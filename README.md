@@ -183,7 +183,10 @@ Primary MCP tools:
 - `recall_daemon_run_once`: run one outside-LLM maintenance pass
 
 See [LLM Integration Guide](docs/LLM_INTEGRATION.md) for the full agent
-operating contract and proposal shape.
+operating contract and proposal shape. For LLM desktop apps and agent runners,
+also add the [Recall LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md) to the app's
+custom instructions, project memory file, repo `AGENTS.md`, MCP profile, or
+wherever that LLM stores persistent behavior.
 
 ## Write Model
 
@@ -295,6 +298,7 @@ remains an explicit user action.
 - [LLM Managed Memory](docs/15_LLM_MANAGED_MEMORY.md)
 - [Derivation Closure](docs/16_DERIVATION_CLOSURE.md)
 - [LLM Integration Guide](docs/LLM_INTEGRATION.md)
+- [LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md)
 
 ## Development
 

@@ -63,6 +63,22 @@ Generate a local MCP config block:
 recall mcp config --db .recall/recall.sqlite3
 ```
 
+## LLM App Setup
+
+Recall needs both MCP tooling and persistent LLM instructions.
+
+1. Add the generated MCP config block to your LLM desktop app or agent runtime.
+2. Add the pasteable instructions from
+   [LLM System Prompt](LLM_SYSTEM_PROMPT.md) anywhere the LLM stores durable
+   behavior: desktop app custom instructions, memory files, project memory,
+   repo `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, Cursor project rules,
+   Windsurf rules, MCP profile instructions, or local runner system prompts.
+3. Repeat this for each LLM app that should use Recall.
+
+The MCP server gives the app tools. The persistent instruction tells the LLM
+when to read memory, when to write, which schema to use, and what must never be
+stored.
+
 ## Daemon LaunchAgent
 
 Generate or install a macOS LaunchAgent plist for background operation:
