@@ -42,12 +42,6 @@ npm run install:local
 recall status
 ```
 
-For a full release smoke check:
-
-```bash
-npm run smoke
-npm run e2e
-```
 
 ## CLI Usage
 
@@ -164,7 +158,7 @@ recall eval run --derive
 recall eval list
 ```
 
-The base memory structure is a hypernetwork, not a DAG. DAGs are optional
+The base memory structure is a hypernetwork, DAGs are optional
 overlays for ordered workflows, evidence chains, or execution traces.
 
 ## Daemon
@@ -217,14 +211,8 @@ remains an explicit user action.
 npm install
 npm run build
 npm test
-npm run smoke
-npm run e2e
 ```
 
-`npm run e2e` builds the project and exercises the public paths end to end:
-CLI, strict writes, search, semantic search, subgraphs, compiler, TUI, rollback,
-secrets, hyperedges, programs, DAG overlays, evals, daemon lease behavior,
-LaunchAgent helpers, and MCP tools.
 
 ## Project Status
 
