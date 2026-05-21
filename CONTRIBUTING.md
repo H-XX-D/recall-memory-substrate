@@ -6,7 +6,7 @@ should stay small, testable, and aligned with the schema-first architecture.
 ## Development Setup
 
 ```bash
-git clone https://github.com/hendrixx-cnc/recall-memory-substrate.git
+git clone https://github.com/H-XX-D/recall-memory-substrate.git
 cd recall
 npm install
 npm test

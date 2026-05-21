@@ -34,7 +34,7 @@ CLI, MCP server, database, tests, and E2E checks are local Node processes.
 ## Quick Start
 
 ```bash
-git clone https://github.com/hendrixx-cnc/recall-memory-substrate.git
+git clone https://github.com/H-XX-D/recall-memory-substrate.git
 cd recall
 npm install
 npm test

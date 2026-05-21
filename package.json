@@ -6,12 +6,12 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hendrixx-cnc/recall-memory-substrate.git"
+    "url": "git+https://github.com/H-XX-D/recall-memory-substrate.git"
   },
   "bugs": {
-    "url": "https://github.com/hendrixx-cnc/recall-memory-substrate/issues"
+    "url": "https://github.com/H-XX-D/recall-memory-substrate/issues"
   },
-  "homepage": "https://github.com/hendrixx-cnc/recall-memory-substrate#readme",
+  "homepage": "https://github.com/H-XX-D/recall-memory-substrate#readme",
   "publishConfig": {
     "access": "public"
   },
