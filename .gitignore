@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+tmp/
+.recall/
+

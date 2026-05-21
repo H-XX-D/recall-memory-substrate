@@ -1,0 +1,59 @@
+{
+  "name": "recall-memory-substrate",
+  "version": "0.1.0",
+  "description": "Local-first active memory substrate for LLM agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hendrixx-cnc/recall-memory-substrate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hendrixx-cnc/recall-memory-substrate/issues"
+  },
+  "homepage": "https://github.com/hendrixx-cnc/recall-memory-substrate#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "llm",
+    "memory",
+    "mcp",
+    "agents",
+    "sqlite",
+    "knowledge-graph",
+    "semantic-search"
+  ],
+  "bin": {
+    "recall": "dist/src/cli.js",
+    "recall-mcp": "dist/src/mcp/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "docs",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "npm run build && node --disable-warning=ExperimentalWarning --test \"dist/tests/**/*.test.js\"",
+    "check": "npm run test",
+    "e2e": "npm run build && node --disable-warning=ExperimentalWarning scripts/e2e.mjs",
+    "install:local": "npm install && npm run build && npm link",
+    "prepublishOnly": "npm test && npm run e2e",
+    "smoke": "npm run build && node --disable-warning=ExperimentalWarning dist/src/cli.js init --db .recall/smoke.sqlite3 && node --disable-warning=ExperimentalWarning dist/src/cli.js status --db .recall/smoke.sqlite3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3"
+  }
+}
