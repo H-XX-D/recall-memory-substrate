@@ -4,14 +4,69 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24.0.0-brightgreen.svg)](package.json)
 [![Status](https://img.shields.io/badge/status-early%20runtime-orange.svg)](#project-status)
 
-Recall is a local-first active memory substrate for LLM agents.
+Recall is a local-first active memory substrate for LLM agents. It is designed
+to give an agent durable, evidence-weighted working memory without pouring the
+whole memory store back into the prompt on every turn.
 
-It stores structured evidence, decisions, risks, tasks, witnesses,
-contradictions, eval results, and derivations outside the LLM context window.
-Agents interact through a strict write schema and receive compact compiled
-context packets instead of raw memory dumps.
+Most memory systems behave like passive notes, chat logs, or vector search over
+loose text. Recall is a running memory runtime. An LLM proposes structured
+writes, Recall validates them, stores them as addressable graph cells and
+hyperedges, and then compiles only the relevant subgraph back to the LLM under a
+word budget. The goal is cross-session continuity with provenance, rollback,
+stale-memory detection, contradiction pressure, and measurable recall behavior.
 
-Recall is built around one runtime:
+This release is the first clean public runtime for the Recall architecture. It
+combines the practical parts of Cognitive Construct-style graph memory, C
+Operating Substrate-style policy and maintenance, and substrate-guided workflow
+into a single installable Node.js tool with a CLI, TUI, MCP server, daemon,
+SQLite store, strict write schema, semantic search, encrypted secrets side
+graph, and derivation/eval machinery.
+
+## What Recall Does
+
+Recall gives an LLM a memory layer that can:
+
+- persist observations, decisions, tasks, risks, contradictions, witnesses,
+  eval results, and derivations outside the context window
+- require structured, evidence-aware writes instead of vague memory notes
+- compose subgraphs using category/type/subject/project/idea/timestamp tags
+- retrieve by exact graph search, semantic search, or compiled task context
+- keep secrets out of the primary memory graph and store them only in an
+  encrypted side graph after explicit confirmation
+- maintain memory outside the LLM through a quiet daemon loop
+- expose the same runtime through CLI commands, a terminal UI, and MCP tools
+- support n-ary hyperedges, addressable cells, sandboxed hyperedge programs,
+  optional DAG overlays, holonomy witnesses, rollback, and eval closure
+
+Recall is meant to be invisible during normal agent work. The user should not
+have to manually curate memory. The LLM writes through MCP or CLI using the
+strict schema, Recall admits or rejects the proposal, and the context compiler
+returns compact packets when the next task needs memory.
+
+## How It Works
+
+The core loop is deliberately simple:
+
+1. The LLM submits a `recall.write.v1` proposal with content, evidence,
+   confidence, provenance, and structured tags.
+2. Admission validates the schema, applies firewall checks, attenuates weak
+   claims, blocks secret-looking content, records provenance, and writes a
+   rollback journal entry.
+3. The store persists memory as addressable cells and n-ary hyperedges in
+   SQLite. Cells can be found directly, through tags, through relations, or by
+   semantic search.
+4. The compiler builds a compact context packet for a task instead of dumping
+   the database into the LLM context window.
+5. The daemon can run maintenance passes outside the LLM to surface stale
+   memory, contradictions, derivation candidates, and eval results.
+6. Rollback and evals make memory writes inspectable, reversible, and testable.
+
+The base memory structure is a hypernetwork. DAGs are optional overlays for
+ordered workflows, evidence chains, execution traces, and holonomy witness
+generation. Hyperedge programs are sandboxed declared operations, not arbitrary
+shell execution.
+
+## Included In This Release
 
 - strict `recall.write.v1` admission with firewall checks and rollback
 - addressable graph cells and n-ary hyperedges
@@ -31,11 +86,47 @@ Recall is built around one runtime:
 The daemon service helper currently generates macOS LaunchAgent plists. The core
 CLI, MCP server, database, tests, and E2E checks are local Node processes.
 
-## Quick Start
+## One-Line Install
+
+Install directly from GitHub with npm:
+
+```bash
+npm install -g github:H-XX-D/recall-memory-substrate
+```
+
+Then initialize and check the local runtime:
+
+```bash
+recall init
+recall status
+```
+
+If you prefer an installer script that clones the repo into
+`~/.recall-memory-substrate/source`, builds it, and links the `recall` and
+`recall-mcp` commands:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | bash
+```
+
+To install into a custom directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | \
+  RECALL_INSTALL_DIR="$HOME/dev/recall-memory-substrate" bash
+```
+
+When the npm registry package is published, the install command becomes:
+
+```bash
+npm install -g recall-memory-substrate
+```
+
+## Source Install
 
 ```bash
 git clone https://github.com/H-XX-D/recall-memory-substrate.git
-cd recall
+cd recall-memory-substrate
 npm install
 npm test
 npm run install:local

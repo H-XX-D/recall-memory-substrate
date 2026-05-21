@@ -7,10 +7,30 @@ Current implementation target: TypeScript on Node 24+.
 
 ```bash
 git clone https://github.com/H-XX-D/recall-memory-substrate.git
-cd recall
+cd recall-memory-substrate
 npm install
 npm test
 ```
+
+## One-Line Install
+
+Install directly from GitHub with npm:
+
+```bash
+npm install -g github:H-XX-D/recall-memory-substrate
+recall init
+recall status
+```
+
+Or use the installer script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | bash
+```
+
+The script clones or updates Recall at `~/.recall-memory-substrate/source`,
+runs `npm install`, builds the CLI, and links the `recall` and `recall-mcp`
+commands globally.
 
 ## Local CLI Use
 
@@ -60,6 +80,8 @@ service remains an explicit shell step.
 ## Direct Script Install
 
 ```bash
+git clone https://github.com/H-XX-D/recall-memory-substrate.git
+cd recall-memory-substrate
 ./scripts/install-local.sh
 recall status
 ```

@@ -31,6 +31,8 @@
   "files": [
     "dist/src",
     "docs",
+    "scripts/install.sh",
+    "scripts/install-local.sh",
     "AGENTS.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
