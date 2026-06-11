@@ -8,8 +8,10 @@ Recall installs as a single Node.js package that provides two binaries:
 - **Node.js 24 or newer** (Recall uses Node's built-in SQLite — no database
   server, no native compilation)
 - **npm** (ships with Node)
-- macOS or Linux. The core runtime is plain local Node on any platform;
-  the daemon *service* helper currently emits macOS LaunchAgent plists.
+- Linux, macOS, or Windows. The CI suite (build, tests, e2e, smoke) runs
+  green on all three. The core runtime is plain local Node; only the daemon
+  *service* helper is platform-specific (it emits macOS LaunchAgent plists).
+  On Linux/Windows, run the daemon directly instead (see below).
 
 Check your Node version first:
 
@@ -101,7 +103,8 @@ service stays an explicit step:
 launchctl load ~/Library/LaunchAgents/io.recall.memory.daemon.plist
 ```
 
-On any platform you can run maintenance directly instead:
+On Linux and Windows (and macOS if you prefer not to use LaunchAgent), run
+maintenance directly instead:
 
 ```bash
 recall daemon run-once --derive

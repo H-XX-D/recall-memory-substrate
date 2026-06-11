@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main
 
 Requires Node.js 24+. Recall uses Node's built-in SQLite, so there is no
 database server, no native build step, no account, and no network
-dependency. Runs on macOS and Linux. Upgrades, uninstall, and
+dependency. CI runs the full suite on Linux, macOS, and Windows. Upgrades, uninstall, and
 troubleshooting: [Installation Guide](docs/11_INSTALLATION.md).
 
 ## The 60-second tour
