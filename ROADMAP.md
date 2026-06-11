@@ -1,7 +1,7 @@
 # Recall Roadmap
 
 This roadmap describes **direction, not promises.** Recall is an early working
-runtime, and the point of the project is auditability — including being honest
+runtime, and the point of the project is auditability, including being honest
 about what is built, what is planned, and what is still just an idea. Dates are
 deliberately omitted; sequencing reflects priority, and priorities shift with
 real usage and contributor interest.
@@ -10,7 +10,7 @@ The roadmap is organized around Recall's three rings. A change is "done" only
 when it lands schema-first, tested, and through the same admission path
 everything else uses.
 
-> **Legend** — ✅ shipped in 0.1.0 · 🛠️ actively planned · 🔭 exploratory
+> **Legend:** ✅ shipped in 0.1.0 · 🛠️ actively planned · 🔭 exploratory
 
 ---
 
@@ -27,7 +27,7 @@ These don't change. They're the filter every roadmap item passes through:
 
 ---
 
-## Foundation — schema, graph semantics, evidence calculus, compiler
+## Foundation: schema, graph semantics, evidence calculus, compiler
 
 - ✅ Strict `recall.write.v1` schema, admission firewall, rollback journal
 - ✅ Addressable cells + n-ary hyperedges in SQLite
@@ -38,7 +38,7 @@ These don't change. They're the filter every roadmap item passes through:
 - 🛠️ Schema-versioned migrations with a documented upgrade/export path
 - 🔭 Pluggable ranking strategies for the compiler, selectable per task
 
-## Runtime — daemon, firewall, scheduler, rollback, eval harness
+## Runtime: daemon, firewall, scheduler, rollback, eval harness
 
 - ✅ Quiet maintenance daemon (stale memory, contradictions, derivations, evals)
 - ✅ SQLite-backed lease control for single-writer daemon passes
@@ -50,24 +50,24 @@ These don't change. They're the filter every roadmap item passes through:
   tables can graduate from *design properties* to *measured results*
 - 🔭 Configurable maintenance policies (cadence, budgets, which passes run)
 
-## Interfaces — CLI, TUI, MCP, bridges, importers, integrations
+## Interfaces: CLI, TUI, MCP, bridges, importers, integrations
 
 - ✅ CLI, read-only TUI, stdio MCP server (42 tools, idle self-exit)
 - ✅ Enforcement hook templates + compliance/longitudinal instrumentation
 - ✅ Real-embedding semantic backend via `RECALL_EMBEDDING_COMMAND`
 - 🛠️ **Publish to npm** so `npm install -g recall-memory-substrate` works
   directly (today's install is from GitHub)
-- 🛠️ **Shared team graph** — one project graph served to a whole team. The
+- 🛠️ **Shared team graph:** one project graph served to a whole team. The
   admission firewall already makes multi-writer memory safe: every write is
   schema-gated, attributed (`actor`, `produced_by`), timestamped,
-  rollbackable, and calibration scores each writer separately — so a
+  rollbackable, and calibration scores each writer separately, so a
   teammate is never operating blind on what changed, who changed it, or
   how much to trust it. WAL covers many processes on one host today; the
-  remaining work is transport and identity — an HTTP/SSE MCP endpoint in
+  remaining work is transport and identity: an HTTP/SSE MCP endpoint in
   front of the store, and authenticated actor identity (signed witnesses
   are the existing upgrade path from declared identity).
 - 🛠️ Workflow-engine CLI surface (`recall workflow allocate` shipped; the
-  remaining commands are planned — see
+  remaining commands are planned, see
   [`docs/09_WORKFLOW_ENGINE.md`](docs/09_WORKFLOW_ENGINE.md))
 - 🛠️ Importers for common note/agent-log formats, writing through admission
 - 🔭 Additional embedding backends and external graph integrations
@@ -78,7 +78,7 @@ These don't change. They're the filter every roadmap item passes through:
 ## How to influence this
 
 The fastest way to move something up the list is to open an issue describing
-the problem you hit — real usage beats speculation. If you want to build, pick
+the problem you hit. Real usage beats speculation. If you want to build, pick
 up a [good first issue][gfi] or propose a design before writing a lot of code.
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 

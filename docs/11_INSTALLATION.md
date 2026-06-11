@@ -5,7 +5,7 @@ Recall installs as a single Node.js package that provides two binaries:
 
 ## Requirements
 
-- **Node.js 24 or newer** (Recall uses Node's built-in SQLite — no database
+- **Node.js 24 or newer** (Recall uses Node's built-in SQLite: no database
   server, no native compilation)
 - **npm** (ships with Node)
 - Linux, macOS, or Windows. The CI suite (build, tests, e2e, smoke) runs
@@ -19,7 +19,7 @@ Check your Node version first:
 node --version   # must be v24.0.0 or newer
 ```
 
-## Option A — npm global install (recommended)
+## Option A: npm global install (recommended)
 
 ```bash
 npm install -g github:H-XX-D/recall-memory-substrate
@@ -28,7 +28,7 @@ npm install -g github:H-XX-D/recall-memory-substrate
 This fetches the repository, builds it, and links `recall` and `recall-mcp`
 onto your PATH.
 
-## Option B — installer script
+## Option B: installer script
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | bash
@@ -37,9 +37,9 @@ curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main
 The script verifies Node 24+, clones the repository into
 `~/.recall-memory-substrate/source` (override with `RECALL_INSTALL_DIR`),
 builds it, and links the binaries. Re-running the script updates the
-checkout and rebuilds — it is also the upgrade path for this option.
+checkout and rebuilds. It is also the upgrade path for this option.
 
-## Option C — from source (development)
+## Option C: from source (development)
 
 ```bash
 git clone https://github.com/H-XX-D/recall-memory-substrate.git
@@ -58,7 +58,7 @@ recall init       # creates ./.recall/recall.sqlite3 in the current directory
 recall status     # prints store health, counts, and config
 ```
 
-`recall init` creates the local graph database wherever you run it — one
+`recall init` creates the local graph database wherever you run it. One
 `.recall/` per project is the intended pattern. Runtime databases and logs
 are git-ignored by default.
 
@@ -77,7 +77,7 @@ recall mcp config --db .recall/recall.sqlite3   # prints an MCP config block
 ```
 
 Paste the block into any MCP-capable client (Claude Code, desktop apps,
-agent runtimes). The server is stdio JSON-RPC and exposes 42 tools —
+agent runtimes). The server is stdio JSON-RPC and exposes 42 tools:
 compile, write, search, subgraphs, hyperedges, programs, DAGs, evals, ACP
 coordination, calibration, and more. It exits on its own after 30 idle
 minutes (`RECALL_MCP_IDLE_EXIT_MS` to tune, `0` to disable); clients respawn
@@ -96,7 +96,7 @@ recall daemon service-status
 recall daemon uninstall
 ```
 
-`daemon install` writes the plist but does not load it — loading a user
+`daemon install` writes the plist but does not load it. Loading a user
 service stays an explicit step:
 
 ```bash
@@ -135,18 +135,18 @@ gone too.
 
 ## Troubleshooting
 
-**`Recall requires Node 24 or newer`** — install a current Node (e.g.
+**`Recall requires Node 24 or newer`**: install a current Node (e.g.
 `brew install node`, or via nvm: `nvm install 24 && nvm use 24`) and rerun.
 
-**`recall: command not found` after npm install** — your npm global bin
+**`recall: command not found` after npm install**: your npm global bin
 directory isn't on PATH. Find it with `npm prefix -g` (binaries are in
 `<prefix>/bin`) and add it to your shell profile.
 
-**`ExperimentalWarning: SQLite is an experimental feature`** — harmless;
+**`ExperimentalWarning: SQLite is an experimental feature`**: harmless;
 Node 24's built-in SQLite is flagged experimental upstream. Recall's own
 scripts suppress it with `--disable-warning=ExperimentalWarning`.
 
-**Wrong database** — database routing has a clear precedence: an explicit
+**Wrong database**: database routing has a clear precedence: an explicit
 `--db <path>` flag wins, otherwise the `RECALL_DB` environment variable is
 used if set, otherwise Recall falls back to `./.recall/recall.sqlite3`
 relative to where you run it. `RECALL_DB` is the same variable the MCP

@@ -1,0 +1,14 @@
+{
+  "kind": "supports",
+  "title": "Deploy gate",
+  "members": [
+    {
+      "nodeId": "98bedb4d-6794-4519-8a68-f61154447ad5",
+      "role": "source"
+    },
+    {
+      "nodeId": "3f747773-81f7-4578-b584-399a17f1218f",
+      "role": "target"
+    }
+  ]
+}

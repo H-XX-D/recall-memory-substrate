@@ -60,7 +60,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement privately through
-GitHub — open a
+GitHub by opening a
 [private security advisory](https://github.com/H-XX-D/recall-memory-substrate/security/advisories/new)
 (which supports confidential reports) or contact the maintainer
 [@H-XX-D](https://github.com/H-XX-D) directly. All complaints will be reviewed

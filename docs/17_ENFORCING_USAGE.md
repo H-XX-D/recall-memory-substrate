@@ -34,7 +34,7 @@ Four real causes, each addressable by a different technique:
 
 ## The fix: ambient presence, not stronger prompting
 
-Stronger system prompts don't work — they fade like the original. The
+Stronger system prompts don't work; they fade like the original. The
 fix is to make Recall **ambient**: continuously present in the model's
 context, not just announced once. Combine three techniques:
 
@@ -72,13 +72,13 @@ runtime provides.
 
 **Why this works**: the model sees the header on EVERY turn. It can't
 drift away because every input has a fresh reminder. The cost is ~100
-bytes per turn — negligible against any realistic budget.
+bytes per turn, negligible against any realistic budget.
 
 ### Technique 2: Stop hook prompts writeback before turn ends
 
 The asymmetric failure mode: agents that DO read from Recall often
 still FAIL TO WRITE durable findings back. A decision is made, a bug is
-root-caused, a contradiction is noticed — and the agent moves on
+root-caused, a contradiction is noticed, and the agent moves on
 without persisting. Next session, the same agent rediscovers the same
 things.
 
@@ -139,7 +139,7 @@ across the session.
 
 The four reinforcement points combined produce **continuous Recall
 presence** across the session. The agent doesn't have to remember to use
-Recall — Recall keeps reminding it.
+Recall. Recall keeps reminding it.
 
 ## Configuration controls
 
@@ -162,7 +162,7 @@ latency matters: profile the hooks (each adds ~10-50ms) and decide.
 
 ## Soft vs hard enforcement
 
-Techniques 1–3 above are **soft enforcement**. They don't:
+Techniques 1 to 3 above are **soft enforcement**. They don't:
 
 - Block the agent from doing anything
 - Force the agent to call Recall before responding
@@ -233,13 +233,13 @@ invocation to unblock, and reminds about the BYPASS escape hatch.
    project. A typical setup: 30-minute window, allowlist
    `.recall,/tmp,docs/scratch,tests/fixtures`.
 4. Keep `RECALL_GUARD_BYPASS` documented but treat its use as a
-   reportable event — the whole point is no untracked mutations.
+   reportable event: the whole point is no untracked mutations.
 
 **When to use hard enforcement.** Regulated environments where every
 change requires an audit trail. Multi-agent systems where one agent's
 mutations affect another's working set. Long-horizon research where
 "why did I make this change six months ago" must be answerable. NOT
-recommended for casual personal use — the friction-to-payoff ratio
+recommended for casual personal use; the friction-to-payoff ratio
 inverts when you're the only writer and reader.
 
 ## Combined effect: hooks at every reinforcement point
@@ -247,7 +247,7 @@ inverts when you're the only writer and reader.
 ## Diagnosing usage in practice
 
 **Verify the hooks themselves** with the included test suite (10 checks
-across both hooks — exit code 0 if all pass):
+across both hooks, exit code 0 if all pass):
 
 ```bash
 python3 python/hooks/test_hooks.py
@@ -291,7 +291,7 @@ sqlite3 ~/.recall/recall.sqlite3 \
 ```
 
 If the count is unexpectedly low for a session that should have
-produced substantive findings, the agent is drifting — increase the
+produced substantive findings, the agent is drifting. Increase the
 inject-context frequency or enable `RECALL_WRITEBACK_FORCE` to make the
 reminder unconditional for a few sessions until the pattern sticks.
 
@@ -302,16 +302,16 @@ looked healthy. It doesn't tell you whether enforcement is producing
 *better outcomes over time*. The longitudinal tracker measures four
 trajectory dimensions:
 
-1. **Rationale quality** — substance (body length), linkage (evidence
+1. **Rationale quality**: substance (body length), linkage (evidence
    refs), confidence-grading variance, topic specificity. Composite
    `quality_score` 0..1.
-2. **Rework / churn** — `contradicts_rate`, `supersedes_rate`, and
+2. **Rework / churn**: `contradicts_rate`, `supersedes_rate`, and
    `rediscovery_rate` (cells whose body has high token-overlap with
-   older cells — indicating the agent re-derived instead of reading).
-3. **Enforcement compliance** — from guard event log: approve/block/
+   older cells, indicating the agent re-derived instead of reading).
+3. **Enforcement compliance**: from guard event log: approve/block/
    bypass rates, median time from block→write→retry. A healthy
    trajectory: bypass rate near zero, block-to-write latency falling.
-4. **Continuity value** — `handle_reuse_rate` (fraction of cells
+4. **Continuity value**: `handle_reuse_rate` (fraction of cells
    referenced by later cells via typed edges) and avg incoming-edge
    count. This is the operatable-memory thesis becoming measurable:
    when continuity matters, addresses get reused.
@@ -360,19 +360,19 @@ actually work" answerable instead of speculative.
 - Quality flat or falling: discipline is being skipped, possibly because the schema feels too heavy. Consider lowering required tag families or expanding the `--admit` helper.
 - Rediscovery rising: agent isn't reading before writing. Increase `inject-context` aggressiveness or expand topic matching.
 - Bypass rate climbing: hard enforcement is being routed around. Review allowlist scope and consider whether the window is too short.
-- Handle reuse falling: cells are write-only, not building on each other. This is the operatable-memory thesis failing — investigate why agents aren't linking new writes to prior ones.
+- Handle reuse falling: cells are write-only, not building on each other. This is the operatable-memory thesis failing. Investigate why agents aren't linking new writes to prior ones.
 
 ## Enforcement roadmap
 
 | Mechanism | Status |
 |---|---|
-| UserPromptSubmit injection (soft) | **shipped** — see Technique 1 |
-| Stop / SubagentStop reminder (soft) | **shipped** — see Technique 2 |
-| System prompt operating contract | **shipped** — see Technique 3 |
-| PreToolUse guard / mandatory write-on-decision (hard) | **shipped** — see Technique 4 |
-| Compliance attestation per session | planned — hash chain of writes and reads for audit-trail use |
-| Multi-tenant enforcement profiles | planned — per-project guard profiles loaded by tenant |
-| Replay-from-audit-log | planned — reconstruct prior session state from immutable write log |
+| UserPromptSubmit injection (soft) | **shipped**: see Technique 1 |
+| Stop / SubagentStop reminder (soft) | **shipped**: see Technique 2 |
+| System prompt operating contract | **shipped**: see Technique 3 |
+| PreToolUse guard / mandatory write-on-decision (hard) | **shipped**: see Technique 4 |
+| Compliance attestation per session | planned: hash chain of writes and reads for audit-trail use |
+| Multi-tenant enforcement profiles | planned: per-project guard profiles loaded by tenant |
+| Replay-from-audit-log | planned: reconstruct prior session state from immutable write log |
 
 If you need any of the planned items now, file an issue describing your
 use case.

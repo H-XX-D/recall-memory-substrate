@@ -30,21 +30,21 @@ Example relation shape:
 Declared operations are sandboxed `recall.program.v1` specs. They are not
 arbitrary JavaScript. The deterministic operations are:
 
-- `score` — bundle health: mean **live effective confidence** of members
+- `score`: bundle health, the mean **live effective confidence** of members
   (stated-confidence average retained for explainability) combined with the
   worst member concern. Because scoring reads the live graph surface, a
   scored bundle is a *tripwire*: contradict any member anywhere and the
   score falls on the next run, with no model involved.
-- `emit_witness` — freeze the bundle's current state as a witness record.
-- `tag_projection` — project a tag family (set union) across members.
-- `watch` — a standing reflex. Baselines against the program's own previous
+- `emit_witness`: freeze the bundle's current state as a witness record.
+- `tag_projection`: project a tag family (set union) across members.
+- `watch`: a standing reflex. Baselines against the program's own previous
   run (run history is the state), trips when the bundle's live effective
   confidence moves more than `params.delta` (default 0.15). First run
   establishes the baseline and never trips. Untripped runs derive nothing:
   silence means verified stability.
-- `drift` — watch with attribution: a tripped run names which member moved
+- `drift`: watch with attribution: a tripped run names which member moved
   (`topMover`, ranked `movers`).
-- `quorum` — k-of-m sign-off as a graph object: a member approves when its
+- `quorum`: k-of-m sign-off as a graph object: a member approves when its
   live effective confidence clears `params.minEff` (default 0.7), counted
   across distinct actors by default (`params.role` filters eligible
   members). A contradicted approver's approval stops counting. Quorum runs
@@ -53,8 +53,8 @@ arbitrary JavaScript. The deterministic operations are:
 `--derive` converts operation output into a strict witness proposal and
 admits it through the normal write path, producing a rollbackable
 addressable cell. A tripped `watch`/`drift` with `params.concernTarget`
-additionally carries a `concerns` reference against that cell — reflexes
-file claims, never value assignments — and program derivations are
+additionally carries a `concerns` reference against that cell (reflexes
+file claims, never value assignments) and program derivations are
 attributed `produced_by: program:<id>`, so programs accumulate per-actor
 calibration like any other writer.
 

@@ -1,9 +1,9 @@
-# Sprints — Multi-Session AI Work in Recall
+# Sprints: Multi-Session AI Work in Recall
 
 A **sprint** is a structured multi-session work project represented as a graph
 of task cells in Recall. The AI executes the sprint by querying Recall for the
 next open task, doing the work, writing the outcome back as cells, and
-proceeding to the next task — without stopping to ask the user what to do at
+proceeding to the next task, without stopping to ask the user what to do at
 every step.
 
 Sprints are the highest-leverage usage pattern for Recall as operatable
@@ -33,7 +33,7 @@ A sprint is NOT appropriate when:
 - The work is a single conversation that completes in one session
 - The work is exploratory in a way that doesn't admit structured planning
 - The work is genuinely throwaway (debugging a one-off issue, casual
-  questions, etc.) — don't pollute the substrate with cells you won't
+  questions, etc.). Don't pollute the substrate with cells you won't
   reference again
 
 ## Sprint anatomy
@@ -127,12 +127,12 @@ When a task is complete, the AI either:
 
 Status states for sprint tasks:
 
-- `open` — not yet started
-- `in-progress` — actively being worked
-- `blocked` — waiting on resolution (typically with a `concerns` cell
+- `open`: not yet started
+- `in-progress`: actively being worked
+- `blocked`: waiting on resolution (typically with a `concerns` cell
   explaining what's needed)
-- `done` — completed, outcome cells written
-- `abandoned` — no longer applicable, with reason in a superseding cell
+- `done`: completed, outcome cells written
+- `abandoned`: no longer applicable, with reason in a superseding cell
 
 ## Setting up a sprint
 
@@ -197,7 +197,7 @@ Once the sprint is set up, the AI's loop looks like this:
 ```
 
 This loop is what the AI does autonomously between user check-ins. The
-user doesn't direct each step — they directed the sprint plan, and the AI
+user doesn't direct each step: they directed the sprint plan, and the AI
 executes within it.
 
 ## User check-ins
@@ -258,7 +258,7 @@ sprint root as superseded by N new sprint roots, each focused on a
 subset of the original tasks.
 
 **Sprint becomes irrelevant.** Mark sprint root and all open tasks as
-`abandoned` with a reflection cell explaining why. Don't delete —
+`abandoned` with a reflection cell explaining why. Don't delete:
 preserve the audit trail of work that was planned but not pursued.
 
 **AI executes task without writing outcome cells.** The audit trail
@@ -307,7 +307,7 @@ enough to be a sprint. Either clarify the goal or treat it as
 exploratory single-session work.
 
 **Tasks without acceptance criteria**: "Explore the implications of
-the new caching layer" is not a task — it's a topic. Convert to:
+the new caching layer" is not a task. It's a topic. Convert to:
 "Identify three specific behavioral changes the new caching layer
 introduces in the hot path; write one observation cell per change
 with measured before/after performance numbers and any regression
@@ -320,7 +320,7 @@ A is done. Always model real dependencies explicitly.
 **Skipping outcome cells**: an AI that executes tasks without writing
 outcome cells is doing work that doesn't persist. The next session has
 no way to know what was done or build on it. Outcome cells aren't
-optional — they're the substrate of cross-session continuity.
+optional. They're the substrate of cross-session continuity.
 
 **Treating sprints as project management software**: sprints are
 structured AI work, not Jira boards. The granularity, language, and
@@ -422,13 +422,13 @@ the queue.
 
 **Sprint archiving**: when a sprint completes, write a summary
 reflection cell that captures lessons learned, then mark the sprint
-root lifecycle as `done,archived`. Don't delete — preserve for future
+root lifecycle as `done,archived`. Don't delete: preserve for future
 queries about how similar work was done.
 
 ## Where sprints fit in the Recall architecture
 
 Sprints aren't a Recall feature in the sense of a CLI subcommand or
-schema kind. They weren't designed into Recall — they emerged from
+schema kind. They weren't designed into Recall. They emerged from
 users discovering that Recall's existing primitives compose to
 support this kind of structured cross-session work. The first user
 who articulated the pattern simply asked their AI to "set up a
@@ -441,7 +441,7 @@ for. The fact that sprints fall out of Recall's primitives without
 anyone designing the sprint pattern in advance is evidence the
 primitives were well-chosen. It also means there are probably other
 useful patterns Recall's primitives support that haven't been
-documented yet — users will keep discovering them.
+documented yet. Users will keep discovering them.
 
 The primitives sprints compose from:
 
@@ -466,11 +466,11 @@ specific implementation detail.
 
 ## See also
 
-- [15_LLM_MANAGED_MEMORY.md](15_LLM_MANAGED_MEMORY.md) — the broader
+- [15_LLM_MANAGED_MEMORY.md](15_LLM_MANAGED_MEMORY.md): the broader
   discipline of agent-managed memory that sprints sit within
-- [17_ENFORCING_USAGE.md](17_ENFORCING_USAGE.md) — hooks that help
+- [17_ENFORCING_USAGE.md](17_ENFORCING_USAGE.md): hooks that help
   enforce the writeback discipline sprints depend on
-- [04_CONTEXT_COMPILER.md](04_CONTEXT_COMPILER.md) — how the AI
+- [04_CONTEXT_COMPILER.md](04_CONTEXT_COMPILER.md): how the AI
   retrieves sprint state efficiently via compile
-- [14_ADDRESSABLE_CELLS_AND_GRAPH_VIEWS.md](14_ADDRESSABLE_CELLS_AND_GRAPH_VIEWS.md)
-  — cell addressing that makes cross-session task references reliable
+- [14_ADDRESSABLE_CELLS_AND_GRAPH_VIEWS.md](14_ADDRESSABLE_CELLS_AND_GRAPH_VIEWS.md):
+  cell addressing that makes cross-session task references reliable

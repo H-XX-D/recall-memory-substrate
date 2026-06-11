@@ -1,4 +1,4 @@
-# Recall — Python Client Toolkit
+# Recall: Python Client Toolkit
 
 This directory contains an optional **Python client toolkit** that sits on top
 of the core Recall TypeScript runtime. The toolkit provides agent-facing tools
@@ -25,7 +25,7 @@ the CLI surface (`recall` and `recall-mcp`) with agent-friendly conveniences.
 | `scripts/recall_bench.py` | Benchmark harness: naive / op-fixed / router retrieval comparison. |
 | `scripts/vector_rag_bench.py` | Real vector RAG benchmark (sentence-transformers + cosine). |
 | `scripts/recall_semantic_real.py` | Real-embedding backend (mpnet, 768-dim). Standalone batched indexer with `query` / `compare` / `verify` / `status` subcommands. |
-| `scripts/recall_mpnet_embedder.py` | Adapter for `RECALL_EMBEDDING_COMMAND` — wires mpnet into the TS-side `recall semantic` so per-query and per-write embedding use real vectors. |
+| `scripts/recall_mpnet_embedder.py` | Adapter for `RECALL_EMBEDDING_COMMAND` that wires mpnet into the TS-side `recall semantic` so per-query and per-write embedding use real vectors. |
 | `hooks/recall_inject_context.py.sample` | UserPromptSubmit hook injecting Recall status into every user turn (soft enforcement). |
 | `hooks/recall_writeback_reminder.py.sample` | Stop/SubagentStop hook reminding the agent to persist substantive findings (soft enforcement). |
 | `hooks/recall_pretooluse_guard.py.sample` | PreToolUse hook blocking mutations without a recorded rationale cell (hard enforcement). |
@@ -182,7 +182,7 @@ python3 python/scripts/recall_bench.py --format json --out router.json
 python3 python/scripts/vector_rag_bench.py --compare-router router.json --out vs-rag.md
 ```
 
-No reference benchmark results are shipped — the output is specific to
+No reference benchmark results are shipped. The output is specific to
 the graph state at run time, and we don't ship private content. See
 `reference/HOW_TO_BENCHMARK.md` for how to run the benchmark against
 your own graph and what the results mean.
@@ -225,5 +225,5 @@ write firewall, plus the Python tools for the agent-facing client surface.
 
 ## Reference docs
 
-- [code-integration.md](./reference/code-integration.md) — full code extension reference
-- [HOW_TO_BENCHMARK.md](./reference/HOW_TO_BENCHMARK.md) — how to run the benchmark against your own graph
+- [code-integration.md](./reference/code-integration.md): full code extension reference
+- [HOW_TO_BENCHMARK.md](./reference/HOW_TO_BENCHMARK.md): how to run the benchmark against your own graph

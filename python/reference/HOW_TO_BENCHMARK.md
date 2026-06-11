@@ -17,7 +17,7 @@ top-k by cosine similarity.
 ## Why no reference results are committed
 
 The benchmark output is necessarily specific to the graph state at the
-time of the run — which cells exist, which entity tags, which relations,
+time of the run: which cells exist, which entity tags, which relations,
 which contradictions, which superseded chains. We do not commit
 snapshot reports because they would be:
 
@@ -73,9 +73,9 @@ production-grade benchmarking, replace this with an LLM-judge evaluation
 
 | Metric | Interpretation |
 |---|---|
-| **Bytes returned per query** | Proxy for LLM input tokens (~4 chars / token) — direct cost driver |
+| **Bytes returned per query** | Proxy for LLM input tokens (~4 chars / token): direct cost driver |
 | **Total bytes** | Cumulative cost across the scenario suite |
-| **Reduction ratio** | Naive / operator — higher = more efficient |
+| **Reduction ratio** | Naive / operator: higher = more efficient |
 | **Relevance hits** | How often each strategy retrieved content containing the expected substring |
 | **Latency** | Retrieval time (excludes LLM processing time, which depends on result size) |
 

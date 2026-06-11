@@ -52,14 +52,14 @@ not a graph dump.
 - `relevant_memory`, `active_beliefs`, `conflicts`, `risks`, and `tasks` should
   be compact enough to reason from, with IDs or addresses attached.
 - `cell_state` lines carry both the author's immutable stated confidence and
-  the live **effective confidence** — `eff:<value>` with a cause tag
-  (`challenged`, `supported`, `actor-discounted`) — recomputed from the graph
+  the live **effective confidence**, `eff:<value>` with a cause tag
+  (`challenged`, `supported`, `actor-discounted`), recomputed from the graph
   surface on every compile. Treat `eff` as the claim's current price and the
   cause tag as the dig heuristic: a challenged cell warrants a peek before
   you rely on it.
 - `standing_programs` lists the enabled programs (watch, drift, quorum,
-  score) covering each selected cell, with program and hyperedge handles —
-  when you write new evidence about a guarded cell, tie it into the listed
+  score) covering each selected cell, with program and hyperedge handles.
+  When you write new evidence about a guarded cell, tie it into the listed
   bundle instead of orphaning it.
 - `conflicts` includes each selected cell's incoming `contradicts`/`concerns`
   challengers (capped per cell, with expansion handles), so a contested

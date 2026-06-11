@@ -1,4 +1,4 @@
-# Recall Python toolkit — Quickstart
+# Recall Python toolkit: Quickstart
 
 A literal copy-paste walkthrough from fresh install to first useful query.
 All commands verified end-to-end against a fresh empty Recall DB.
@@ -9,8 +9,8 @@ You need:
 
 1. **Node.js 24+** and the Recall TypeScript core installed (see top-level
    `README.md` for `./scripts/install.sh`). This provides the `recall` CLI.
-2. **Python 3.10+**. All core Python tools use stdlib only — no pip install
-   needed.
+2. **Python 3.10+**. All core Python tools use stdlib only, so no pip install
+   is needed.
 3. **(Optional, for benchmarks)** `pip install sentence-transformers numpy`
 
 ## 1. Initialize an empty DB
@@ -49,7 +49,7 @@ python3 $SCRIPTS/recall_helper.py \
 ```
 
 **Note**: `--confidence` is required with no default. The helper deliberately
-forces you to commit to a number — this is the calibration discipline that
+forces you to commit to a number. This is the calibration discipline that
 makes Recall's epistemic substrate work. Pick a value in (0, 1]:
 - `0.95+` for things you've verified and tested
 - `0.8` for confident decisions with some uncertainty
@@ -297,7 +297,7 @@ home location. Either run `recall init --db <path>` to create one, or pass
 **"build_proposal failed schema validation"**
 
 If you're getting schema validation errors, you're probably skipping the
-helper and constructing proposals manually. Use the helper — it handles all
+helper and constructing proposals manually. Use the helper. It handles all
 the schema scaffolding. The helper rejects only missing required fields
 (`kind`, `title`, `body`, `confidence`, `topics`) and invalid enum values;
 everything else is auto-derived from your inputs.

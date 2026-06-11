@@ -81,8 +81,8 @@ missing or non-active nodes.
 Declared graph operations are sandboxed `recall.program.v1` specs attached to
 graph relationships. Their implemented operations include `score`,
 `emit_witness`, `tag_projection`, `watch`, `drift`, and `quorum`. Reflex
-operations (`watch`, `drift`) derive only when tripped — an untripped run
-produces no proposal — and a trip configured with `concernTarget` derives a
+operations (`watch`, `drift`) derive only when tripped (an untripped run
+produces no proposal), and a trip configured with `concernTarget` derives a
 witness carrying a `concerns` reference against that cell, attributed
 `produced_by: program:<id>`.
 

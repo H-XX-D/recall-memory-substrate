@@ -14,12 +14,12 @@ Nothing yet.
 ### Added
 
 - **Effective confidence** (`src/core/evidence.ts`): every cell now carries a
-  living, graph-computed confidence alongside its immutable stated one —
+  living, graph-computed confidence alongside its immutable stated one:
   `clamp01(stated × actor-calibration + support − challenge)`, derived
   one-hop from incoming `supports`/`contradicts`/`concerns` relations and
   `*-supports`/`*-contradicts` hyperedges, recomputed on every read with no
   LLM involved. Search ranking consumes the effective value (challenged
-  cells sink even though challenge edges raise their graph degree — the
+  cells sink even though challenge edges raise their graph degree, the
   ranking-inversion class found in stress testing), compile packets render
   it per cell as `eff:<value>(challenged|supported|actor-discounted)`, and
   actor discounts use the overconfidence signal (contradicted rate × mean
@@ -32,28 +32,28 @@ Nothing yet.
 - **Standing programs surfaced at compile**: packets now carry a
   `standing_programs:` section listing the enabled programs (watch, drift,
   quorum, score) covering each selected cell, with program and hyperedge
-  handles — so agents wire new evidence into existing gates instead of
+  handles, so agents wire new evidence into existing gates instead of
   orphaning it.
 - **`drift` and `quorum` program operations**: `drift` is watch with
-  attribution — a tripped run names which member moved (`topMover`, ranked
+  attribution. A tripped run names which member moved (`topMover`, ranked
   `movers`); untripped runs derive nothing. `quorum` is k-of-m sign-off as
-  a graph object — members approve when live effective confidence clears
+  a graph object: members approve when live effective confidence clears
   `minEff`, counted across distinct actors by default, so a contradicted
   approver's approval stops counting with no policy code; quorum runs
   always derive their attestation witness.
 - **Graph reflexes** (`watch` program operation): a hyperedge program that
   baselines against its own previous run, trips when the bundle's live
-  effective confidence moves more than `delta`, and — with `--derive` —
+  effective confidence moves more than `delta`, and (with `--derive`)
   files a concern against a configured target cell through the admission
   gate, attributed to `program:<id>` so reflexes accumulate per-actor
   calibration like any other writer. Untripped watch runs derive nothing:
   silence means verified stability. Consequents file claims, never value
-  assignments — belief revision propagates as audited evidence, one
+  assignments. Belief revision propagates as audited evidence, one
   admission at a time.
 - **Tripwire bundles**: scored hyperedge programs now price their members
   from live effective confidence (`averageEffectiveConfidence` in the score
   output; stated-confidence average retained for explainability). A scored
-  evidence bundle — a deploy gate, a launch review — loses score on its
+  evidence bundle (a deploy gate, a launch review) loses score on its
   next run when any member is contradicted anywhere in the graph, with no
   model involved. Pinned by an end-to-end tripwire test.
 
@@ -67,7 +67,7 @@ Nothing yet.
   contradicted rate, overconfidence signal). Only `contradicts` references that
   resolve to actual cells count toward the score.
 - Agent coordination (ACP): a durable agent-to-agent request queue over the same
-  store — `recall acp send / list / show / process / run` plus matching MCP tools.
+  store: `recall acp send / list / show / process / run` plus matching MCP tools.
 - Operator runs (`recall operate once/list/show`), workflow allocation
   (`recall workflow allocate`), pages (`recall page`), storage stats
   (`recall storage`), trust and beliefs reports, blind locks, and compaction.
@@ -75,7 +75,7 @@ Nothing yet.
   (default 30 minutes, `RECALL_MCP_IDLE_EXIT_MS`, `0` disables) so abandoned
   spawns no longer accumulate; clients respawn on demand.
 - Public benchmark harness: `npm run bench` and `npm run bench:public` against a
-  reproducible synthetic corpus — see `docs/19_PUBLIC_BENCHMARK.md`.
+  reproducible synthetic corpus. See `docs/19_PUBLIC_BENCHMARK.md`.
 - Adversarial retrieval-quality test gate: IDF, stemming, graph prior, recency
   decay, and literal code-symbol matching are pinned by tests.
 
@@ -113,7 +113,7 @@ Nothing yet.
 - Compile is graph-aware: each selected cell's incoming `contradicts`/`concerns`
   relations surface in the conflicts section with expansion handles (cap 6 per
   cell + overflow marker).
-- Reference resolution handles the short `recall://cell/<id>` form everywhere —
+- Reference resolution handles the short `recall://cell/<id>` form everywhere:
   relations, compile translation, health findings, calibration; legacy
   address-form relation targets migrate to bare node ids on first open.
 - Admission warns on near-duplicate creates (title Jaccard / content cosine vs
@@ -131,7 +131,7 @@ Nothing yet.
 
 ## [0.1.0] - 2026-06-01
 
-Initial public release — an early, honest working runtime for auditable agent
+Initial public release: an early, honest working runtime for auditable agent
 memory.
 
 ### Added
