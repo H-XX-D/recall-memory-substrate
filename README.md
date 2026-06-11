@@ -3,13 +3,13 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/recall-banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset=".github/assets/recall-banner-light.svg">
-  <img alt="Recall — active memory substrate for LLM agents" src=".github/assets/recall-banner-light.svg" width="100%">
+  <img alt="Recall: active memory substrate for LLM agents" src=".github/assets/recall-banner-light.svg" width="100%">
 </picture>
 
 <br/>
 <br/>
 
-**Disciplined, operable memory for LLM agents — evidence-weighted, auditable, and compiled to a budget instead of poured back into the prompt.**
+**Disciplined, operable memory for LLM agents. Evidence-weighted, auditable, and compiled to a budget instead of poured back into the prompt.**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
@@ -34,13 +34,14 @@
 
 ---
 
-**Recall is disciplined, operable memory — a runtime, not a pile of notes.** Most agent "memory" is
-chat logs or a vector index you pour back into the prompt and hope. With
-Recall, an LLM proposes a structured write; an admission firewall validates
-it; the graph store persists it as addressable cells and n-ary hyperedges in
-local SQLite; and the compiler returns only the relevant subgraph — ranked by
-evidence, fit to a word budget. Every fact carries provenance, confidence,
-and a rollback entry. Memory you can **inspect, question, and undo**.
+**Recall is disciplined, operable memory: a runtime, not a pile of notes.**
+Most agent "memory" is chat logs or a vector index that gets poured back
+into the prompt. With Recall, an LLM proposes a structured write, an
+admission firewall validates it, the graph store persists it as addressable
+cells and n-ary hyperedges in local SQLite, and the compiler returns only
+the relevant subgraph, ranked by evidence and fit to a word budget. Every
+fact carries provenance, confidence, and a rollback entry. You can inspect,
+question, and undo anything in it.
 
 One installable Node.js tool: CLI, read-only TUI, MCP server, quiet
 maintenance daemon, strict write schema, semantic search, encrypted secrets
@@ -59,9 +60,10 @@ Or use the installer script, which clones, builds, and links `recall` +
 curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | bash
 ```
 
-Requires **Node.js 24+**. Recall uses Node's built-in SQLite — no database
-server, no native builds, no account, no network. Runs on macOS and Linux.
-Upgrades, uninstall, and troubleshooting: [Installation Guide](docs/11_INSTALLATION.md).
+Requires Node.js 24+. Recall uses Node's built-in SQLite, so there is no
+database server, no native build step, no account, and no network
+dependency. Runs on macOS and Linux. Upgrades, uninstall, and
+troubleshooting: [Installation Guide](docs/11_INSTALLATION.md).
 
 ## The 60-second tour
 
@@ -70,15 +72,15 @@ recall init       # create the local graph in ./.recall
 recall status     # store health, counts, config
 ```
 
-Memory enters as **structured, schema-validated proposals** — normally your
-agent submits these over MCP ([see below](#hook-up-your-agent)), but the same
-path is available from the shell:
+Memory enters as structured, schema-validated proposals. Normally your
+agent submits these over MCP ([see below](#hook-up-your-agent)), but the
+same path works from the shell:
 
 ```bash
 recall admit --json decision.json   # validated, provenance-stamped, rollbackable
 ```
 
-And it comes back as a **compiled context packet**, not a dump of the store:
+It comes back as a compiled context packet, not a dump of the store:
 
 ```bash
 recall compile "prepare the auth service deploy" --words 220
@@ -109,9 +111,9 @@ expansion_handles:
 - 07fbbfd9-…  1cb991a1-…  8bddbb07-…
 ```
 
-The packet is the product: ranked evidence, surfaced risks and open tasks,
-contradiction warnings when they exist, and expansion handles for drilling
-into any cell — all under a hard word budget. Browse the graph anytime:
+A packet holds ranked evidence, open risks and tasks, contradiction
+warnings when they exist, and expansion handles for drilling into any cell,
+all under a hard word budget. You can browse the graph at any time:
 
 ```bash
 recall tui                          # read-only terminal dashboard
@@ -119,23 +121,22 @@ recall search "rate limiter"        # FTS5 + BM25 lexical search
 recall semantic "token rotation"    # semantic search (hash or real embeddings)
 ```
 
-**And the graph prices its own claims.** Next to the author's immutable
-stated confidence, every cell carries a living **effective confidence** —
-recomputed on every read from incoming supports, challenges, and the
-writer's contradiction record. Write one contradiction and watch the number
-move:
+Every cell also carries an **effective confidence** next to the author's
+immutable stated confidence. It is recomputed on every read from incoming
+supports, challenges, and the writer's contradiction record. Write one
+contradiction and the number moves:
 
 ```text
-# before — the pool-cap decision stands alone
+# before: the pool-cap decision stands alone
 decision:6eba1114…  state=active/conf:0.7/eff:0.7/…
 
-# after — one cell contradicts it (nothing deleted, no model ran)
+# after: one cell contradicts it (nothing deleted, no model ran)
 decision:6eba1114…  state=active/conf:0.7/eff:0.29(challenged)/…
 ```
 
-Challenged cells sink in ranking, supported cells hold, and chronically
-overconfident writers get discounted — deterministically, offline,
-reproducibly.
+Challenged cells sink in ranking, supported cells hold, and writers with a
+record of overconfidence get discounted. All of it is deterministic and
+runs offline.
 
 Runtime state stays local and is git-ignored by default:
 
@@ -146,8 +147,8 @@ Runtime state stays local and is git-ignored by default:
 
 ## Hook up your agent
 
-Routine memory is **agent-managed through MCP** — users shouldn't hand-save
-ordinary observations, decisions, risks, or tasks.
+Routine memory is agent-managed through MCP. Users should not have to
+hand-save ordinary observations, decisions, risks, or tasks.
 
 ```bash
 recall mcp config --db .recall/recall.sqlite3   # print an MCP config block
@@ -155,20 +156,20 @@ recall-mcp                                       # start the stdio MCP server
 ```
 
 Paste the config block into any MCP-capable client (Claude Code, desktop
-apps, agent runtimes), then drop the
-[LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md) into your agent's instructions.
-The agent's loop becomes: **compile → work → write back**.
+apps, agent runtimes), then add the
+[LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md) to your agent's
+instructions. The agent's loop becomes: compile, work, write back.
 
 | Tool | Purpose |
 |---|---|
-| `recall_compile` | Compile a compact context packet for a task — **start here** |
+| `recall_compile` | Compile a compact context packet for a task. Start here |
 | `recall_write` | Submit a strict, evidence-aware memory proposal |
 | `recall_search` / `recall_semantic` | Retrieve graph evidence by exact or semantic match |
 | `recall_subgraph` | Compose subgraphs from structured tags |
 | `recall_daemon_run_once` | Run one outside-the-LLM maintenance pass |
 
-There are 42 MCP tools in total — status, hyperedges, programs, DAGs, evals,
-ACP agent coordination, calibration, and more. The
+There are 42 MCP tools in total, covering status, hyperedges, programs,
+DAGs, evals, ACP agent coordination, and calibration. The
 [LLM Integration Guide](docs/LLM_INTEGRATION.md) is the full operating
 contract, including the proposal shape.
 
@@ -184,49 +185,47 @@ contract, including the proposal shape.
    attenuates unsupported claims, warns on near-duplicates, blocks
    secret-looking content, and journals a rollback entry.
 3. **Store.** Memory persists as addressable cells and n-ary hyperedges in
-   SQLite — reachable by address, tag, relation, or semantic search.
+   SQLite, reachable by address, tag, relation, or semantic search.
 4. **Compile.** The compiler builds a compact, task-specific packet under a
-   word budget, surfacing each cell's challengers alongside it and pricing
-   every cell's effective confidence from the live graph.
-5. **Maintain.** A quiet daemon runs stale-memory, contradiction, derivation,
-   and eval passes *outside* the LLM — writing back through the same
-   admission path as everyone else.
+   word budget, listing each cell's challengers alongside it and computing
+   each cell's effective confidence from the live graph.
+5. **Maintain.** A quiet daemon runs stale-memory, contradiction,
+   derivation, and eval passes outside the LLM, writing back through the
+   same admission path as everyone else.
 
-The base structure is a hypernetwork; DAGs are optional overlays for ordered
-workflows, evidence chains, and execution traces.
+The base structure is a hypernetwork. DAGs are optional overlays for
+ordered workflows, evidence chains, and execution traces.
 
-**Relations can also act.** A hyperedge can carry a declared, versioned,
-sandboxed operation (`recall.program.v1` — score, tag projection, witness
-emission) and be run on demand. Bind a decision to its risks and
-verifications, and the bundle audits itself — scored from **live effective
-confidence**, so it doubles as a tripwire:
+Hyperedges can also carry programs: declared, versioned, sandboxed
+operations (`recall.program.v1`) that run on demand. Bind a decision to its
+risks and verifications and the bundle can score itself. Because the score
+reads live effective confidence, it works as a tripwire:
 
 ```text
 recall program run <program-id>     # Friday deploy gate
   → averageEffectiveConfidence: 0.7, score: 0.827
 
-# …new evidence contradicts the load-test verification…
+# new evidence contradicts the load-test verification
 
-recall program run <program-id>     # same gate — no model ran
+recall program run <program-id>     # same gate, no model ran
   → averageEffectiveConfidence: 0.322, score: 0.638
 
 recall program run <program-id> --derive
-  → derives a first-class witness cell, filed through the same admission
-    gate as every other write
+  → derives a witness cell, filed through the same admission gate as any
+    other write
 ```
 
-No other memory system has active relations: passive triplets and prose
-blocks can only be acted *upon* by an external model. Here, a deploy gate's
-score falls on its own when any member is contradicted — by a teammate,
-another agent, or a failing test wired in through `test-contradicts` edges.
-The graph takes minutes of its own meetings, deterministically. See
+Other memory systems store relations as passive records that only an
+external model can act on. Here, a deploy gate's score falls on its own
+when any member is contradicted, whether by a teammate, another agent, or
+a failing test wired in through `test-contradicts` edges. See
 [Advanced Graph Operations](docs/06_ADVANCED_GRAPH_OPERATIONS.md).
 
-**And relations can stand guard.** The `watch` operation turns a bundle
-into a standing reflex: it baselines against its own previous run (history
-is state — no extra machinery), trips when the bundle's live effective
-confidence moves more than `delta`, and stays silent otherwise — silence
-means *verified* stability, not no-news:
+The `watch` operation turns a bundle into a standing reflex. It baselines
+against its own previous run (run history is the state, so no extra
+machinery is needed), trips when the bundle's live effective confidence
+moves more than `delta`, and derives nothing otherwise. A quiet watch
+means the value was checked and had not moved.
 
 ```text
 recall program add <hyperedge-id> --json watch.json
@@ -240,34 +239,32 @@ recall program run <program-id> --derive
                program:<id>
 ```
 
-A reflex never pokes values — it **files claims**. Tripped watches propose
-through admission like everyone else, which means reflexes carry
-`produced_by` and accumulate a calibration record: a trigger-happy watcher
-whose concerns keep getting refuted gets discounted by the same loop that
-disciplines humans and LLMs. Chain them — a verification collapses, its
-watcher files a concern on the decision built on it, the decision's
-effective confidence falls, *its* watcher wakes — and belief revision
-propagates through your dependency graph one audited write at a time. Cron
-a watch and any standing decision becomes a monitored service: gate score
-in your dashboards, alerts in the channel your team already reads.
+A tripped watch does not modify its target. It files a concern through
+admission like any other writer, which means reflexes carry `produced_by`
+and accumulate a calibration record. A watcher whose concerns keep getting
+refuted gets discounted by the same loop that scores humans and LLMs.
+Watches can chain: a verification collapses, its watcher files a concern
+on the decision built on it, that decision's effective confidence falls,
+and a watcher on the decision can fire next. Run a watch from cron and a
+standing decision becomes a monitored service, with the gate score in your
+dashboards and alerts in the channel your team already reads.
 
-Two more verbs in the vocabulary:
+Two more operations round out the set:
 
-- **`drift`** — watch with attribution: a tripped run names **which member
-  moved** (`topMover`, ranked `movers`), so the on-call question — *the
-  gate fell, because of what?* — is answered by the bundle itself.
-- **`quorum`** — k-of-m sign-off as a graph object: a member approves when
-  its live effective confidence clears `minEff`, counted across **distinct
-  actors** so one enthusiast can't stack the gate. Approvals are calibrated
-  cells, not checkbox clicks — when an approver's verification gets
-  contradicted, their approval *stops counting*, with no policy code
-  written anywhere. Quorum runs always derive their attestation.
+- `drift` is watch with attribution. A tripped run names which member
+  moved (`topMover`, plus a ranked `movers` list), so you can see what
+  caused a gate to fall.
+- `quorum` is k-of-m sign-off as a graph object. A member counts as an
+  approval when its live effective confidence clears `minEff`, counted
+  across distinct actors so one writer cannot stack the gate. If an
+  approver's cell is later contradicted, its effective confidence drops
+  and the approval stops counting, with no policy code involved. Quorum
+  runs always derive their attestation.
 
-And the loop closes at read time: compile packets carry a
-`standing_programs:` section listing the gates, watches, and quorums
-covering each returned cell — with program and bundle handles — so an
-agent writing new evidence ties it into the existing fabric instead of
-orphaning it. Deeper concepts live in the
+Compile packets carry a `standing_programs` section listing the gates,
+watches, and quorums covering each returned cell, with program and bundle
+handles, so an agent writing new evidence can tie it into the existing
+bundle instead of orphaning it. Deeper concepts live in the
 [docs](docs/README.md): the [write schema](docs/02_WRITE_SCHEMA.md),
 [tagging & subgraphs](docs/03_TAGGING_AND_SUBGRAPHS.md), the
 [context compiler](docs/04_CONTEXT_COMPILER.md), and
@@ -279,34 +276,35 @@ Recall makes a few opinionated bets that most memory layers don't:
 
 | | Most memory layers | **Recall** |
 |---|---|---|
-| **Trust model** | Append text, trust later | Every write passes an **admission firewall**: schema-validated, provenance-stamped, rollbackable |
-| **What returns to the model** | The whole store, or a top-k blob | A **compiled context packet** — the relevant subgraph, ranked by evidence, fit to a word budget |
-| **Structure** | Flat notes or a single knowledge graph | **Addressable cells + n-ary hyperedges**, with optional DAG overlays for ordered work |
-| **Where it lives** | A cloud service you send data to | **Local-first.** SQLite on your machine. No account, no network required |
-| **Secrets** | Mixed into the same store | A separate **encrypted side graph**, opt-in, never in the primary graph |
-| **Mistakes** | Overwrite and move on | **Rollback, don't overwrite** — supersede by relation, keep the audit trail |
-| **Maintenance** | Manual curation, or none | A **quiet daemon** runs stale-memory, contradiction, and derivation passes _outside_ the LLM |
-| **Calibration** | Confidence is decoration | **Closed-loop calibration** — each actor's stated confidence is scored against survived contradictions |
-| **Confidence** | A static number typed once | A **living number** — effective confidence is recomputed from supports, challenges, and the writer's track record on every read, with no LLM in the loop |
+| **Trust model** | Append text, trust later | Every write passes an admission firewall: schema-validated, provenance-stamped, rollbackable |
+| **What returns to the model** | The whole store, or a top-k blob | A compiled context packet: the relevant subgraph, ranked by evidence, fit to a word budget |
+| **Structure** | Flat notes or a single knowledge graph | Addressable cells plus n-ary hyperedges, with optional DAG overlays for ordered work |
+| **Where it lives** | A cloud service you send data to | Local-first. SQLite on your machine. No account, no network required |
+| **Secrets** | Mixed into the same store | A separate encrypted side graph, opt-in, never in the primary graph |
+| **Mistakes** | Overwrite and move on | Rollback instead of overwrite: supersede by relation, keep the audit trail |
+| **Maintenance** | Manual curation, or none | A quiet daemon runs stale-memory, contradiction, and derivation passes outside the LLM |
+| **Calibration** | Confidence is decoration | Closed-loop calibration: each actor's stated confidence is scored against survived contradictions |
+| **Confidence** | A static number typed once | A living number: effective confidence is recomputed from supports, challenges, and the writer's track record on every read, with no LLM in the loop |
 
-The throughline: **memory you can audit.** Provenance on every cell, a
-firewall on every write, a packet you can read instead of a prompt you can't.
+The common thread is auditability: provenance on every cell, a firewall on
+every write, and a packet you can actually read.
 
 ## How Recall compares
 
-The deepest split in agent memory is **how trust changes** when new
+The main design split in agent memory is how trust changes when new
 information arrives. The field has three mechanisms:
 
 | Mechanism | Who uses it | What happens to a contested claim |
 |---|---|---|
-| **A model decides** | mem0, Zep, Letta, Hindsight | An LLM resolves the conflict at ingest, invalidates the fact, or "reflects" beliefs into new shapes — opaque, non-reproducible, and the loser is often rewritten or deleted |
-| **The clock decides** | decay-based systems | Importance fades on a forgetting curve, whether or not any evidence arrived |
-| **The evidence decides** | **Recall** | Effective confidence is recomputed from typed supports, challenges, and the writer's contradiction record — same graph, same number, every time |
+| A model decides | mem0, Zep, Letta, Hindsight | An LLM resolves the conflict at ingest, invalidates the fact, or rewrites beliefs. Opaque, non-reproducible, and the losing claim is often deleted |
+| The clock decides | decay-based systems | Importance fades on a forgetting curve whether or not any evidence arrived |
+| The evidence decides | **Recall** | Effective confidence is recomputed from typed supports, challenges, and the writer's contradiction record. Same graph, same number, every time |
 
-**Other systems ask a model what to believe. Recall computes it.**
+Other systems ask a model what to believe. Recall computes it.
 
-The rest are **architectural design properties**, not benchmark claims. Pick
-the tool that matches how much you care about auditability and local control.
+The rest are architectural design properties, not benchmark claims. Pick
+the tool that matches how much you care about auditability and local
+control.
 
 | Property | Vector RAG | Knowledge-graph memory | Cloud memory APIs | **Recall** |
 |---|:---:|:---:|:---:|:---:|
@@ -318,57 +316,55 @@ the tool that matches how much you care about auditability and local control.
 | Word-budgeted compiled context | ✗ | ✗ | partial | ✅ |
 | Encrypted, segregated secrets store | ✗ | ✗ | varies | ✅ |
 | Single runtime, one memory API | ✗ | varies | n/a | ✅ |
-| Trust evolves with **no LLM in the loop** | ✗ | ✗ | ✗ | ✅ |
-| Tiered reads over **trust-annotated claims** (title → peek → full cell) | ✗ | partial | partial | ✅ |
+| Trust evolves with no LLM in the loop | ✗ | ✗ | ✗ | ✅ |
+| Tiered reads over trust-annotated claims (title → peek → full cell) | ✗ | partial | partial | ✅ |
 
-Tiered, agent-navigated retrieval is an emerging pattern across the field —
+Tiered, agent-navigated retrieval is an emerging pattern across the field.
 Letta pages between memory tiers, and progressive-disclosure indexes are
-appearing elsewhere. Recall's difference is **what sits at each tier**: not
+appearing elsewhere. Recall's difference is what sits at each tier: not
 auto-summaries of activity, but gate-vetted claims carrying live trust
-state, addressed in the same namespace the evidence machinery uses — so the
-index layer tells the agent *where* digging is warranted, not just that it
-may.
+state, addressed in the same namespace the evidence machinery uses. The
+index layer tells the agent where digging is warranted, not just that it
+may dig.
 
-Recall trades turnkey cloud convenience for **local control and an audit
-trail.** If you want a hosted, batteries-included memory service, projects
+Recall trades turnkey cloud convenience for local control and an audit
+trail. If you want a hosted, batteries-included memory service, projects
 like mem0, Letta, and Zep are excellent. If you want memory that lives on
 your machine and that you can interrogate write-by-write, that's Recall.
 
 ## Beyond memory: Checker and Solver
 
-Recall is the memory organ of a three-part system. The other two organs
-plug into the same graph, through the same admission gate:
+Recall is the memory layer of a three-part system. The other two parts
+plug into the same graph through the same admission gate.
 
-**Checker** is the truth layer — a
-deterministic verification substrate built on one creed: *absence of
-refutation is not verification.* It runs declared checks and stores honest
+**Checker** is the verification layer, built on one rule: absence of
+refutation is not verification. It runs declared checks and stores honest
 verdicts (`verified` / `refuted` / `unverifiable` / `error` / `partial`)
-in a ledger, attests **git-natively** — `verify-commit` refuses dirty
-trees and non-HEAD SHAs, `gate --ref` answers "is this exact commit
-verified?", and a fail-closed pre-push hook gates pushes on it — and emits
-typed `checker-supports` / `checker-contradicts` edges into the Recall
-graph. Recall already treats those edges as first-class: externally
-executed evidence outweighs peer testimony in effective confidence, and
-compile packets surface checker challenges on every affected cell. Checker
-is what turns *"the graph says"* into *"the graph says, attested against
-commit `abc123` on a clean tree."*
+in a ledger, and its attestation is git-native: `verify-commit` refuses
+dirty trees and non-HEAD SHAs, `gate --ref` answers whether a specific
+commit is verified, and a fail-closed pre-push hook gates pushes on that
+answer. Checker emits typed `checker-supports` and `checker-contradicts`
+edges into the Recall graph, where they already count for more than peer
+testimony in effective confidence, and compile packets surface checker
+challenges on every affected cell. Verification is tied to an exact
+commit on a clean tree, not to a claim that the tests passed at some
+point.
 
-**Solver** is the compute layer — a library of **96 small, fast, gated
-solvers** spanning control theory, signal processing, estimation, and
-optimization: Kalman filtering, FIR/biquad, CORDIC, Goertzel, count-min
+**Solver** is the compute layer: a library of 96 small, fast, gated
+solvers spanning control theory, signal processing, estimation, and
+optimization. Kalman filtering, FIR/biquad, CORDIC, Goertzel, count-min
 sketches, matrix-free conjugate gradient, and an Ising/simulated-annealing
 tier that makes QUBO formulations practical where hand-rolled heuristics
-used to be the only affordable option. The CPU tier is tight C, the GPU
+used to be the only affordable option. The CPU tier is plain C, the GPU
 tier is CUDA, and every solver is validated against a reference oracle
-before any speed number is trusted — with a per-solver **optimality
-contract** declaring exactly what class of claim each answer carries
-(exact, tolerance-bounded, or heuristic). Results land in Recall as
-addressable, priced claims. The division of labor: *the model formulates,
-Solver computes, Recall remembers, Checker attests.*
+before any speed number is trusted. Each solver carries an optimality
+contract declaring what class of claim its answers make: exact,
+tolerance-bounded, or heuristic. Results land in Recall as addressable,
+priced claims. The division of labor: the model formulates, Solver
+computes, Recall remembers, Checker attests.
 
-Together the three close a loop no single tool can: memory that prices its
-claims, verification pinned to commits, and computation with contracts —
-one admission gate, no model in the loop anywhere.
+Together they cover memory, verification, and computation behind one
+write path, with no model in the loop.
 
 **Checker org capabilities and Solver access:**
 [todd@hendrixxdesign.com](mailto:todd@hendrixxdesign.com)
@@ -421,26 +417,27 @@ Run `recall help` for the full command surface, or see the
 
 ## Benchmarks
 
-Recall ships a reproducible public benchmark — a synthetic corpus in a
-throwaway database, measuring latency and throughput across the operational
-surfaces (`admit_write`, `search`, `semantic`, `compile`, paging, daemon and
-operator passes, secrets):
+Recall ships a reproducible public benchmark: a synthetic corpus in a
+throwaway database, measuring latency and throughput across the
+operational surfaces (`admit_write`, `search`, `semantic`, `compile`,
+paging, daemon and operator passes, secrets):
 
 ```bash
 npm run bench:public
 ```
 
-Numbers vary by machine; the harness is the claim, not a leaderboard. See
-[Public Benchmark](docs/19_PUBLIC_BENCHMARK.md) for methodology.
+Numbers vary by machine. The point is that anyone can rerun the
+measurement. See [Public Benchmark](docs/19_PUBLIC_BENCHMARK.md) for
+methodology.
 
 ## Documentation
 
-Start with the [docs index](docs/README.md) — it routes by purpose and by
-audience. Highlights:
+Start with the [docs index](docs/README.md), which routes by purpose and
+by audience. Highlights:
 
 - [Installation Guide](docs/11_INSTALLATION.md)
 - [Architecture](docs/01_ARCHITECTURE.md)
-- [Strict Write Schema](docs/02_WRITE_SCHEMA.md) — the `recall.write.v1` contract
+- [Strict Write Schema](docs/02_WRITE_SCHEMA.md), the `recall.write.v1` contract
 - [Context Compiler](docs/04_CONTEXT_COMPILER.md)
 - [LLM Integration Guide](docs/LLM_INTEGRATION.md) · [LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md)
 - [Secrets Side Graph](docs/12_SECRETS_SIDE_GRAPH.md)
@@ -457,12 +454,12 @@ npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 ```
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md). Keep changes schema-first, small,
 tested, and aligned with the single-runtime architecture. A good first PR
 runs `npm test && npm run e2e` clean. The [Roadmap](ROADMAP.md) lays out
-direction by ring — Foundation, Runtime, and Interfaces. Working in this repo
-with an AI agent? Point it at [AGENTS.md](AGENTS.md).
+direction by ring: Foundation, Runtime, and Interfaces. Working in this
+repo with an AI agent? Point it at [AGENTS.md](AGENTS.md).
 
 ## Security
 
@@ -474,21 +471,21 @@ Important defaults:
 - encrypted secret saves require explicit confirmation
 - primary-graph writes are schema-validated and rollbackable
 
-Report vulnerabilities via GitHub Security Advisories — see the policy for
+Report vulnerabilities via GitHub Security Advisories. See the policy for
 details.
 
 ## Project status
 
 Recall is an early working runtime foundation. It is suitable for local
-experimentation and integration work, and it deliberately does **not** claim
-production-grade or state-of-the-art behavior without external benchmarks and
-deployment review. Interfaces may change before a stable release. Treat
-compiled context packets as evidence, not unquestionable truth — which is
-exactly how Recall is designed to be used.
+experimentation and integration work, and it does not claim
+production-grade or state-of-the-art behavior without external benchmarks
+and deployment review. Interfaces may change before a stable release.
+Treat compiled context packets as evidence, not unquestionable truth,
+which is how Recall is designed to be used anyway.
 
 ## Citation
 
-If Recall helps your work, please cite it — see [CITATION.cff](CITATION.cff)
+If Recall helps your work, please cite it. See [CITATION.cff](CITATION.cff)
 or use GitHub's "Cite this repository" button.
 
 ## License
