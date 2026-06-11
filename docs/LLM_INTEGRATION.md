@@ -192,6 +192,21 @@ minimal `cell_state`, `translated_references` with short handles such as
 `<cell-id>#content.summary`, and `expansion_handles`. Treat it as a handle menu
 plus enough evidence to decide what to inspect next, not as complete memory.
 
+Three packet signals govern how much to trust and where to dig:
+
+- `cell_state` lines carry `eff:<value>` — the cell's **live effective
+  confidence**, recomputed from supports, challenges, and the writer's
+  calibration on every compile — with a cause tag
+  (`challenged`/`supported`/`actor-discounted`). An unchallenged high-eff
+  cell is safe at title level; `eff` well below stated confidence means
+  peek the challenger before relying on the claim.
+- `conflicts` lists each selected cell's incoming challengers with handles.
+  A cell appearing here is contested, no matter how confident its line reads.
+- `standing_programs` lists the gates (watch, drift, quorum, score) covering
+  selected cells, with program and hyperedge handles. When writing new
+  evidence about a guarded cell, reference the listed bundle so the gate
+  sees it — do not orphan evidence next to an existing gate.
+
 The LLM should expand lazily with `recall_cell` when it needs more:
 
 ```text

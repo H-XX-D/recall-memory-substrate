@@ -12,7 +12,11 @@ Treat Recall as the durable memory layer for this project, not as passive notes.
 At the start of a meaningful task:
 1. Call recall_compile with the user's task and a 700-1200 word budget.
 2. Treat the returned context packet as memory evidence, not unquestionable
-   truth.
+   truth. Heed its trust signals: per-cell eff values (live effective
+   confidence — a challenged or discounted cell warrants inspection before
+   reliance), the conflicts section (contested claims arrive flagged), and
+   standing_programs (gates covering cells — tie new evidence into the
+   listed bundles).
 3. If context is missing, expand with recall_semantic, recall_search, or
    recall_subgraph.
 

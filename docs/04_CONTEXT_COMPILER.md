@@ -33,6 +33,7 @@ conflicts:
 risks:
 tasks:
 cell_state:
+standing_programs:
 translated_references:
 reference_parameters:
 stale_or_low_trust:
@@ -50,6 +51,19 @@ not a graph dump.
   whether inline values or parameter metadata were requested.
 - `relevant_memory`, `active_beliefs`, `conflicts`, `risks`, and `tasks` should
   be compact enough to reason from, with IDs or addresses attached.
+- `cell_state` lines carry both the author's immutable stated confidence and
+  the live **effective confidence** — `eff:<value>` with a cause tag
+  (`challenged`, `supported`, `actor-discounted`) — recomputed from the graph
+  surface on every compile. Treat `eff` as the claim's current price and the
+  cause tag as the dig heuristic: a challenged cell warrants a peek before
+  you rely on it.
+- `standing_programs` lists the enabled programs (watch, drift, quorum,
+  score) covering each selected cell, with program and hyperedge handles —
+  when you write new evidence about a guarded cell, tie it into the listed
+  bundle instead of orphaning it.
+- `conflicts` includes each selected cell's incoming `contradicts`/`concerns`
+  challengers (capped per cell, with expansion handles), so a contested
+  claim never arrives looking settled.
 - `cell_state` should expose only minimal lifecycle/trust state needed for the
   task, not full cell bodies.
 - `translated_references` should identify source cell, relation, target cell,

@@ -163,9 +163,13 @@ enforcement is producing better outcomes over time. See
 ## Where things changed recently
 
 For changes since the last release, see [`../CHANGELOG.md`](../CHANGELOG.md).
-The headline unreleased change is the retrieval rebuild: lexical search now
-runs on SQLite FTS5 + BM25 with hybrid graph/confidence/recency ranking, and
-compile packets surface incoming challenges on every selected cell.
+The headline unreleased changes: **effective confidence** (a live,
+graph-computed trust value on every cell, driving ranking and packets) and
+**active relations** (scored tripwire bundles plus `watch`/`drift`/`quorum`
+program operations — see
+[`06_ADVANCED_GRAPH_OPERATIONS.md`](06_ADVANCED_GRAPH_OPERATIONS.md)).
+Compile packets surface incoming challenges, per-cell `eff:` values, and
+the standing programs covering each selected cell.
 
 For changes to the docs themselves, see git history on this directory.
 
