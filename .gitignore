@@ -14,3 +14,29 @@ coverage/
 tmp/
 .recall/
 
+# Python (python/ subdir client toolkit)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python tool caches
+*.npz                         # vector_rag_bench.py embedding cache
+*.meta.json                   # embedding cache metadata
+.embeddings_*.npz             # any embedding cache variant
+
+# Benchmark outputs (regeneratable from the harness)
+benchmark-results-*.md
+benchmark-results-*.json
+
+# Personal/private content that must never land in OSS
+*-private*
+patent-*-draft*.md
+patent-*-confidential*.md
+*-confidential*.md

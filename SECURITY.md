@@ -18,7 +18,5 @@ databases in reports. Use minimal reproductions.
 - Secret-looking values are rejected from the primary graph.
 - Secrets can be stored only through the encrypted Secrets side graph and only
   after explicit confirmation.
-- Hyperedge programs use the declared `recall.program.v1` sandbox operations;
-  Recall does not execute arbitrary user code.
 - MCP exposes the same operations as Recall. It is not a separate trust
   boundary.

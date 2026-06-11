@@ -1,0 +1,90 @@
+<svg width="1280" height="520" viewBox="0 0 1280 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Recall architecture: the write, admit, store, compile loop">
+  <title>Recall architecture — the write / admit / store / compile loop</title>
+  <defs>
+    <linearGradient id="ar-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+    <marker id="ar-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="ar-arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2dd4bf"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="520" rx="20" fill="#0a0e14"/>
+  <rect x="0.5" y="0.5" width="1279" height="519" rx="19.5" fill="none" stroke="#1e293b"/>
+
+  <text x="48" y="58" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="22" font-weight="700" fill="#f1f5f9">The Recall loop</text>
+  <text x="48" y="84" font-family="-apple-system, system-ui, sans-serif" font-size="15" fill="#64748b">Structured memory enters through one admission path. Only a compact, task-specific packet ever returns to the model.</text>
+
+  <!-- LLM -->
+  <g transform="translate(48, 150)">
+    <rect width="180" height="120" rx="14" fill="#0f172a" stroke="#334155"/>
+    <text x="90" y="46" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="17" font-weight="700" fill="#e2e8f0">LLM Agent</text>
+    <text x="90" y="72" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="12.5" fill="#94a3b8">proposes a</text>
+    <text x="90" y="90" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="12.5" fill="#5eead4">recall.write.v1</text>
+  </g>
+
+  <!-- Admission -->
+  <g transform="translate(312, 132)">
+    <rect width="232" height="156" rx="14" fill="#0f172a" stroke="url(#ar-accent)" stroke-opacity="0.6"/>
+    <text x="116" y="34" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="16" font-weight="700" fill="#5eead4">Admission &#183; Firewall</text>
+    <g font-family="-apple-system, system-ui, sans-serif" font-size="13" fill="#cbd5e1">
+      <text x="22" y="64">&#8226; validate strict schema</text>
+      <text x="22" y="88">&#8226; reject secret-looking content</text>
+      <text x="22" y="112">&#8226; attenuate weak claims</text>
+      <text x="22" y="136">&#8226; record provenance + rollback</text>
+    </g>
+  </g>
+
+  <!-- Store -->
+  <g transform="translate(628, 132)">
+    <rect width="232" height="156" rx="14" fill="#0f172a" stroke="#334155"/>
+    <text x="116" y="34" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="16" font-weight="700" fill="#e2e8f0">Graph Store</text>
+    <g font-family="-apple-system, system-ui, sans-serif" font-size="13" fill="#cbd5e1">
+      <text x="22" y="64">&#8226; addressable cells</text>
+      <text x="22" y="88">&#8226; n-ary hyperedges</text>
+      <text x="22" y="112">&#8226; tags + relations</text>
+      <text x="22" y="136">&#8226; SQLite, local-first</text>
+    </g>
+  </g>
+
+  <!-- Compiler -->
+  <g transform="translate(944, 132)">
+    <rect width="232" height="156" rx="14" fill="#0f172a" stroke="url(#ar-accent)" stroke-opacity="0.6"/>
+    <text x="116" y="34" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="16" font-weight="700" fill="#5eead4">Context Compiler</text>
+    <g font-family="-apple-system, system-ui, sans-serif" font-size="13" fill="#cbd5e1">
+      <text x="22" y="64">&#8226; selects relevant subgraph</text>
+      <text x="22" y="88">&#8226; ranks by evidence</text>
+      <text x="22" y="112">&#8226; fits a word budget</text>
+      <text x="22" y="136">&#8226; returns a compact packet</text>
+    </g>
+  </g>
+
+  <!-- arrows row -->
+  <g stroke="#64748b" stroke-width="2" fill="none">
+    <line x1="232" y1="210" x2="306" y2="210" marker-end="url(#ar-arrow)"/>
+    <line x1="548" y1="210" x2="622" y2="210" marker-end="url(#ar-arrow)"/>
+    <line x1="864" y1="210" x2="938" y2="210" marker-end="url(#ar-arrow)"/>
+  </g>
+
+  <!-- compiled packet return arrow -->
+  <path d="M1060 288 V360 H138 V276" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#ar-arrow-accent)"/>
+  <text x="600" y="352" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="13" fill="#5eead4">compiled context packet returns to the model — never the whole store</text>
+
+  <!-- Daemon -->
+  <g transform="translate(312, 408)">
+    <rect width="548" height="76" rx="14" fill="#0b1220" stroke="#334155" stroke-dasharray="5 4"/>
+    <text x="24" y="34" font-family="ui-monospace, Menlo, monospace" font-size="15" font-weight="700" fill="#94a3b8">Daemon &#183; outside the LLM</text>
+    <text x="24" y="58" font-family="-apple-system, system-ui, sans-serif" font-size="12.5" fill="#64748b">stale-memory, contradiction, derivation &amp; eval passes &#8212; written back through admission</text>
+  </g>
+  <g transform="translate(944, 408)">
+    <rect width="232" height="76" rx="14" fill="#0b1220" stroke="#334155" stroke-dasharray="5 4"/>
+    <text x="24" y="34" font-family="ui-monospace, Menlo, monospace" font-size="15" font-weight="700" fill="#94a3b8">Secrets side graph</text>
+    <text x="24" y="58" font-family="-apple-system, system-ui, sans-serif" font-size="12.5" fill="#64748b">encrypted, opt-in, never primary</text>
+  </g>
+
+  <line x1="586" y1="288" x2="586" y2="402" stroke="#334155" stroke-width="2" stroke-dasharray="5 4" fill="none" marker-end="url(#ar-arrow)"/>
+</svg>

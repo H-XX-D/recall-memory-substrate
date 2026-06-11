@@ -1,0 +1,48 @@
+name: "✨ Feature request"
+description: Propose an enhancement that fits Recall's single-runtime, schema-first design.
+title: "[feat]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Recall stays small and auditable on purpose. Proposals that add a **second
+        memory store** or a **second agent API** are out of scope by design — see
+        [AGENTS.md](../../AGENTS.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the user or agent need, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: How might this work within the admission / graph / compiler model?
+    validations:
+      required: true
+  - type: dropdown
+    id: ring
+    attributes:
+      label: Which ring does this touch?
+      options:
+        - Foundation (schema, graph semantics, evidence calculus, compiler)
+        - Runtime (daemon, firewall, scheduler, rollback, evals)
+        - Interfaces (CLI, TUI, MCP, bridges, importers)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Design alignment
+      options:
+        - label: This keeps all graph writes behind `recall.write.v1` admission.
+        - label: This does not introduce a second memory store or agent API.
+        - label: This does not put secrets in the primary graph.

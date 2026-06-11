@@ -1,0 +1,8 @@
+# Default owner for everything in the repo.
+* @H-XX-D
+
+# Critical trust-boundary code: changes here should always get a careful look.
+/src/core/admission.ts   @H-XX-D
+/src/core/firewall.ts    @H-XX-D
+/src/core/secrets.ts     @H-XX-D
+/src/core/schema.ts      @H-XX-D

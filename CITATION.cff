@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+title: "Recall — active memory substrate for LLM agents"
+message: "If you use Recall in your work, please cite it using these metadata."
+type: software
+authors:
+  - name: "Recall contributors"
+repository-code: "https://github.com/H-XX-D/recall-memory-substrate"
+url: "https://github.com/H-XX-D/recall-memory-substrate"
+abstract: >-
+  Recall is a local-first, evidence-weighted, auditable working-memory runtime
+  for LLM agents. Instead of pouring a whole store back into the prompt, an LLM
+  proposes a structured write that passes an admission firewall (schema
+  validation, provenance, confidence, and a rollback journal entry); memory is
+  persisted as addressable graph cells and n-ary hyperedges in SQLite; and a
+  context compiler returns only the relevant subgraph under a word budget. It
+  ships as a single Node.js tool with a CLI, a read-only TUI, an MCP server, a
+  quiet maintenance daemon, semantic search, and an encrypted secrets side
+  graph.
+keywords:
+  - llm
+  - memory
+  - mcp
+  - agents
+  - sqlite
+  - knowledge-graph
+  - semantic-search
+  - local-first
+  - provenance
+license: Apache-2.0
+version: 0.1.0
+date-released: "2026-06-01"

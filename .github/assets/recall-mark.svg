@@ -1,0 +1,23 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Recall mark">
+  <title>Recall</title>
+  <defs>
+    <linearGradient id="rcl-accent" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+  <!-- hyperedge: a rounded region binding three memory cells -->
+  <path d="M60 18 L96 39 V81 L60 102 L24 81 V39 Z"
+        fill="none" stroke="url(#rcl-accent)" stroke-width="5"
+        stroke-linejoin="round" opacity="0.45"/>
+  <!-- edges -->
+  <g stroke="url(#rcl-accent)" stroke-width="4" stroke-linecap="round">
+    <line x1="60" y1="44" x2="42" y2="74"/>
+    <line x1="60" y1="44" x2="78" y2="74"/>
+    <line x1="42" y1="74" x2="78" y2="74"/>
+  </g>
+  <!-- cells (addressable nodes) -->
+  <circle cx="60" cy="44" r="10" fill="url(#rcl-accent)"/>
+  <circle cx="42" cy="74" r="9" fill="#0d9488"/>
+  <circle cx="78" cy="74" r="9" fill="#2dd4bf"/>
+</svg>

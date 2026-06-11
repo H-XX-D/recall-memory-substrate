@@ -1,0 +1,137 @@
+name: Release
+
+# Triggered by pushing a semver tag, e.g.:
+#   git tag -a v0.1.0 -m "Recall 0.1.0" && git push origin v0.1.0
+#
+# The release is gated on a full green build/test/e2e run, then a GitHub
+# Release is published with notes extracted from CHANGELOG.md. Publishing to
+# npm happens only if an NPM_TOKEN secret is configured — otherwise that step
+# is skipped, so the workflow never fails for lack of a token.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)release, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write   # create the GitHub Release
+  id-token: write   # npm provenance (used only when publishing)
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify (build · test · e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: End-to-end checks
+        run: npm run e2e
+
+  release:
+    name: Publish GitHub Release
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          # Pull the section under "## [<version>]" up to the next "## " heading
+          # (CHANGELOG follows Keep a Changelog, so headings are bracketed).
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+            /^## / && flag {flag=0}
+            flag {print}
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No matching CHANGELOG section for ${VERSION}; using auto-generated notes." > RELEASE_NOTES.md
+          fi
+          echo "Release notes:"; cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Recall ${{ steps.tag.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+
+  publish-npm:
+    name: Publish to npm
+    needs: [verify, release]
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Checkout
+        if: env.NPM_TOKEN != ''
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        if: env.NPM_TOKEN != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        if: env.NPM_TOKEN != ''
+        run: npm ci || npm install
+
+      - name: Build
+        if: env.NPM_TOKEN != ''
+        run: npm run build
+
+      - name: Publish (with provenance)
+        if: env.NPM_TOKEN != ''
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skipped (no NPM_TOKEN)
+        if: env.NPM_TOKEN == ''
+        run: echo "NPM_TOKEN not set — skipping npm publish. The GitHub Release is still published."
