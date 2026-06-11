@@ -1,9 +1,0 @@
-{
-  "schemaVersion": "recall.program.v1",
-  "operation": "watch",
-  "description": "gate",
-  "params": {
-    "delta": 0.1,
-    "concernTarget": "98bedb4d-6794-4519-8a68-f61154447ad5"
-  }
-}
