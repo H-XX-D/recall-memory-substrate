@@ -18,7 +18,7 @@ map
 ## Graph Nodes
 
 - `work_candidate`: possible file, source, action, hypothesis, benchmark, or
-  adapter path.
+  connector path.
 - `proxy_score`: cheap estimate of impact, risk, uncertainty, cost,
   reversibility, dependency, and expected information gain.
 - `verification_result`: expensive check result.
@@ -48,11 +48,35 @@ after checks run.
 ## CLI Commands
 
 ```text
-recall workflow map "task"
-recall workflow score <candidate-id>
-recall workflow allocate --top 8
-recall workflow verify <candidate-id>
-recall workflow misses
-recall workflow handoff
+recall workflow allocate --json candidates.json --limit 8
+recall workflow allocate --json candidates.json --limit 8 --derive
+recall blind-lock add --json blind-lock.json
+recall beliefs
+recall maintenance --derive
 ```
 
+`workflow allocate` accepts either an array of candidates or:
+
+```json
+{
+  "candidates": [
+    {
+      "id": "runtime-health",
+      "title": "Verify daemon memory health",
+      "impact": 0.9,
+      "uncertainty": 0.8,
+      "concern": 0.8,
+      "dependencyWeight": 0.9,
+      "cost": 0.4,
+      "reversibility": 0.7,
+      "novelty": 0.6,
+      "tags": ["daemon", "memory-health"]
+    }
+  ],
+  "limit": 8
+}
+```
+
+With `--derive`, the selected allocation plan is admitted as an
+`allocation_plan` cell. `blind-lock add` admits a pre-registered prediction as a
+`blind_lock` cell.

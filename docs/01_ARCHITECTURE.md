@@ -30,7 +30,7 @@ Shared Recall core -> schema + tags + compiler + daemon + CLI/TUI
 
 ### Graph Core
 
-Stores durable state as nodes, relations, hyperedges, tags, provenance, and
+Stores durable state as nodes, relations, multi-party relations, tags, provenance, and
 rollback entries.
 
 Every admitted node is also an addressable cell:
@@ -118,7 +118,7 @@ The workflow engine maps a task into candidates, assigns cheap proxy scores,
 allocates expensive checks, records misses, and feeds verified results back into
 the graph.
 
-It should be callable by CLI, daemon, MCP, and hyperedge programs.
+It should be callable by CLI, daemon, MCP, and declared graph operations.
 
 ### CLI/TUI
 
@@ -126,13 +126,12 @@ The CLI is the automation interface. The TUI is the quiet human control panel.
 The daemon should remain invisible unless the user asks for status or a problem
 crosses an alert threshold.
 
-### Hyperedge Program Layer
+### Declared Runtime Layer
 
-Hyperedges may have attached programs. Programs transform graph-local inputs into
-declared outputs. They must be versioned, sandboxed, permissioned, testable, and
-auditable.
+Declared graph operations transform graph-local inputs into declared outputs.
+They must be versioned, sandboxed, permissioned, testable, and auditable.
 
-The current implementation supports n-ary hyperedges and a sandboxed
+The current implementation supports multi-party graph relations and a sandboxed
 `recall.program.v1` runtime with deterministic `score`, `emit_witness`, and
 `tag_projection` operations. It does not execute arbitrary user code.
 
@@ -141,10 +140,10 @@ explicit derivation mode. Derivation creates strict `recall.write.v1` proposals
 and admits them through the same firewall/admission/rollback path instead of
 writing raw rows.
 
-The base hypernetwork is not a DAG. Optional DAG overlays may be used for
-specific ordered workflows, evidence pipelines, or execution plans. Holonomy
-checks over those overlays can produce witnesses, concerns, or contradiction
-pressure without forcing the whole hypernetwork to be acyclic.
+The base graph is not a DAG. Optional DAG overlays may be used for specific
+ordered workflows, evidence pipelines, or execution plans. Consistency checks
+over those overlays can produce witnesses, concerns, or contradiction pressure
+without forcing the whole graph to be acyclic.
 
 ### Eval And Service Layer
 

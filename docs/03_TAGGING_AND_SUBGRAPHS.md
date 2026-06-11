@@ -21,11 +21,11 @@ Recall should work with sparse tags and derive fallbacks where it can.
 ## Secondary Tag Families
 
 - `scope`: project, repo, tenant, path, session.
-- `topic`: memory, planner, cli, tui, compiler, eval, adapter.
+- `topic`: memory, planner, cli, tui, compiler, eval, connector.
 - `entity`: named object, system, file, person, theory, artifact.
-- `identity`: agent, daemon, project, user, adapter, program, model, tenant, or
+- `identity`: agent, daemon, project, user, connector, program, model, tenant, or
   role identity.
-- `ring`: foundation, runtime, adapter.
+- `ring`: foundation, runtime, connector.
 - `lifecycle`: proposed, active, stale, superseded, archived.
 - `quality`: unverified, source-grounded, tested, benchmarked, contradicted.
 - `sensitivity`: public, private, secret.
@@ -93,11 +93,11 @@ agent:claude
 daemon:recall
 project:recall
 tenant:local
-adapter:pubchem
+connector:pubchem
 program:stale-memory-scorer
 model:gpt-5
 role:reviewer
 ```
 
-Identity tags let Recall also compose subgraphs by actor, adapter, daemon, or
+Identity tags let Recall also compose subgraphs by actor, connector, daemon, or
 role without duplicating memory stores.

@@ -79,3 +79,10 @@ Report:
 - human review burden
 
 No SOTA claim without benchmark evidence.
+
+## Public Benchmark
+
+Use `npm run bench:public` for the published surface benchmark that measures
+Recall's graph-native control plane, addressable cells, rollback preview, ACP
+exchange, DAG analysis, workflow allocation, and operator cycle behavior.
+Details live in [19_PUBLIC_BENCHMARK.md](19_PUBLIC_BENCHMARK.md).

@@ -1,112 +1,157 @@
 # Installation
 
-Recall should remain easy to install regardless of implementation language.
-Current implementation target: TypeScript on Node 24+.
+Recall installs as a single Node.js package that provides two binaries:
+`recall` (CLI + TUI) and `recall-mcp` (stdio MCP server).
 
-## Local Development
+## Requirements
+
+- **Node.js 24 or newer** (Recall uses Node's built-in SQLite — no database
+  server, no native compilation)
+- **npm** (ships with Node)
+- macOS or Linux. The core runtime is plain local Node on any platform;
+  the daemon *service* helper currently emits macOS LaunchAgent plists.
+
+Check your Node version first:
 
 ```bash
-git clone https://github.com/H-XX-D/recall-memory-substrate.git
-cd recall-memory-substrate
-npm install
-npm test
+node --version   # must be v24.0.0 or newer
 ```
 
-## One-Line Install
-
-Install directly from GitHub with npm:
+## Option A — npm global install (recommended)
 
 ```bash
 npm install -g github:H-XX-D/recall-memory-substrate
-recall init
-recall status
 ```
 
-Or use the installer script:
+This fetches the repository, builds it, and links `recall` and `recall-mcp`
+onto your PATH.
+
+## Option B — installer script
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | bash
 ```
 
-The script clones or updates Recall at `~/.recall-memory-substrate/source`,
-runs `npm install`, builds the CLI, and links the `recall` and `recall-mcp`
-commands globally.
+The script verifies Node 24+, clones the repository into
+`~/.recall-memory-substrate/source` (override with `RECALL_INSTALL_DIR`),
+builds it, and links the binaries. Re-running the script updates the
+checkout and rebuilds — it is also the upgrade path for this option.
 
-## Local CLI Use
-
-```bash
-npm run build
-node dist/src/cli.js status
-```
-
-## Global Local Install
-
-```bash
-npm run install:local
-recall status
-```
-
-## MCP Server
-
-```bash
-npm run build
-recall-mcp
-```
-
-The MCP server is stdio JSON-RPC. It exposes Recall status, lexical search,
-semantic search, context compilation, tag-composed subgraphs, and daemon
-run-once.
-
-Generate a local MCP config block:
-
-```bash
-recall mcp config --db .recall/recall.sqlite3
-```
-
-## LLM App Setup
-
-Recall needs both MCP tooling and persistent LLM instructions.
-
-1. Add the generated MCP config block to your LLM desktop app or agent runtime.
-2. Add the pasteable instructions from
-   [LLM System Prompt](LLM_SYSTEM_PROMPT.md) anywhere the LLM stores durable
-   behavior: desktop app custom instructions, memory files, project memory,
-   repo `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, Cursor project rules,
-   Windsurf rules, MCP profile instructions, or local runner system prompts.
-3. Repeat this for each LLM app that should use Recall.
-
-The MCP server gives the app tools. The persistent instruction tells the LLM
-when to read memory, when to write, which schema to use, and what must never be
-stored.
-
-## Daemon LaunchAgent
-
-Generate or install a macOS LaunchAgent plist for background operation:
-
-```bash
-recall daemon plist
-recall daemon install
-recall daemon service-status
-recall daemon uninstall
-```
-
-`daemon install` writes the plist but does not call `launchctl`; loading a user
-service remains an explicit shell step.
-
-## Direct Script Install
+## Option C — from source (development)
 
 ```bash
 git clone https://github.com/H-XX-D/recall-memory-substrate.git
 cd recall-memory-substrate
-./scripts/install-local.sh
-recall status
+npm install
+npm test             # verify the checkout: 83 tests
+npm run install:local   # build + npm link → global `recall` / `recall-mcp`
 ```
 
-## Installability Requirements
+Or equivalently: `./scripts/install-local.sh`.
 
-- One package manager command should install dependencies.
-- One test command should verify the package.
-- One global install path should expose `recall`.
-- CLI should create its local `.recall` directory automatically.
-- No database server should be required for the local-first install.
-- Runtime databases, logs, and generated build output stay out of git.
+## Verify the install
+
+```bash
+recall init       # creates ./.recall/recall.sqlite3 in the current directory
+recall status     # prints store health, counts, and config
+```
+
+`recall init` creates the local graph database wherever you run it — one
+`.recall/` per project is the intended pattern. Runtime databases and logs
+are git-ignored by default.
+
+From a source checkout you can also run the full verification suite:
+
+```bash
+npm test          # 83 unit/integration tests
+npm run e2e       # 94 end-to-end checks
+npm run smoke     # init + status on a throwaway db
+```
+
+## Set up the MCP server (for agents)
+
+```bash
+recall mcp config --db .recall/recall.sqlite3   # prints an MCP config block
+```
+
+Paste the block into any MCP-capable client (Claude Code, desktop apps,
+agent runtimes). The server is stdio JSON-RPC and exposes 42 tools —
+compile, write, search, subgraphs, hyperedges, programs, DAGs, evals, ACP
+coordination, calibration, and more. It exits on its own after 30 idle
+minutes (`RECALL_MCP_IDLE_EXIT_MS` to tune, `0` to disable); clients respawn
+it on demand.
+
+Then give your agent its operating instructions: drop the
+[LLM System Prompt](LLM_SYSTEM_PROMPT.md) into its custom instructions, and
+see the [LLM Integration Guide](LLM_INTEGRATION.md) for the full contract.
+
+## Optional: background daemon (macOS)
+
+```bash
+recall daemon plist            # generate a LaunchAgent plist
+recall daemon install          # write the plist (does not call launchctl)
+recall daemon service-status
+recall daemon uninstall
+```
+
+`daemon install` writes the plist but does not load it — loading a user
+service stays an explicit step:
+
+```bash
+launchctl load ~/Library/LaunchAgents/io.recall.memory.daemon.plist
+```
+
+On any platform you can run maintenance directly instead:
+
+```bash
+recall daemon run-once --derive
+recall daemon run --interval-ms 60000
+```
+
+## Upgrading
+
+| Installed via | Upgrade with |
+|---|---|
+| Option A (npm) | `npm install -g github:H-XX-D/recall-memory-substrate` again |
+| Option B (script) | Re-run the installer script |
+| Option C (source) | `git pull && npm install && npm run install:local` |
+
+Databases migrate forward automatically on first open; existing data is
+preserved. (FTS indexes backfill on first open after an upgrade.)
+
+## Uninstalling
+
+```bash
+npm uninstall -g recall-memory-substrate
+rm -rf ~/.recall-memory-substrate        # only if you used the installer script
+```
+
+Your data is never deleted by an uninstall: each project's graph lives in
+its own `.recall/` directory. Remove those explicitly if you want the data
+gone too.
+
+## Troubleshooting
+
+**`Recall requires Node 24 or newer`** — install a current Node (e.g.
+`brew install node`, or via nvm: `nvm install 24 && nvm use 24`) and rerun.
+
+**`recall: command not found` after npm install** — your npm global bin
+directory isn't on PATH. Find it with `npm prefix -g` (binaries are in
+`<prefix>/bin`) and add it to your shell profile.
+
+**`ExperimentalWarning: SQLite is an experimental feature`** — harmless;
+Node 24's built-in SQLite is flagged experimental upstream. Recall's own
+scripts suppress it with `--disable-warning=ExperimentalWarning`.
+
+**Wrong database** — Recall operates on `./.recall/recall.sqlite3` relative
+to where you run it unless you pass `--db <path>`. `recall status` shows
+which database you're talking to.
+
+## Installability requirements (project policy)
+
+- One package manager command installs everything.
+- One test command verifies the package.
+- One global install path exposes `recall`.
+- The CLI creates its local `.recall` directory automatically.
+- No database server required for the local-first install.
+- Runtime databases, logs, and build output stay out of git.

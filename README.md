@@ -1,336 +1,379 @@
-# Recall
+<div align="center">
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D24.0.0-brightgreen.svg)](package.json)
-[![Status](https://img.shields.io/badge/status-early%20runtime-orange.svg)](#project-status)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/recall-banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset=".github/assets/recall-banner-light.svg">
+  <img alt="Recall — active memory substrate for LLM agents" src=".github/assets/recall-banner-light.svg" width="100%">
+</picture>
 
-Recall is a local-first active memory substrate for LLM agents. It is designed
-to give an agent durable, evidence-weighted working memory without pouring the
-whole memory store back into the prompt on every turn.
+<br/>
+<br/>
 
-Most memory systems behave like passive notes, chat logs, or vector search over
-loose text. Recall is a running memory runtime. An LLM proposes structured
-writes, Recall validates them, stores them as addressable graph cells and
-hyperedges, and then compiles only the relevant subgraph back to the LLM under a
-word budget. The goal is cross-session continuity with provenance, rollback,
-stale-memory detection, contradiction pressure, and measurable recall behavior.
+**Disciplined, operable memory for LLM agents — evidence-weighted, auditable, and compiled to a budget instead of poured back into the prompt.**
 
-This release is the first clean public runtime for the Recall architecture. It
-combines the practical parts of Cognitive Construct-style graph memory, C
-Operating Substrate-style policy and maintenance, and substrate-guided workflow
-into a single installable Node.js tool with a CLI, TUI, MCP server, daemon,
-SQLite store, strict write schema, semantic search, encrypted secrets side
-graph, and derivation/eval machinery.
+[![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
+[![Tests](https://img.shields.io/badge/tests-83%20passing-2dd4bf.svg)](#development)
+[![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
+[![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
+[![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-0d9488.svg)](CONTRIBUTING.md)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-5eead4.svg)](CODE_OF_CONDUCT.md)
 
-## What Recall Does
+[Install](#install) ·
+[Quickstart](#the-60-second-tour) ·
+[Agents & MCP](#hook-up-your-agent) ·
+[How it works](#how-it-works) ·
+[Why Recall](#why-recall) ·
+[Compare](#how-recall-compares) ·
+[Docs](docs/README.md) ·
+[Roadmap](ROADMAP.md)
 
-Recall gives an LLM a memory layer that can:
+</div>
 
-- persist observations, decisions, tasks, risks, contradictions, witnesses,
-  eval results, and derivations outside the context window
-- require structured, evidence-aware writes instead of vague memory notes
-- compose subgraphs using category/type/subject/project/idea/timestamp tags
-- retrieve by exact graph search, semantic search, or compiled task context
-- keep secrets out of the primary memory graph and store them only in an
-  encrypted side graph after explicit confirmation
-- maintain memory outside the LLM through a quiet daemon loop
-- expose the same runtime through CLI commands, a terminal UI, and MCP tools
-- support n-ary hyperedges, addressable cells, sandboxed hyperedge programs,
-  optional DAG overlays, holonomy witnesses, rollback, and eval closure
+---
 
-Recall is meant to be invisible during normal agent work. The user should not
-have to manually curate memory. The LLM writes through MCP or CLI using the
-strict schema, Recall admits or rejects the proposal, and the context compiler
-returns compact packets when the next task needs memory.
+**Recall is disciplined, operable memory — a runtime, not a pile of notes.** Most agent "memory" is
+chat logs or a vector index you pour back into the prompt and hope. With
+Recall, an LLM proposes a structured write; an admission firewall validates
+it; the graph store persists it as addressable cells and n-ary hyperedges in
+local SQLite; and the compiler returns only the relevant subgraph — ranked by
+evidence, fit to a word budget. Every fact carries provenance, confidence,
+and a rollback entry. Memory you can **inspect, question, and undo**.
 
-## How It Works
+One installable Node.js tool: CLI, read-only TUI, MCP server, quiet
+maintenance daemon, strict write schema, semantic search, encrypted secrets
+side graph, and a reproducible benchmark harness.
 
-The core loop is deliberately simple:
-
-1. The LLM submits a `recall.write.v1` proposal with content, evidence,
-   confidence, provenance, and structured tags.
-2. Admission validates the schema, applies firewall checks, attenuates weak
-   claims, blocks secret-looking content, records provenance, and writes a
-   rollback journal entry.
-3. The store persists memory as addressable cells and n-ary hyperedges in
-   SQLite. Cells can be found directly, through tags, through relations, or by
-   semantic search.
-4. The compiler builds a compact context packet for a task instead of dumping
-   the database into the LLM context window.
-5. The daemon can run maintenance passes outside the LLM to surface stale
-   memory, contradictions, derivation candidates, and eval results.
-6. Rollback and evals make memory writes inspectable, reversible, and testable.
-
-The base memory structure is a hypernetwork. DAGs are optional overlays for
-ordered workflows, evidence chains, execution traces, and holonomy witness
-generation. Hyperedge programs are sandboxed declared operations, not arbitrary
-shell execution.
-
-## Included In This Release
-
-- strict `recall.write.v1` admission with firewall checks and rollback
-- addressable graph cells and n-ary hyperedges
-- category/type/subject/project/idea/timestamp tags for subgraph composition
-- semantic search and word-budget context compilation
-- encrypted Secrets side graph with explicit user confirmation
-- CLI, TUI, MCP server, and quiet daemon maintenance
-- sandboxed hyperedge programs, optional DAG overlays, holonomy witnesses, and
-  persisted evals
-
-## Requirements
-
-- Node.js 24 or newer
-- npm
-- macOS, Linux, or any platform supported by Node's built-in SQLite module
-
-The daemon service helper currently generates macOS LaunchAgent plists. The core
-CLI, MCP server, database, tests, and E2E checks are local Node processes.
-
-## One-Line Install
-
-Install directly from GitHub with npm:
+## Install
 
 ```bash
 npm install -g github:H-XX-D/recall-memory-substrate
 ```
 
-Then initialize and check the local runtime:
-
-```bash
-recall init
-recall status
-```
-
-If you prefer an installer script that clones the repo into
-`~/.recall-memory-substrate/source`, builds it, and links the `recall` and
-`recall-mcp` commands:
+Or use the installer script, which clones, builds, and links `recall` +
+`recall-mcp`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | bash
 ```
 
-To install into a custom directory:
+Requires **Node.js 24+**. Recall uses Node's built-in SQLite — no database
+server, no native builds, no account, no network. Runs on macOS and Linux.
+Upgrades, uninstall, and troubleshooting: [Installation Guide](docs/11_INSTALLATION.md).
+
+## The 60-second tour
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main/scripts/install.sh | \
-  RECALL_INSTALL_DIR="$HOME/dev/recall-memory-substrate" bash
+recall init       # create the local graph in ./.recall
+recall status     # store health, counts, config
 ```
 
-When the npm registry package is published, the install command becomes:
+Memory enters as **structured, schema-validated proposals** — normally your
+agent submits these over MCP ([see below](#hook-up-your-agent)), but the same
+path is available from the shell:
 
 ```bash
-npm install -g recall-memory-substrate
+recall admit --json decision.json   # validated, provenance-stamped, rollbackable
 ```
 
-## Source Install
+And it comes back as a **compiled context packet**, not a dump of the store:
 
 ```bash
-git clone https://github.com/H-XX-D/recall-memory-substrate.git
-cd recall-memory-substrate
-npm install
-npm test
-npm run install:local
-recall status
+recall compile "prepare the auth service deploy" --words 220
 ```
-
-
-## CLI Usage
-
-```bash
-recall init
-recall status
-recall search "context compiler"
-recall semantic "active memory graph"
-recall semantic reindex
-recall subgraph --project Recall --category memory --subject compiler
-recall compile "prepare the next agent turn" --words 900
-recall tui
-```
-
-Runtime state is local by default:
 
 ```text
-.recall/recall.sqlite3
-.recall/secrets.sqlite3
+objective:
+prepare the auth service deploy
+
+compiler_state:
+- retrieval=fts5-bm25; query="prepare the auth service deploy"; selected_cells=3; budget_words=220
+- health=beliefs:0, contradictions:0, stale_or_low_trust:0, critical_warnings:0
+
+relevant_memory:
+- Cap the Postgres pool at 20 connections: Staging fell over at 35 concurrent
+  connections during the load test on June 3. Capped pool_size at 20 in service
+  config; raising it requires a load test sign-off. [decision:07fbbfd9-…]
+
+risks:
+- Auth tokens expire but never rotate: Access tokens have 24h expiry but no
+  rotation path; a leaked token stays valid until expiry. [risk:1cb991a1-…]
+
+tasks:
+- Add a smoke check for the new rate limiter: The rate limiter shipped behind a
+  flag; nobody has verified the 429 path end to end. [task:8bddbb07-…]
+
+expansion_handles:
+- 07fbbfd9-…  1cb991a1-…  8bddbb07-…
 ```
 
-These files are ignored by git.
-
-## Agent And MCP Usage
-
-Routine memory is agent-managed through MCP. The user should not need to
-manually save ordinary observations, witnesses, risks, decisions, tasks, or
-context updates.
-
-Generate an MCP config block:
+The packet is the product: ranked evidence, surfaced risks and open tasks,
+contradiction warnings when they exist, and expansion handles for drilling
+into any cell — all under a hard word budget. Browse the graph anytime:
 
 ```bash
-recall mcp config --db .recall/recall.sqlite3
+recall tui                          # read-only terminal dashboard
+recall search "rate limiter"        # FTS5 + BM25 lexical search
+recall semantic "token rotation"    # semantic search (hash or real embeddings)
 ```
 
-Start the stdio MCP server:
+**And the graph prices its own claims.** Next to the author's immutable
+stated confidence, every cell carries a living **effective confidence** —
+recomputed on every read from incoming supports, challenges, and the
+writer's contradiction record. Write one contradiction and watch the number
+move:
 
-```bash
-recall-mcp
+```text
+# before — the pool-cap decision stands alone
+decision:6eba1114…  state=active/conf:0.7/eff:0.7/…
+
+# after — one cell contradicts it (nothing deleted, no model ran)
+decision:6eba1114…  state=active/conf:0.7/eff:0.29(challenged)/…
 ```
 
-Primary MCP tools:
+Challenged cells sink in ranking, supported cells hold, and chronically
+overconfident writers get discounted — deterministically, offline,
+reproducibly.
 
-- `recall_write`: submit strict LLM-managed memory proposals
-- `recall_compile`: compile a compact context packet for a task
-- `recall_search` and `recall_semantic`: retrieve graph evidence
-- `recall_subgraph`: compose subgraphs from structured tags
-- `recall_daemon_run_once`: run one outside-LLM maintenance pass
+Runtime state stays local and is git-ignored by default:
 
-See [LLM Integration Guide](docs/LLM_INTEGRATION.md) for the full agent
-operating contract and proposal shape. For LLM desktop apps and agent runners,
-also add the [Recall LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md) to the app's
-custom instructions, project memory file, repo `AGENTS.md`, MCP profile, or
-wherever that LLM stores persistent behavior.
+```text
+.recall/recall.sqlite3      # primary graph
+.recall/secrets.sqlite3     # encrypted secrets side graph
+```
 
-## Write Model
+## Hook up your agent
 
-All durable memory enters Recall as a `recall.write.v1` proposal:
+Routine memory is **agent-managed through MCP** — users shouldn't hand-save
+ordinary observations, decisions, risks, or tasks.
 
 ```bash
+recall mcp config --db .recall/recall.sqlite3   # print an MCP config block
+recall-mcp                                       # start the stdio MCP server
+```
+
+Paste the config block into any MCP-capable client (Claude Code, desktop
+apps, agent runtimes), then drop the
+[LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md) into your agent's instructions.
+The agent's loop becomes: **compile → work → write back**.
+
+| Tool | Purpose |
+|---|---|
+| `recall_compile` | Compile a compact context packet for a task — **start here** |
+| `recall_write` | Submit a strict, evidence-aware memory proposal |
+| `recall_search` / `recall_semantic` | Retrieve graph evidence by exact or semantic match |
+| `recall_subgraph` | Compose subgraphs from structured tags |
+| `recall_daemon_run_once` | Run one outside-the-LLM maintenance pass |
+
+There are 42 MCP tools in total — status, hyperedges, programs, DAGs, evals,
+ACP agent coordination, calibration, and more. The
+[LLM Integration Guide](docs/LLM_INTEGRATION.md) is the full operating
+contract, including the proposal shape.
+
+## How it works
+
+<div align="center">
+<img alt="The Recall loop: an LLM proposes a write, admission validates and firewalls it, the graph store persists addressable cells and hyperedges, and the context compiler returns a compact packet." src=".github/assets/recall-architecture.svg" width="100%">
+</div>
+
+1. **Propose.** The LLM submits a `recall.write.v1` proposal with content,
+   evidence, confidence, provenance, and structured tags.
+2. **Admit.** Admission validates the schema, applies firewall checks,
+   attenuates unsupported claims, warns on near-duplicates, blocks
+   secret-looking content, and journals a rollback entry.
+3. **Store.** Memory persists as addressable cells and n-ary hyperedges in
+   SQLite — reachable by address, tag, relation, or semantic search.
+4. **Compile.** The compiler builds a compact, task-specific packet under a
+   word budget, surfacing each cell's challengers alongside it and pricing
+   every cell's effective confidence from the live graph.
+5. **Maintain.** A quiet daemon runs stale-memory, contradiction, derivation,
+   and eval passes *outside* the LLM — writing back through the same
+   admission path as everyone else.
+
+The base structure is a hypernetwork; DAGs are optional overlays for ordered
+workflows, evidence chains, and execution traces. Deeper concepts live in the
+[docs](docs/README.md): the [write schema](docs/02_WRITE_SCHEMA.md),
+[tagging & subgraphs](docs/03_TAGGING_AND_SUBGRAPHS.md), the
+[context compiler](docs/04_CONTEXT_COMPILER.md), and
+[cells & graph views](docs/14_ADDRESSABLE_CELLS_AND_GRAPH_VIEWS.md).
+
+## Why Recall
+
+Recall makes a few opinionated bets that most memory layers don't:
+
+| | Most memory layers | **Recall** |
+|---|---|---|
+| **Trust model** | Append text, trust later | Every write passes an **admission firewall**: schema-validated, provenance-stamped, rollbackable |
+| **What returns to the model** | The whole store, or a top-k blob | A **compiled context packet** — the relevant subgraph, ranked by evidence, fit to a word budget |
+| **Structure** | Flat notes or a single knowledge graph | **Addressable cells + n-ary hyperedges**, with optional DAG overlays for ordered work |
+| **Where it lives** | A cloud service you send data to | **Local-first.** SQLite on your machine. No account, no network required |
+| **Secrets** | Mixed into the same store | A separate **encrypted side graph**, opt-in, never in the primary graph |
+| **Mistakes** | Overwrite and move on | **Rollback, don't overwrite** — supersede by relation, keep the audit trail |
+| **Maintenance** | Manual curation, or none | A **quiet daemon** runs stale-memory, contradiction, and derivation passes _outside_ the LLM |
+| **Calibration** | Confidence is decoration | **Closed-loop calibration** — each actor's stated confidence is scored against survived contradictions |
+| **Confidence** | A static number typed once | A **living number** — effective confidence is recomputed from supports, challenges, and the writer's track record on every read, with no LLM in the loop |
+
+The throughline: **memory you can audit.** Provenance on every cell, a
+firewall on every write, a packet you can read instead of a prompt you can't.
+
+## How Recall compares
+
+The deepest split in agent memory is **how trust changes** when new
+information arrives. The field has three mechanisms:
+
+| Mechanism | Who uses it | What happens to a contested claim |
+|---|---|---|
+| **A model decides** | mem0, Zep, Letta, Hindsight | An LLM resolves the conflict at ingest, invalidates the fact, or "reflects" beliefs into new shapes — opaque, non-reproducible, and the loser is often rewritten or deleted |
+| **The clock decides** | decay-based systems | Importance fades on a forgetting curve, whether or not any evidence arrived |
+| **The evidence decides** | **Recall** | Effective confidence is recomputed from typed supports, challenges, and the writer's contradiction record — same graph, same number, every time |
+
+**Other systems ask a model what to believe. Recall computes it.**
+
+The rest are **architectural design properties**, not benchmark claims. Pick
+the tool that matches how much you care about auditability and local control.
+
+| Property | Vector RAG | Knowledge-graph memory | Cloud memory APIs | **Recall** |
+|---|:---:|:---:|:---:|:---:|
+| Runs fully local, no account | sometimes | sometimes | ✗ | ✅ |
+| Structured write schema enforced | ✗ | partial | varies | ✅ |
+| Admission firewall on every write | ✗ | ✗ | varies | ✅ |
+| Provenance + rollback per write | ✗ | partial | varies | ✅ |
+| N-ary hyperedges (not just pairwise) | ✗ | rare | ✗ | ✅ |
+| Word-budgeted compiled context | ✗ | ✗ | partial | ✅ |
+| Encrypted, segregated secrets store | ✗ | ✗ | varies | ✅ |
+| Single runtime, one memory API | ✗ | varies | n/a | ✅ |
+| Trust evolves with **no LLM in the loop** | ✗ | ✗ | ✗ | ✅ |
+
+Recall trades turnkey cloud convenience for **local control and an audit
+trail.** If you want a hosted, batteries-included memory service, projects
+like mem0, Letta, and Zep are excellent. If you want memory that lives on
+your machine and that you can interrogate write-by-write, that's Recall.
+
+## CLI cheat sheet
+
+```bash
+# inspect
+recall status
+recall tui [--watch]
+
+# retrieve
+recall search "query"
+recall semantic "query"
+recall subgraph --project Recall --category memory --subject compiler
+recall compile "task description" --words 900
+
+# write (agent/debug path; normal memory flows through MCP recall_write)
 recall validate --json proposal.json
-recall admit --json proposal.json
-```
+recall admit    --json proposal.json
 
-Admission validates schema, blocks secret-looking content, attenuates unsupported
-claims, writes graph cells, records provenance, and creates rollback entries.
-
-Rollback is explicit:
-
-```bash
+# undo
 recall rollback list
 recall rollback show <journal-id>
 recall rollback apply <journal-id>
-```
 
-## Secrets
-
-Secrets never enter the primary graph. They are stored only in the encrypted
-Secrets side graph, and only when explicitly requested:
-
-```bash
-printf 'password\nsecret-value' | recall secrets save \
-  --title "service token" \
-  --confirm-secret-save \
-  --password-stdin \
-  --value-stdin
-
-recall secrets list
-printf 'password\n' | recall secrets get <secret-id> --password-stdin
-```
-
-Secret payloads are encrypted with AES-256-GCM using a scrypt-derived key.
-Listing secrets returns metadata only.
-
-## Advanced Graph Runtime
-
-Hyperedges and programs:
-
-```bash
+# advanced graph runtime
 recall hyperedge add --json hyperedge.json
 recall program add <hyperedge-id> --json program.json
-recall program run <program-id> --derive
-recall program runs
-```
-
-DAG overlays and holonomy witnesses:
-
-```bash
-recall dag add --json overlay.json
 recall dag analyze <overlay-id> --derive
-```
-
-Eval closure:
-
-```bash
 recall eval run --derive
-recall eval list
-```
+recall operate once --derive
 
-The base memory structure is a hypernetwork, DAGs are optional
-overlays for ordered workflows, evidence chains, or execution traces.
+# health & trust
+recall beliefs
+recall calibration
+recall maintenance --derive
 
-## Daemon
-
-Run one quiet maintenance pass:
-
-```bash
-recall daemon run-once
-recall daemon run-once --derive
-```
-
-Run continuously:
-
-```bash
+# daemon
+recall daemon run-once [--derive]
 recall daemon run --interval-ms 60000
+
+# secrets (encrypted side graph, explicit confirmation required)
+printf 'password\nsecret-value' | recall secrets save \
+  --title "service token" --confirm-secret-save --password-stdin --value-stdin
 ```
 
-Generate or install a macOS LaunchAgent plist:
+Run `recall help` for the full command surface, or see the
+[CLI & TUI reference](docs/05_CLI_TUI.md).
+
+## Benchmarks
+
+Recall ships a reproducible public benchmark — a synthetic corpus in a
+throwaway database, measuring latency and throughput across the operational
+surfaces (`admit_write`, `search`, `semantic`, `compile`, paging, daemon and
+operator passes, secrets):
 
 ```bash
-recall daemon plist
-recall daemon install
-recall daemon service-status
-recall daemon uninstall
+npm run bench:public
 ```
 
-`daemon install` writes the plist only. Loading or unloading with `launchctl`
-remains an explicit user action.
+Numbers vary by machine; the harness is the claim, not a leaderboard. See
+[Public Benchmark](docs/19_PUBLIC_BENCHMARK.md) for methodology.
 
 ## Documentation
 
+Start with the [docs index](docs/README.md) — it routes by purpose and by
+audience. Highlights:
+
+- [Installation Guide](docs/11_INSTALLATION.md)
 - [Architecture](docs/01_ARCHITECTURE.md)
-- [Strict Write Schema](docs/02_WRITE_SCHEMA.md)
-- [Tagging And Subgraphs](docs/03_TAGGING_AND_SUBGRAPHS.md)
+- [Strict Write Schema](docs/02_WRITE_SCHEMA.md) — the `recall.write.v1` contract
 - [Context Compiler](docs/04_CONTEXT_COMPILER.md)
-- [CLI And TUI](docs/05_CLI_TUI.md)
-- [Hyperedge Programs](docs/06_HYPEREDGE_PROGRAMS.md)
-- [Evals](docs/07_EVALS.md)
-- [Installation](docs/11_INSTALLATION.md)
+- [LLM Integration Guide](docs/LLM_INTEGRATION.md) · [LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md)
 - [Secrets Side Graph](docs/12_SECRETS_SIDE_GRAPH.md)
-- [Daemon, MCP, Semantic Search, And Subgraphs](docs/13_DAEMON_MCP_SEMANTIC_SUBGRAPHS.md)
-- [Addressable Cells And Hypernetworks](docs/14_ADDRESSABLE_CELLS_AND_HYPERNETWORKS.md)
-- [LLM Managed Memory](docs/15_LLM_MANAGED_MEMORY.md)
-- [Derivation Closure](docs/16_DERIVATION_CLOSURE.md)
-- [LLM Integration Guide](docs/LLM_INTEGRATION.md)
-- [LLM System Prompt](docs/LLM_SYSTEM_PROMPT.md)
+- [Daemon, MCP & Semantic Search](docs/13_DAEMON_MCP_SEMANTIC_SUBGRAPHS.md)
+- [Public Benchmark](docs/19_PUBLIC_BENCHMARK.md)
 
 ## Development
 
 ```bash
 npm install
-npm run build
-npm test
+npm run build     # tsc
+npm test          # 83 unit/integration tests
+npm run e2e       # 94 end-to-end checks across user + agent workflows
+npm run smoke     # init + status on a throwaway db
 ```
 
-
-## Project Status
-
-Recall is an early working runtime foundation. It is suitable for local
-experimentation and integration work, but it should not claim production-grade
-or state-of-the-art behavior without external benchmarks and deployment review.
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Keep changes schema-first, small,
+tested, and aligned with the single-runtime architecture. A good first PR
+runs `npm test && npm run e2e` clean. The [Roadmap](ROADMAP.md) lays out
+direction by ring — Foundation, Runtime, and Interfaces. Working in this repo
+with an AI agent? Point it at [AGENTS.md](AGENTS.md).
 
 ## Security
 
 Read [SECURITY.md](SECURITY.md) before using Recall with sensitive data.
-
 Important defaults:
 
-- runtime databases and logs are ignored by git
-- primary graph writes reject secret-looking content
+- runtime databases and logs are git-ignored
+- primary-graph writes reject secret-looking content
 - encrypted secret saves require explicit confirmation
-- hyperedge programs are sandboxed declared operations, not arbitrary code
+- primary-graph writes are schema-validated and rollbackable
 
-## Contributing
+Report vulnerabilities via GitHub Security Advisories — see the policy for
+details.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Keep changes schema-first, small,
-tested, and aligned with the single-runtime architecture.
+## Project status
+
+Recall is an early working runtime foundation. It is suitable for local
+experimentation and integration work, and it deliberately does **not** claim
+production-grade or state-of-the-art behavior without external benchmarks and
+deployment review. Interfaces may change before a stable release. Treat
+compiled context packets as evidence, not unquestionable truth — which is
+exactly how Recall is designed to be used.
+
+## Citation
+
+If Recall helps your work, please cite it — see [CITATION.cff](CITATION.cff)
+or use GitHub's "Cite this repository" button.
 
 ## License
 
-Recall is licensed under the [Apache License 2.0](LICENSE).
+Recall is licensed under the [Apache License 2.0](LICENSE). See
+[NOTICE](NOTICE).
+
+<div align="center">
+<br/>
+<sub>Built for agents that should <strong>remember responsibly</strong>.</sub>
+</div>

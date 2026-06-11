@@ -14,7 +14,7 @@ Recall includes:
 - provenance and source quality
 - stale memory detection
 - autonomous maintenance loop
-- adapter signal ingestion
+- connector signal ingestion
 - graph health diagnostics
 - context boot/focus packets
 
@@ -49,7 +49,7 @@ Clean improvements:
 
 - COS state lives in the same graph as CC evidence
 - rollback applies to all durable write kinds
-- session state compiles into LLM packets instead of being pasted wholesale
+- session state compiles into LLM packets instead of being copied wholesale
 - operational pressure uses confidence, uncertainty, concern, and importance
 
 ## Verification Workflow

@@ -22,7 +22,7 @@ the CLI/TUI. It should give the LLM concise compiled context, not a memory dump.
 Recall rebuilds three proven idea families behind one public runtime:
 
 - graph-backed cognition: witnesses, beliefs, contradictions, provenance,
-  adapters, autonomous loop.
+  connectors, autonomous loop.
 - operational continuity: objectives, tasks, checkpoints, rollbackable writes,
   firewall/admission, MCP portability, cross-session continuity.
 - verification-oriented workflow: map, approximate, allocate, verify,
@@ -50,11 +50,11 @@ Recall is a local-first memory kernel with:
 - Evidence-weighted beliefs.
 - Contradiction and stale-memory detection.
 - Robust tagging for subgraph composition.
-- Programmable hyperedges for controlled extra behavior.
+- Sandboxed declared graph operations for controlled extra behavior.
 - Word-budget context compiler.
 - CLI for automation and inspection.
 - TUI for human review.
-- MCP/adapter bridge for cross-agent use.
+- MCP/connector bridge for cross-agent use.
 - Background daemon that is quiet unless asked.
 
 ## Milestones
@@ -62,7 +62,8 @@ Recall is a local-first memory kernel with:
 ### Phase 0: Repo Plan
 
 - Create clean repo folder.
-- Capture architecture, schema, CLI/TUI, compiler, and hyperedge program plan.
+- Capture architecture, schema, CLI/TUI, compiler, and declared graph operation
+  plan.
 - Write README only after the working skeleton stabilizes.
 
 ### Phase 1: Core Schema
@@ -102,12 +103,12 @@ Recall is a local-first memory kernel with:
 
 - Implement quiet inspection dashboard.
 - Show beliefs, tasks, conflicts, stale memories, write queue, rollback journal,
-  subgraphs, and hyperedge programs.
+  subgraphs, and declared graph operations.
 
-### Phase 5: Hyperedge Programs
+### Phase 5: Declared Graph Operations
 
 - Implement sandboxed program registration.
-- Attach programs to hyperedges by typed inputs and outputs.
+- Attach declared operations to typed graph inputs and outputs.
 - Require deterministic mode by default.
 - Require permissions for side effects.
 

@@ -1,4 +1,4 @@
-# Addressable Cells And Hypernetworks
+# Addressable Cells And Graph Views
 
 Recall graph nodes are addressable cells.
 
@@ -16,12 +16,12 @@ Facet tags are optional on write. Recall derives missing address parts from:
 - content title
 - provenance timestamp
 
-## Hypernetwork Rule
+## General Graph Rule
 
-The base Recall hypernetwork is general. It may contain cycles, contradictions,
-reciprocal links, n-ray connections, and programmable hyperedges.
+The base Recall graph is general. It may contain cycles, contradictions,
+reciprocal links, and typed multi-party connections.
 
-Do not make the whole hypernetwork a DAG.
+Do not make the whole graph a DAG.
 
 ## Optional DAG Overlays
 
@@ -30,11 +30,11 @@ DAGs are optional overlays for specific ordered processes:
 - execution plans
 - evidence pipelines
 - verification chains
-- adapter refresh sequences
+- connector refresh sequences
 - reproducible workflow traces
 
-DAG overlays point at addressable cells. They are views over the hypernetwork,
-not replacements for it.
+DAG overlays point at addressable cells. They are views over the graph, not
+replacements for it.
 
 Implemented commands:
 
@@ -59,7 +59,7 @@ Overlay shape:
 }
 ```
 
-## Holonomy Witnesses
+## Consistency Witnesses
 
 When a DAG overlay has multiple comparable paths between addressable cells,
 Recall can check whether path transport is consistent.
@@ -77,6 +77,6 @@ The current implementation returns analysis JSON with:
 - `cycles`
 - `witnesses`
 
-Witnesses identify comparable multi-path transports whose signatures differ.
+Witnesses identify comparable multi-path checks whose signatures differ.
 With `--derive`, those witnesses and concerns enter the normal admission path as
 addressable graph cells.

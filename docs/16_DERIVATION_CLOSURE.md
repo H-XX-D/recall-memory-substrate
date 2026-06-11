@@ -33,12 +33,35 @@ Closure is therefore not "the system writes anything it thinks." Closure means
 the system can propose its own durable evidence, and the normal write policy
 decides whether that evidence becomes memory.
 
+## Agent Close/Derive Procedure
+
+Agents should use close/derive as a disciplined loop:
+
+```text
+compile ID-first context
+  -> expand only necessary handles with recall_cell
+  -> run the work or runtime analysis
+  -> derive only outputs that should become future evidence
+  -> inspect accepted / duplicateOf / rejected / requires_review state
+  -> reference accepted cells by ID or address in later writes
+```
+
+Do not treat stdout, a program run table, an eval transcript, or a daemon
+summary as durable memory until the derived proposal is accepted or mapped to an
+existing cell with `duplicateOf`. Rejected, review-blocked, or secret-looking
+outputs must not be copied into another memory path to force persistence.
+
+When a derivation returns `duplicateOf`, reuse the existing cell ID or address.
+When it returns a new accepted cell, link future claims to that cell rather than
+copying the derived body. When exact derived payload details are needed later,
+retrieve them lazily with MCP `recall_cell` or CLI `recall cell show`.
+
 ## Derivation Identity
 
 Derived writes are keyed before admission:
 
-- program output: program id, hyperedge id, and deterministic output payload;
-- DAG holonomy: overlay id, endpoints, signatures, and witness/concern kind;
+- operation output: operation id and deterministic output payload;
+- DAG consistency: overlay id, endpoints, signatures, and witness/concern kind;
 - eval output: suite name, pass/fail state, score, and case results.
 
 Admission stores the key in `derivation_index` in the same transaction as the
@@ -53,13 +76,13 @@ node archives the cell, removes attached relations, and clears its
 active cell. Store migration also removes stale derivation keys that point to
 missing or non-active nodes.
 
-## Program Runs
+## Operation Runs
 
-Hyperedge programs are sandboxed `recall.program.v1` specs attached to graph
-relationships. Their implemented operations include `score`, `emit_witness`,
-and `tag_projection`.
+Declared graph operations are sandboxed `recall.program.v1` specs attached to
+graph relationships. Their implemented operations include `score`,
+`emit_witness`, and `tag_projection`.
 
-Program output closes the loop only by becoming a proposal:
+Operation output closes the loop only by becoming a proposal:
 
 ```text
 recall program run <program-id>
@@ -71,14 +94,14 @@ recall program run <program-id> --derive
   -> later compiler/MCP retrieval
 ```
 
-Programs should not write graph rows directly. Failed program execution is not
-yet automatically converted into a failure proposal; that is a future closure
-path because failures can be relevant to trust, verification, or workflow
-state.
+Declared operations should not write graph rows directly. Failed operation
+execution is not yet automatically converted into a failure proposal; that is a
+future closure path because failures can be relevant to trust, verification, or
+workflow state.
 
-## DAG Holonomy Witnesses
+## DAG Consistency Witnesses
 
-DAG overlays are optional ordered views over the general hypernetwork. They are
+DAG overlays are optional ordered views over the general graph. They are
 used for workflows, evidence chains, execution traces, and verification routes;
 they do not replace the cyclic base graph.
 
@@ -86,7 +109,7 @@ they do not replace the cyclic base graph.
 topological order, and multi-path transport disagreement. Stored CLI/MCP DAG
 overlays are rejected if cyclic; cycle-concern proposal support exists in the
 derivation builder for runtime analysis objects, but normal stored overlays are
-kept acyclic. Holonomy analysis closes through witnesses:
+kept acyclic. Consistency analysis closes through witnesses:
 
 ```text
 recall dag analyze <overlay-id> --derive
@@ -178,6 +201,12 @@ interfaces:
 MCP is a surface over the same runtime, not a second memory API. Agents can read
 derived cells and submit new proposals, but accepted memory remains governed by
 the shared schema, admission, firewall, provenance, and rollback rules.
+
+Retrieval remains ID-first after closure. A derived witness may appear in a
+compiled packet as a compact line, relation handle, and `expansion_handles`
+entry. Inline derived payloads and detailed parameter metadata are not included
+unless the caller explicitly asks for them, and agents should prefer one-handle
+expansion before requesting a self-contained packet.
 
 ## What Is Not Automatic
 

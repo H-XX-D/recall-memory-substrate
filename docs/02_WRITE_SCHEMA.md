@@ -8,7 +8,7 @@ All LLM writes enter Recall as `WriteProposal` records.
 {
   "schema_version": "recall.write.v1",
   "actor": {
-    "kind": "llm|human|daemon|adapter|program",
+    "kind": "llm|human|daemon|connector|program",
     "id": "codex",
     "display": "Codex"
   },
@@ -49,7 +49,7 @@ All LLM writes enter Recall as `WriteProposal` records.
   },
   "provenance": {
     "created_at": "ISO-8601",
-    "origin": "human|llm|daemon|adapter|program|external",
+    "origin": "human|llm|daemon|connector|program|external",
     "produced_by": "agent-or-tool-id",
     "verification": "unverified|checked|tested|external",
     "signature_status": "unsigned|signed|verified"
