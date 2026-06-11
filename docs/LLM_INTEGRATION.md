@@ -271,3 +271,24 @@ user task
 
 Use CLI/TUI for inspection, correction, rollback, and explicit human actions.
 Use MCP for the routine agent path.
+
+## Making the Loop Stick: Enforcement Hooks
+
+The contract above tells an agent how to use Recall. It does not keep the
+agent using it: long sessions drift, and a system prompt fades like any
+other instruction. Recall ships hook templates (in
+[`python/hooks/`](../python/hooks/)) that make the loop ambient instead of
+announced once:
+
+- **UserPromptSubmit** prepends a tiny Recall status header to every
+  prompt, so each turn arrives with a fresh pointer to what the graph
+  holds (`recall_inject_context.py.sample`).
+- **Stop** prompts for writeback before a turn ends with unsaved findings
+  (`recall_writeback_reminder.py.sample`).
+- **PreToolUse guard** is the hard tier: it blocks substantive mutations
+  (Edit, Write, destructive Bash) unless a recent Recall cell records the
+  rationale for the change (`recall_pretooluse_guard.py.sample`).
+
+The soft layers nudge; the guard enforces. Setup, decision rules,
+configuration controls, and compliance auditing live in
+[Enforcing Recall Usage](17_ENFORCING_USAGE.md).
