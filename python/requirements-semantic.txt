@@ -1,0 +1,17 @@
+# Optional dependencies for the real-embedding backend (mpnet:v1).
+#
+# Install with: pip install -r python/requirements-semantic.txt
+#
+# Enables:
+#   - python/scripts/recall_semantic_real.py — standalone batched indexer
+#   - python/scripts/recall_mpnet_embedder.py — RECALL_EMBEDDING_COMMAND adapter
+#   - python/scripts/vector_rag_bench.py — competitive benchmark vs vector RAG
+#
+# Without these, Recall still runs fine on the default hash:v1 backend.
+# The core tools (helper, peek, diff, router, hooks, tracker) are
+# stdlib-only and need nothing here.
+
+# Floors chosen to match what was verified at release time.
+# Upper bounds left open so transitive security updates can land.
+sentence-transformers>=2.2.2
+numpy>=1.24.0

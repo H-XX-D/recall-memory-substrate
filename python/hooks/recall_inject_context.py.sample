@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""
+recall_inject_context.py.sample — UserPromptSubmit hook that injects a
+compact Recall status header before every user turn.
+
+The problem this solves: LLMs forget that Recall exists as the session
+grows. System-prompt instructions to "use Recall first" fade as the
+context window fills with other content. Without continuous reminders,
+agents drift toward generating answers from in-context information
+rather than consulting persistent memory.
+
+This hook makes Recall presence AMBIENT: every user prompt arrives with
+a tiny status header showing what Recall has on the topic. The agent
+literally cannot miss it.
+
+WHAT IT DOES.
+
+On every user message:
+1. Take the user's prompt text
+2. Run `recall_router.py --explain-only` to detect what kind of query it is
+3. If the router thinks the query maps to a Recall operation, prepend a
+   compact header to the prompt:
+
+       [recall: 3 cells touch this topic. Top hit: `4ae7579e` "L7 closure".
+        Try: `recall_peek 4ae7579e` or `recall_router.py "<query>"`]
+
+4. Otherwise prepend a lighter header:
+
+       [recall: graph state — 428 cells, 12 contradictions flagged, last
+        write 2h ago. `recall_health_peek.py` for triage.]
+
+The injection is small (typically 100-200 bytes) but makes Recall
+presence persistent across the entire session.
+
+INSTALLATION.
+
+This script is a TEMPLATE — adapt for your specific agent runtime.
+
+For Claude Code (settings.json):
+
+    {
+      "hooks": {
+        "UserPromptSubmit": [
+          {
+            "command": "python3 /path/to/python/hooks/recall_inject_context.py.sample"
+          }
+        ]
+      }
+    }
+
+For other runtimes, wire this into whatever pre-prompt-submission hook
+the runtime provides.
+
+INPUT.
+
+Receives the user's prompt text via stdin (matching Claude Code's
+UserPromptSubmit hook convention). Falls back to argv[1] if stdin is
+empty.
+
+OUTPUT.
+
+Prints a context block to stdout that gets prepended to the user's
+prompt before the model sees it. Empty stdout = no injection (the
+hook is silent).
+
+CONFIGURATION.
+
+Environment variables:
+- RECALL_DB: path to Recall database (default: ~/.recall/recall.sqlite3)
+- RECALL_HOOK_MAX_HITS: max cells to mention in injection (default 3)
+- RECALL_HOOK_DISABLE: set to any non-empty value to disable injection
+- RECALL_HOOK_VERBOSE: set to any non-empty value to include more detail
+
+DESIGN INTENT.
+
+The injection is deliberately:
+- SHORT: 100-200 bytes typical, so it doesn't dominate the prompt
+- INFORMATIVE: includes cell IDs the agent can directly use
+- ACTION-ORIENTED: every header suggests a specific tool to invoke
+- NON-BLOCKING: if Recall is unavailable, the hook silently passes
+  through (the user's prompt isn't blocked or modified)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+MAX_HITS = int(os.environ.get("RECALL_HOOK_MAX_HITS", "3"))
+DISABLED = bool(os.environ.get("RECALL_HOOK_DISABLE", ""))
+VERBOSE = bool(os.environ.get("RECALL_HOOK_VERBOSE", ""))
+
+SCRIPT_DIR = Path(__file__).parent.parent / "scripts"
+
+
+def _get_user_prompt() -> str:
+    """Read user prompt from stdin (or argv as fallback)."""
+    if not sys.stdin.isatty():
+        data = sys.stdin.read().strip()
+        if data:
+            # Some hook runtimes pass JSON; some pass raw text
+            try:
+                parsed = json.loads(data)
+                if isinstance(parsed, dict):
+                    return parsed.get("prompt") or parsed.get("text") or data
+            except json.JSONDecodeError:
+                pass
+            return data
+    if len(sys.argv) > 1:
+        return " ".join(sys.argv[1:])
+    return ""
+
+
+def _route_query(prompt: str) -> dict | None:
+    """Use recall_router to detect what kind of query this is."""
+    router = SCRIPT_DIR / "recall_router.py"
+    if not router.exists():
+        return None
+    try:
+        result = subprocess.run(
+            ["python3", str(router), prompt, "--explain-only", "--format", "json",
+             "--db", DEFAULT_DB],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        return json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+
+
+def _peek_match_top(query_arg: str, limit: int) -> list[dict]:
+    """Run recall_peek --match and return top matches."""
+    peek = SCRIPT_DIR / "recall_peek.py"
+    if not peek.exists():
+        return []
+    try:
+        result = subprocess.run(
+            ["python3", str(peek), "--match", query_arg,
+             "--limit", str(limit), "--format", "json",
+             "--db", DEFAULT_DB],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        if result.returncode != 0:
+            return []
+        data = json.loads(result.stdout)
+        return data.get("results", [])
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return []
+
+
+def _graph_stats() -> dict | None:
+    """Fast graph-state probe via direct SQLite (read-only)."""
+    import sqlite3
+    if not Path(DEFAULT_DB).exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro", uri=True)
+        cells = conn.execute("SELECT COUNT(*) FROM graph_nodes WHERE status = 'active'").fetchone()[0]
+        # Simple recency probe
+        recent = conn.execute(
+            "SELECT created_at FROM graph_nodes ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        last_write = recent[0] if recent else None
+        conn.close()
+        return {"cells": cells, "last_write": last_write}
+    except sqlite3.Error:
+        return None
+
+
+def _build_header(prompt: str) -> str:
+    """Build the injection header. Returns empty string if no injection warranted."""
+    if DISABLED:
+        return ""
+    if not prompt or len(prompt.strip()) < 3:
+        return ""
+
+    routing = _route_query(prompt)
+    stats = _graph_stats()
+
+    if not stats or stats.get("cells", 0) == 0:
+        # Empty graph — hint at first-use
+        return (
+            "[recall: graph is empty. Write durable findings via "
+            "`recall_helper.py --kind <kind> --title ... --confidence <0..1>`.]"
+        )
+
+    if routing and routing.get("tool") == "peek-match" and routing.get("arg"):
+        # Query looks like an identifier lookup — peek for matches
+        hits = _peek_match_top(routing["arg"], MAX_HITS)
+        if hits:
+            top = hits[0]
+            hit_summary = f"top: `{top['id'][:8]}` \"{top.get('title','')[:60]}\""
+            return (
+                f"[recall: {len(hits)} cell(s) match `{routing['arg']}`. "
+                f"{hit_summary}. "
+                f"Run `recall_peek.py {top['id'][:8]}` for details, or "
+                f"`recall_router.py \"{prompt[:40]}\" --fallback` for broader context.]"
+            )
+
+    if routing and routing.get("tool") == "diff":
+        return (
+            f"[recall: temporal query detected. "
+            f"Run `recall_diff.py --since {routing.get('arg','1d')} --summary` "
+            f"to see changes; or `recall_router.py \"{prompt[:40]}\"` to auto-route.]"
+        )
+
+    if routing and routing.get("tool") == "health":
+        return (
+            "[recall: health query detected. Run `recall_health_peek.py` for "
+            "compact graph-state summary (stats, warnings, contradictions, stale).]"
+        )
+
+    # Generic fallback — show graph stats so Recall presence is visible
+    last_write_short = ""
+    if stats.get("last_write"):
+        last_write_short = f" Last write: {stats['last_write'][:10]}."
+    return (
+        f"[recall: {stats['cells']} active cells available."
+        f"{last_write_short} "
+        f"Run `recall_router.py \"{prompt[:40]}\" --fallback` for auto-routed context, "
+        f"or `recall_health_peek.py` for graph state.]"
+    )
+
+
+def main() -> int:
+    prompt = _get_user_prompt()
+    header = _build_header(prompt)
+    if header:
+        # Prepend header to whatever the user typed
+        # The hook runtime may interpret this differently depending on agent
+        print(header)
+        if VERBOSE:
+            print("", file=sys.stderr)
+            print(f"[hook] injected: {header}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

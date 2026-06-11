@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""
+recall_writeback_reminder.py.sample — Stop / SubagentStop hook that
+reminds the agent to write back substantive findings before ending.
+
+The problem this solves: even when agents READ from Recall, they often
+FAIL TO WRITE durable findings back. Decisions get made, contradictions
+get noticed, bugs get root-caused — and the agent moves on without
+persisting the result. Next session, the same agent rediscovers the
+same things from scratch.
+
+This hook fires when the agent is about to stop (end its turn or
+subagent task) and emits a reminder if the conversation contained
+signals suggesting substantive findings were made.
+
+WHAT IT DOES.
+
+On Stop or SubagentStop:
+1. Read the recent conversation context (last N turns, via stdin if the
+   hook runtime provides it)
+2. Scan for signals suggesting a writeback is warranted:
+   - Words like "decided", "chose", "found", "fixed", "discovered",
+     "concluded", "root cause", "the fix is"
+   - Numbers / measurements / specific values
+   - File path mentions paired with action verbs
+3. If signals are detected, emit a reminder asking the agent to write a
+   Recall cell before fully stopping
+4. Otherwise emit nothing (silent pass-through)
+
+INSTALLATION.
+
+For Claude Code (settings.json):
+
+    {
+      "hooks": {
+        "Stop": [
+          {
+            "command": "python3 /path/to/python/hooks/recall_writeback_reminder.py.sample"
+          }
+        ],
+        "SubagentStop": [
+          {
+            "command": "python3 /path/to/python/hooks/recall_writeback_reminder.py.sample"
+          }
+        ]
+      }
+    }
+
+For other runtimes, wire into whatever post-turn / end-of-task hook
+the runtime provides.
+
+DESIGN INTENT.
+
+The reminder is:
+- TRIGGERED ONLY ON SUBSTANTIVE TURNS: silent on trivial Q&A
+- ACTIONABLE: includes a concrete write-helper invocation template
+- NON-BLOCKING: never prevents the agent from stopping; it just suggests
+- IDEMPOTENT: if the agent already wrote a cell this turn, the hook
+  detects that and doesn't double-prompt
+
+CONFIGURATION.
+
+- RECALL_DB: path to Recall database (default: ~/.recall/recall.sqlite3)
+- RECALL_WRITEBACK_DISABLE: set to non-empty to disable the reminder
+- RECALL_WRITEBACK_FORCE: set to non-empty to always emit the reminder
+  (useful for training the agent in early sessions)
+- RECALL_WRITEBACK_VERBOSE: set to non-empty for debug output
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+DISABLED = bool(os.environ.get("RECALL_WRITEBACK_DISABLE", ""))
+FORCE = bool(os.environ.get("RECALL_WRITEBACK_FORCE", ""))
+VERBOSE = bool(os.environ.get("RECALL_WRITEBACK_VERBOSE", ""))
+
+# Phrases that suggest substantive findings worth persisting
+SUBSTANTIVE_SIGNALS = (
+    r"\bdecided\b", r"\bchose\b", r"\bfound\b", r"\bfixed\b",
+    r"\bdiscovered\b", r"\bconcluded\b", r"\broot cause\b",
+    r"\bthe fix is\b", r"\bturns out\b", r"\bthe answer is\b",
+    r"\bthe issue (?:was|is)\b", r"\bthe solution\b",
+    r"\bworking now\b", r"\bnow works\b", r"\bbug\b", r"\bregression\b",
+    r"\barchitecture\b", r"\bdesign decision\b", r"\bapproach\b",
+    r"\bcommit\b", r"\bmerged\b", r"\bshipped\b",
+    r"\bbenchmark(?:ed)?\b", r"\bmeasured\b", r"\bconfirmed\b",
+    r"\brefactor(?:ed)?\b", r"\boptim(?:ized|ization)\b",
+)
+SUBSTANTIVE_PAT = re.compile("|".join(SUBSTANTIVE_SIGNALS), re.IGNORECASE)
+
+
+def _get_recent_context() -> str:
+    """Read recent conversation context from stdin (if hook runtime provides it)."""
+    if sys.stdin.isatty():
+        return ""
+    try:
+        data = sys.stdin.read()
+        if not data.strip():
+            return ""
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, dict):
+                # Common shapes from agent runtimes
+                return (
+                    parsed.get("transcript")
+                    or parsed.get("conversation")
+                    or parsed.get("text")
+                    or data
+                )
+        except json.JSONDecodeError:
+            pass
+        return data
+    except Exception:
+        return ""
+
+
+def _recently_wrote_to_recall(window_seconds: int = 300) -> bool:
+    """Check if a Recall write happened in the last N seconds (default 5 min).
+
+    If yes, the agent already wrote back; no need to remind.
+    """
+    if not Path(DEFAULT_DB).exists():
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro", uri=True)
+        # graph_nodes.created_at is ISO-8601; compare to threshold
+        cutoff_epoch = int(time.time()) - window_seconds
+        cutoff_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff_epoch))
+        row = conn.execute(
+            "SELECT 1 FROM graph_nodes WHERE created_at >= ? LIMIT 1",
+            (cutoff_iso,),
+        ).fetchone()
+        conn.close()
+        return row is not None
+    except sqlite3.Error:
+        return False
+
+
+def _has_substantive_signals(text: str) -> tuple[bool, list[str]]:
+    """Detect whether text contains substantive-finding language."""
+    if not text:
+        return False, []
+    matches = SUBSTANTIVE_PAT.findall(text.lower())
+    # Dedupe + take up to 3 distinct signals
+    seen: set[str] = set()
+    unique: list[str] = []
+    for m in matches:
+        if m not in seen:
+            seen.add(m)
+            unique.append(m)
+        if len(unique) >= 3:
+            break
+    return len(unique) > 0, unique
+
+
+def _build_reminder(signals: list[str]) -> str:
+    """Compose the writeback-reminder message."""
+    signal_text = ", ".join(f"`{s}`" for s in signals) if signals else "substantive content"
+    return (
+        f"[recall reminder] This turn contained {signal_text} — consider writing "
+        f"the finding to Recall before stopping, so the next session has it.\n"
+        f"Template:\n"
+        f'  python3 python/scripts/recall_helper.py \\\n'
+        f'    --kind <decision|lemma|risk|verification_result|reflection> \\\n'
+        f'    --title "<one-line summary>" \\\n'
+        f'    --body "<full finding with rationale>" \\\n'
+        f'    --confidence <0.5..0.95> \\\n'
+        f'    --topics "<topic1,topic2>" \\\n'
+        f'    --project "<project-name>" \\\n'
+        f'    --admit\n'
+        f"\n"
+        f"To suppress this reminder for trivial turns, set "
+        f"RECALL_WRITEBACK_DISABLE=1 in your environment."
+    )
+
+
+def main() -> int:
+    if DISABLED:
+        return 0
+
+    transcript = _get_recent_context()
+
+    if not FORCE:
+        # Skip if no substantive signals
+        is_substantive, signals = _has_substantive_signals(transcript)
+        if not is_substantive:
+            if VERBOSE:
+                print("[writeback-hook] no substantive signals; silent", file=sys.stderr)
+            return 0
+
+        # Skip if a write happened recently (within 5 min — likely this turn)
+        if _recently_wrote_to_recall():
+            if VERBOSE:
+                print("[writeback-hook] recent Recall write detected; silent",
+                      file=sys.stderr)
+            return 0
+    else:
+        # Forced mode — extract signals if any, but emit regardless
+        _, signals = _has_substantive_signals(transcript)
+
+    reminder = _build_reminder(signals)
+    print(reminder)
+    if VERBOSE:
+        print(f"[writeback-hook] reminder emitted ({len(signals)} signals)",
+              file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

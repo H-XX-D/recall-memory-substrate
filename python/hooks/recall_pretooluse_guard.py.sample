@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""
+recall_pretooluse_guard.py.sample — HARD enforcement PreToolUse hook.
+
+This is the "blocking" tier of Recall enforcement. It prevents the agent
+from performing substantive mutations (Edit, Write, destructive Bash,
+NotebookEdit) UNLESS a recent Recall cell exists that records the
+rationale for the change. If no such rationale is found, the hook
+blocks the tool call with an actionable message telling the agent
+exactly what to write to proceed.
+
+WHY THIS EXISTS.
+
+Soft enforcement (the `recall_inject_context` and `recall_writeback_reminder`
+hooks) makes Recall ambient and reminds the agent at end-of-turn. Both
+are useful but neither *guarantees* a rationale is recorded — the agent
+can ignore them. Hard enforcement is the regulated-environment story:
+if the agent edits production code without a recorded decision, the
+edit doesn't happen.
+
+WHAT IT GUARDS.
+
+By default it guards:
+  - Edit, Write, NotebookEdit (any file mutation)
+  - Bash commands matching a destructive pattern (rm -rf, git push --force,
+    git reset --hard, git branch -D, DROP TABLE, TRUNCATE, etc.)
+
+It does NOT guard:
+  - Read, Grep, Glob, LS (read-only)
+  - Bash commands that are clearly read-only (ls, cat, grep, git status,
+    git log, git diff, etc.)
+  - Operations on allowlisted paths (.recall/*, /tmp/*, test fixtures,
+    and configurable via RECALL_GUARD_ALLOWLIST)
+
+DECISION RULE.
+
+A tool call is APPROVED if any of these hold:
+  1. RECALL_GUARD_BYPASS=1 is set in the environment (escape hatch)
+  2. The target path matches the allowlist
+  3. A Recall cell of an appropriate kind (decision, task, hypothesis,
+     lemma, risk) was written in the last RECALL_GUARD_WINDOW seconds
+     (default 1800 = 30 min) AND mentions the target path, a parent
+     directory, the project name, or a topic that matches the file
+  4. The Recall DB doesn't exist yet (cold-start grace; logs a warning)
+
+Otherwise, the call is BLOCKED with exit code 2 and a structured
+stderr message that:
+  - Says what was blocked and why
+  - Shows the exact recall_helper.py invocation to unblock
+  - Names the file path / command being guarded
+  - Suggests minimum acceptable kind + topics
+
+INSTALLATION.
+
+For Claude Code (settings.json):
+
+    {
+      "hooks": {
+        "PreToolUse": [
+          {
+            "matcher": "Edit|Write|NotebookEdit|Bash",
+            "command": "python3 /path/to/python/hooks/recall_pretooluse_guard.py.sample"
+          }
+        ]
+      }
+    }
+
+The `matcher` field is a regex matched against the tool name. Listing
+only the tools we guard means the hook isn't even invoked for Read /
+Grep / etc., which keeps overhead low.
+
+CONFIGURATION.
+
+  RECALL_DB              — path to DB (default: ~/.recall/recall.sqlite3)
+  RECALL_GUARD_BYPASS    — set to non-empty to disable guarding entirely
+  RECALL_GUARD_WINDOW    — seconds to look back for rationale (default 1800)
+  RECALL_GUARD_ALLOWLIST — comma-separated path prefixes that are always
+                           allowed (e.g. "/tmp,.recall,docs/scratch")
+  RECALL_GUARD_PROJECT   — name of current project (used to match the
+                           project tag on rationale cells)
+  RECALL_GUARD_VERBOSE   — set to non-empty for debug output to stderr
+  RECALL_GUARD_DRY_RUN   — emit blocks to stderr but always exit 0
+                           (useful for trial deployment / training mode)
+
+DESIGN INTENT.
+
+The hook is:
+  - STRUCTURED: communicates the exact rationale-cell shape it needs
+  - ACTIONABLE: tells the agent the literal command to unblock
+  - SCOPED: only blocks the specific tools we asked it to guard
+  - AUDITABLE: every block is logged via verbose mode for review
+  - REVERSIBLE: dry-run mode lets you trial the policy before enforcing
+  - HUMAN-OVERRIDABLE: BYPASS env var is a documented escape hatch,
+    NOT a sneaky workaround — it's how you handle emergencies
+
+This hook is for organizations that need an audit trail saying "every
+mutation in this codebase had a recorded rationale." It's not for
+casual personal use; for that, the soft hooks are sufficient and the
+ceremony of this one becomes friction without payoff.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+BYPASS = bool(os.environ.get("RECALL_GUARD_BYPASS", ""))
+DRY_RUN = bool(os.environ.get("RECALL_GUARD_DRY_RUN", ""))
+WINDOW_SECONDS = int(os.environ.get("RECALL_GUARD_WINDOW", "1800"))
+ALLOWLIST = [p.strip() for p in os.environ.get("RECALL_GUARD_ALLOWLIST", "/tmp,.recall").split(",") if p.strip()]
+PROJECT = os.environ.get("RECALL_GUARD_PROJECT", "")
+VERBOSE = bool(os.environ.get("RECALL_GUARD_VERBOSE", ""))
+# Event log: every approve/block/bypass appended as JSONL. This is what
+# longitudinal_tracker.py reads to compute trajectories. Set to empty to disable.
+EVENT_LOG = os.environ.get(
+    "RECALL_GUARD_EVENT_LOG",
+    os.path.expanduser("~/.recall/guard_events.jsonl"),
+)
+
+
+def _log_event(outcome: str, tool: str, target: str, **extra) -> None:
+    """Append one guard-decision event to the event log. Best-effort —
+    a write failure here MUST NOT block or fail the tool call."""
+    if not EVENT_LOG:
+        return
+    try:
+        Path(EVENT_LOG).parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "outcome": outcome,        # approve | block | bypass | cold_start | dry_run
+            "tool": tool,
+            "target": (target or "")[:200],
+            "project": PROJECT,
+            "dry_run": DRY_RUN,
+            **extra,
+        }
+        with open(EVENT_LOG, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
+
+# Kinds that count as a valid rationale for a mutation
+RATIONALE_KINDS = ("decision", "task", "hypothesis", "lemma", "risk",
+                   "verification_result", "reflection", "blind_lock")
+
+# Bash subcommands considered destructive
+DESTRUCTIVE_BASH_PATTERNS = [
+    re.compile(r"\brm\s+-[rRfF]+\b", re.IGNORECASE),
+    re.compile(r"\brm\s+.*\b-r", re.IGNORECASE),
+    re.compile(r"\bgit\s+push\b.*--force\b", re.IGNORECASE),
+    re.compile(r"\bgit\s+push\s+-f\b", re.IGNORECASE),
+    re.compile(r"\bgit\s+reset\s+--hard\b", re.IGNORECASE),
+    re.compile(r"\bgit\s+branch\s+-D\b", re.IGNORECASE),
+    re.compile(r"\bgit\s+clean\s+-[fF]", re.IGNORECASE),
+    re.compile(r"\bgit\s+checkout\s+\.\b", re.IGNORECASE),
+    re.compile(r"\bDROP\s+TABLE\b", re.IGNORECASE),
+    re.compile(r"\bTRUNCATE\s+TABLE\b", re.IGNORECASE),
+    re.compile(r"\bdd\s+if=", re.IGNORECASE),
+    re.compile(r"\bmkfs\b", re.IGNORECASE),
+    re.compile(r":(){\s*:\|:&\s*};:", re.IGNORECASE),  # fork bomb
+]
+
+# Bash commands that are clearly read-only — exempt even if matched
+READ_ONLY_BASH = re.compile(
+    r"^\s*(ls|cat|head|tail|grep|find|git\s+(status|log|diff|show|branch\s*$|"
+    r"remote\s*$|config\s+--get|rev-parse)|ps|top|df|du|wc|file|stat|"
+    r"echo|pwd|which|whoami|uname|date|sleep)\b",
+    re.IGNORECASE,
+)
+
+
+def _read_hook_input() -> dict:
+    """Read the PreToolUse JSON payload from stdin.
+
+    Claude Code passes a JSON object describing the about-to-run tool
+    call. Shape: {tool_name: str, tool_input: dict, session_id?: str, ...}
+    """
+    if sys.stdin.isatty():
+        return {}
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            return {}
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+def _extract_target(payload: dict) -> tuple[str | None, str | None]:
+    """Return (file_path, bash_command) — either may be None.
+
+    Different tools express their target differently:
+      - Edit/Write/NotebookEdit: tool_input.file_path
+      - Bash: tool_input.command
+    """
+    tool = payload.get("tool_name", "")
+    inp = payload.get("tool_input", {}) or {}
+    if tool in ("Edit", "Write", "NotebookEdit"):
+        return inp.get("file_path"), None
+    if tool == "Bash":
+        return None, inp.get("command")
+    return None, None
+
+
+def _is_allowlisted(path: str) -> bool:
+    if not path:
+        return False
+    for prefix in ALLOWLIST:
+        if prefix and (path.startswith(prefix) or f"/{prefix}/" in path or path.endswith(prefix)):
+            return True
+    return False
+
+
+def _is_destructive_bash(cmd: str) -> bool:
+    if not cmd:
+        return False
+    if READ_ONLY_BASH.match(cmd.strip()):
+        return False
+    return any(p.search(cmd) for p in DESTRUCTIVE_BASH_PATTERNS)
+
+
+def _find_rationale(target_hint: str) -> dict | None:
+    """Query Recall for a recent rationale cell that mentions the target.
+
+    Returns the cell row (as dict) if found, else None.
+    """
+    if not Path(DEFAULT_DB).exists():
+        return {"_cold_start": True}
+    try:
+        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro", uri=True)
+        cutoff_epoch = int(time.time()) - WINDOW_SECONDS
+        cutoff_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff_epoch))
+        kinds_clause = ",".join("?" * len(RATIONALE_KINDS))
+        rows = conn.execute(
+            f"SELECT id, kind, title, body, created_at, tags_json FROM graph_nodes "
+            f"WHERE status='active' AND created_at >= ? AND kind IN ({kinds_clause}) "
+            f"ORDER BY created_at DESC LIMIT 50",
+            (cutoff_iso, *RATIONALE_KINDS),
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error as e:
+        if VERBOSE:
+            print(f"[guard] DB query error: {e}", file=sys.stderr)
+        return None
+
+    # Match logic: a rationale cell counts if the file path, its basename,
+    # its parent directory, the project name, or a relevant fragment
+    # appears in the cell's title, body, or tags.
+    needles = set()
+    if target_hint:
+        needles.add(target_hint.lower())
+        # basename + parent dir
+        p = Path(target_hint)
+        needles.add(p.name.lower())
+        if p.parent.name:
+            needles.add(p.parent.name.lower())
+        # strip extension
+        needles.add(p.stem.lower())
+    if PROJECT:
+        needles.add(PROJECT.lower())
+    # Drop tiny needles that would over-match
+    needles = {n for n in needles if len(n) >= 3}
+
+    for row in rows:
+        cell_id, kind, title, body, created_at, tags_json = row
+        haystack = f"{title}\n{body}\n{tags_json}".lower()
+        if any(n in haystack for n in needles):
+            return {
+                "id": cell_id, "kind": kind, "title": title,
+                "created_at": created_at, "matched_needle": next(
+                    (n for n in needles if n in haystack), None,
+                ),
+            }
+    return None
+
+
+def _emit_block_message(tool: str, target: str, kind_of_op: str) -> None:
+    """Write the block message to stderr — Claude Code shows this to the model."""
+    needles = []
+    if target:
+        p = Path(target) if not target.startswith(("git ", "rm ", "DROP")) else None
+        if p:
+            needles = [p.name, p.stem]
+        else:
+            needles = [target[:60]]
+    needle_hint = needles[0] if needles else "<topic>"
+    project_arg = f' --project "{PROJECT}"' if PROJECT else ""
+    print(
+        f"\n[recall guard] BLOCKED: {tool} on {target!r} requires a recorded "
+        f"rationale in Recall (last {WINDOW_SECONDS}s), and none was found.\n"
+        f"\n"
+        f"Why this is enforced: this codebase uses HARD enforcement of "
+        f"writeback discipline. Every {kind_of_op} must have a recorded "
+        f"rationale so the audit trail stays complete.\n"
+        f"\n"
+        f"To unblock, record the rationale FIRST, then retry the tool call:\n"
+        f"\n"
+        f"  python3 python/scripts/recall_helper.py \\\n"
+        f"    --kind decision \\\n"
+        f"    --title \"<one-line summary of WHY you are making this change>\" \\\n"
+        f"    --body \"<full rationale: what changes, why, what you considered>\" \\\n"
+        f"    --confidence 0.7 \\\n"
+        f"    --topics \"{needle_hint}\"{project_arg} \\\n"
+        f"    --admit\n"
+        f"\n"
+        f"If this {kind_of_op} is genuinely an emergency that cannot wait, "
+        f"set RECALL_GUARD_BYPASS=1 in your environment (this WILL be "
+        f"logged for review).",
+        file=sys.stderr,
+    )
+
+
+def main() -> int:
+    payload = _read_hook_input()
+    if not payload:
+        # No payload — probably invoked manually. Pass through.
+        return 0
+
+    tool = payload.get("tool_name", "")
+    file_path, bash_cmd = _extract_target(payload)
+
+    if BYPASS:
+        if VERBOSE:
+            print(f"[guard] BYPASS active; allowing {tool}", file=sys.stderr)
+        _log_event("bypass", tool, file_path or bash_cmd or "")
+        return 0
+
+    # Allowlist check
+    if file_path and _is_allowlisted(file_path):
+        if VERBOSE:
+            print(f"[guard] allowlisted path: {file_path}", file=sys.stderr)
+        _log_event("approve", tool, file_path, reason="allowlist")
+        return 0
+
+    # Decide whether this tool call warrants guarding
+    guard_needed = False
+    target_hint = None
+    kind_of_op = ""
+
+    if tool in ("Edit", "Write", "NotebookEdit") and file_path:
+        guard_needed = True
+        target_hint = file_path
+        kind_of_op = "file mutation"
+    elif tool == "Bash" and bash_cmd and _is_destructive_bash(bash_cmd):
+        guard_needed = True
+        target_hint = bash_cmd[:200]
+        kind_of_op = "destructive command"
+
+    if not guard_needed:
+        return 0
+
+    rationale = _find_rationale(target_hint or "")
+
+    if rationale and rationale.get("_cold_start"):
+        print(f"[guard] Recall DB not initialized at {DEFAULT_DB}; allowing "
+              f"{tool} (cold start). Initialize with `recall init` to enable "
+              f"enforcement.", file=sys.stderr)
+        _log_event("cold_start", tool, target_hint or "")
+        return 0
+
+    if rationale:
+        if VERBOSE:
+            print(f"[guard] approved: rationale cell {rationale['id'][:8]} "
+                  f"({rationale['kind']}) matched on {rationale.get('matched_needle')!r}",
+                  file=sys.stderr)
+        _log_event("approve", tool, target_hint or "",
+                   rationale_cell=rationale["id"], rationale_kind=rationale["kind"],
+                   matched_needle=rationale.get("matched_needle"))
+        return 0
+
+    # No rationale found — BLOCK
+    _emit_block_message(tool, target_hint or "", kind_of_op)
+    if DRY_RUN:
+        print(f"[guard] DRY_RUN — would have blocked but exiting 0", file=sys.stderr)
+        _log_event("dry_run", tool, target_hint or "", would_block=True)
+        return 0
+    _log_event("block", tool, target_hint or "")
+    return 2  # Claude Code: exit 2 blocks and shows stderr to the model
+
+
+if __name__ == "__main__":
+    sys.exit(main())
