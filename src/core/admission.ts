@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { deriveCellAddress } from "./cells.js";
 import { reviewFirewall } from "./firewall.js";
+import { cellReferencePath, cellReferenceTarget, resolveCellReference } from "./references.js";
 import { validateWriteProposal } from "./schema.js";
 import type {
   AdmissionResult,
@@ -57,6 +58,9 @@ export function admitWriteProposal(
   }
 
   attenuateUnsupportedConfidence(proposal, warnings, attenuations);
+  warnOversizedTitle(proposal, warnings);
+  warnNearDuplicate(proposal, store, warnings, derivationKey);
+  normalizeEvidenceTargets(proposal, store);
 
   const now = (options.now ?? new Date()).toISOString();
   const node = proposalToNode(proposal, now);
@@ -119,6 +123,48 @@ function reviewRequired(proposal: WriteProposal, options: AdmitOptions): Validat
   return null;
 }
 
+// Near-duplicate cells silt the graph: ranking splits across copies and
+// supersedure never happens. Warn (never reject) on fresh creates only —
+// derived writes (derivationKey) have their own exact-dedup path, and
+// update/supersede/link/archive operations intentionally touch existing cells.
+const NEAR_DUP_TITLE_JACCARD = 0.6;
+const NEAR_DUP_CONTENT_COSINE = 0.9;
+
+function warnNearDuplicate(
+  proposal: WriteProposal,
+  store: RecallStore,
+  warnings: string[],
+  derivationKey?: string
+): void {
+  if (derivationKey || proposal.intent.operation !== "create" || !store.similarActiveCells) {
+    return;
+  }
+  const [closest] = store.similarActiveCells(proposal.content.title, proposal.content.body, 1);
+  if (!closest) {
+    return;
+  }
+  if (closest.titleJaccard >= NEAR_DUP_TITLE_JACCARD || closest.contentCosine >= NEAR_DUP_CONTENT_COSINE) {
+    const excerpt = closest.node.title.split(/\s+/).slice(0, 12).join(" ");
+    warnings.push(
+      `similar to existing cell ${closest.node.id} ("${excerpt}"; titleJaccard=${closest.titleJaccard.toFixed(2)}, contentCosine=${closest.contentCosine.toFixed(2)}); consider operation=update/supersede or referencing it instead of duplicating`
+    );
+  }
+}
+
+// Long titles get echoed across compile packets and dominate title-weighted
+// ranking, so they cost every future read. Warn, never reject: extractors and
+// older agents must keep working.
+const TITLE_WORD_LIMIT = 20;
+
+function warnOversizedTitle(proposal: WriteProposal, warnings: string[]): void {
+  const words = proposal.content.title.trim().split(/\s+/).length;
+  if (words > TITLE_WORD_LIMIT) {
+    warnings.push(
+      `title has ${words} words; titles over ${TITLE_WORD_LIMIT} bloat compile packets and weaken ranking — move detail into body or summary`
+    );
+  }
+}
+
 function attenuateUnsupportedConfidence(
   proposal: WriteProposal,
   warnings: string[],
@@ -141,6 +187,21 @@ function attenuateUnsupportedConfidence(
     warnings.push("unsupported high confidence was attenuated");
     attenuations.push(`confidence.value ${oldValue.toFixed(2)} -> ${proposal.confidence.value.toFixed(2)}`);
   }
+}
+
+function normalizeEvidenceTargets(proposal: WriteProposal, store: RecallStore): void {
+  proposal.evidence.depends_on = proposal.evidence.depends_on.map((target) => normalizeTarget(target, store));
+  proposal.evidence.supports = proposal.evidence.supports.map((target) => normalizeTarget(target, store));
+  proposal.evidence.contradicts = proposal.evidence.contradicts.map((target) => normalizeTarget(target, store));
+  proposal.evidence.concerns = proposal.evidence.concerns.map((target) => normalizeTarget(target, store));
+}
+
+function normalizeTarget(target: string, store: RecallStore): string {
+  return resolveCellReference(
+    target,
+    (id) => store.getNode(id),
+    (address) => store.getNodeByAddress(address)
+  ).canonical;
 }
 
 function proposalToNode(proposal: WriteProposal, now: string): RecallNode {
@@ -184,12 +245,13 @@ function pushRelations(
   now: string
 ): void {
   for (const targetId of targetIds) {
+    const targetPath = cellReferencePath(targetId);
     relations.push({
       id: randomUUID(),
       kind,
       sourceId,
-      targetId,
-      data: {},
+      targetId: cellReferenceTarget(targetId),
+      data: targetPath ? { targetPath, targetRef: targetId } : {},
       createdAt: now
     });
   }

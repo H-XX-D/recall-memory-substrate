@@ -1,4 +1,5 @@
 import { admitWriteProposal } from "./admission.js";
+import { analyzeMemory, memoryHealthToProposal, type MemoryHealthReport } from "./analysis.js";
 import {
   acquireDaemonLease,
   planDaemonDerivation,
@@ -21,6 +22,7 @@ export interface DaemonRunResult {
     result: RecallEvalResult;
     derived: AdmissionResult[];
   };
+  memoryHealth?: MemoryHealthReport;
   lease?: DaemonRunLease;
 }
 
@@ -83,23 +85,23 @@ function runDaemonWork(
         actorId: "recall-daemon",
         actorDisplay: "Recall Daemon",
         producedBy: "recall-daemon"
-      })
+      }, now)
     : undefined;
-  const stats = store.stats();
-  const proposal: WriteProposal = {
-    schema_version: "recall.write.v1",
-    actor: {
-      kind: "daemon",
-      id: "recall-daemon",
-      display: "Recall Daemon"
-    },
-    intent: {
-      kind: "observation",
-      operation: "create"
-    },
-    content: {
-      title: "Daemon maintenance pass",
-      body: `Daemon ran outside the LLM. Current graph stats: ${JSON.stringify(stats)}. Closure: ${JSON.stringify({
+  const memoryHealth = analyzeMemory(store, now);
+  const proposal: WriteProposal = memoryHealthToProposal(memoryHealth, {
+      project: "Recall",
+      tenant: "local",
+      session: "daemon"
+  });
+  proposal.actor.id = "recall-daemon";
+  proposal.actor.display = "Recall Daemon";
+  proposal.content.title = "Daemon maintenance pass";
+  proposal.content.summary = `Daemon observed ${memoryHealth.stats.nodes} nodes, ${memoryHealth.stats.relations} relations, ${memoryHealth.stats.rollbackEntries} rollback entries; ${memoryHealth.beliefs.length} belief pressure item(s), ${memoryHealth.stale.length} stale item(s), ${memoryHealth.contradictions.length} contradiction/concern item(s).`;
+  proposal.content.body = JSON.stringify(
+    {
+      kind: "daemon_maintenance_pass",
+      memoryHealth,
+      closure: {
         semanticReindex,
         evalClosure: evalClosure
           ? {
@@ -109,59 +111,16 @@ function runDaemonWork(
               derivedAccepted: evalClosure.derived.filter((result) => result.accepted).length
             }
           : null
-      })}.`,
-      summary: `Daemon observed ${stats.nodes} nodes, ${stats.relations} relations, ${stats.rollbackEntries} rollback entries.`
+      }
     },
-    scope: {
-      project: "Recall",
-      tenant: "local",
-      session: "daemon"
-    },
-    tags: {
-      category: ["runtime"],
-      type: ["maintenance_observation"],
-      subject: ["daemon"],
-      project: ["Recall"],
-      idea: options.derive ? ["outside_llm_maintenance", "derivation_closure"] : ["outside_llm_maintenance"],
-      timestamp: [now.toISOString().slice(0, 10)],
-      topics: options.derive ? ["daemon", "maintenance", "derivation"] : ["daemon", "maintenance"],
-      entities: ["Recall"],
-      identities: ["daemon:recall"],
-      rings: ["runtime"],
-      lifecycle: ["active"],
-      quality: ["source-grounded"],
-      sensitivity: ["public"],
-      permission: ["background", "write"]
-    },
-    evidence: {
-      source_refs: ["recall:store.stats"],
-      depends_on: [],
-      supports: [],
-      contradicts: [],
-      concerns: []
-    },
-    confidence: {
-      value: 0.62,
-      uncertainty: 0.2,
-      concern: 0.2,
-      source_quality: "medium",
-      stability: "volatile"
-    },
-    provenance: {
-      created_at: now.toISOString(),
-      origin: "daemon",
-      produced_by: "recall-daemon",
-      verification: "checked",
-      signature_status: "unsigned"
-    },
-    policy: {
-      sensitivity: "public",
-      allow_background_use: true,
-      requires_review: false,
-      expires_at: null,
-      reverify_after: null
-    }
-  };
+    null,
+    2
+  );
+  proposal.tags.idea = options.derive ? ["outside_llm_maintenance", "derivation_closure"] : ["outside_llm_maintenance"];
+  proposal.tags.topics = options.derive ? ["daemon", "maintenance", "beliefs", "stale-memory", "contradictions", "derivation"] : ["daemon", "maintenance", "beliefs", "stale-memory", "contradictions"];
+  proposal.tags.permission = ["background", "write"];
+  proposal.evidence.source_refs = ["recall:graph_nodes", "recall:graph_relations", "recall:store.stats", "recall:analysis.memory_health"];
+  proposal.provenance.produced_by = "recall-daemon";
 
   return {
     status: "ran",
@@ -172,6 +131,7 @@ function runDaemonWork(
     semanticReindex,
     schedule,
     evalClosure,
+    memoryHealth,
     lease:
       lease?.status === "acquired"
         ? {

@@ -5,13 +5,31 @@ export const NODE_KINDS = [
   "witness",
   "belief",
   "contradiction",
+  "conflict",
+  "hypothesis",
+  "lemma",
   "task",
   "objective",
+  "goal",
   "decision",
   "risk",
   "constraint",
+  "question",
+  "assumption",
+  "preference",
+  "checkpoint",
   "artifact",
   "source",
+  "domain",
+  "transfer",
+  "action",
+  "trust",
+  "meta",
+  "reflection",
+  "identity",
+  "handoff",
+  "session",
+  "benchmark_run",
   "program",
   "eval_run",
   "context_packet",
@@ -40,21 +58,50 @@ export const RELATION_KINDS = [
 export type NodeKind = (typeof NODE_KINDS)[number];
 export type RelationKind = (typeof RELATION_KINDS)[number];
 
-export type ActorKind = "llm" | "human" | "daemon" | "adapter" | "program";
+export type ActorKind = "llm" | "human" | "daemon" | "connector" | "program";
 export type IntentKind =
   | "observation"
   | "witness"
   | "belief_update"
   | "task"
+  | "objective"
+  | "goal"
   | "decision"
   | "risk"
   | "constraint"
+  | "contradiction"
+  | "conflict"
+  | "hypothesis"
+  | "lemma"
+  | "question"
+  | "assumption"
+  | "preference"
+  | "checkpoint"
+  | "artifact"
+  | "source"
+  | "domain"
+  | "transfer"
+  | "action"
+  | "trust"
+  | "meta"
+  | "reflection"
+  | "identity"
+  | "handoff"
+  | "session"
+  | "benchmark_run"
   | "program"
-  | "relation";
+  | "relation"
+  | "context_packet"
+  | "work_candidate"
+  | "proxy_score"
+  | "verification_result"
+  | "blind_lock"
+  | "allocation_plan"
+  | "miss";
 export type IntentOperation = "create" | "update" | "supersede" | "link" | "archive";
 export type SourceQuality = "unknown" | "low" | "medium" | "high";
 export type Stability = "ephemeral" | "volatile" | "stable";
-export type ProvenanceOrigin = "human" | "llm" | "daemon" | "adapter" | "program" | "external";
+export type ProvenanceOrigin = "human" | "llm" | "daemon" | "connector" | "program" | "external";
 export type Verification = "unverified" | "checked" | "tested" | "external";
 export type SignatureStatus = "unsigned" | "signed" | "verified";
 export type Sensitivity = "public" | "private" | "secret";
@@ -210,6 +257,45 @@ export interface StoreStats {
   programs?: number;
   dagOverlays?: number;
   evalRuns?: number;
+  operatorRuns?: number;
+  acpRequests?: number;
+}
+
+export interface OperatorRun {
+  id: string;
+  status: "ran" | "skipped";
+  summary: string;
+  result: Record<string, unknown>;
+  createdAt: string;
+}
+
+export type AcpRequestStatus = "queued" | "processing" | "completed" | "failed";
+
+export type AcpRequestAction =
+  | "status"
+  | "search"
+  | "semantic"
+  | "subgraph"
+  | "compile"
+  | "write"
+  | "maintenance"
+  | "tick"
+  | "daemon_run_once"
+  | "operate_once";
+
+export interface AcpRequest {
+  id: string;
+  channel: string;
+  fromAgent: string;
+  toAgent: string;
+  action: AcpRequestAction;
+  payload: Record<string, unknown>;
+  status: AcpRequestStatus;
+  response: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  processedAt: string | null;
 }
 
 export interface HyperedgeMember {

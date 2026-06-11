@@ -12,15 +12,32 @@ export interface EmbeddingRecord {
 }
 
 const DEFAULT_DIMS = 256;
+const HTTP_TIMEOUT_SECONDS = 10;
+
+// External backends that failed once are not retried within this process:
+// embedding runs inside synchronous admission writes, and a dead endpoint
+// must cost one failure, not one per write. Keyed by backend string so a
+// config change mid-process gets a fresh attempt.
+const failedBackends = new Set<string>();
 
 export function embedText(text: string, dims = DEFAULT_DIMS): number[] {
   return embedTextRecord(text, dims).vector;
 }
 
 export function embedTextRecord(text: string, dims = DEFAULT_DIMS): EmbeddingRecord {
+  const url = process.env.RECALL_EMBEDDING_URL;
+  if (url && url.trim() !== "") {
+    const record = httpEmbedding(url.trim(), text);
+    if (record) {
+      return record;
+    }
+  }
   const command = process.env.RECALL_EMBEDDING_COMMAND;
   if (command && command.trim() !== "") {
-    return commandEmbedding(command, text, dims);
+    const record = commandEmbeddingSafe(command, text, dims);
+    if (record) {
+      return record;
+    }
   }
   return {
     backend: "hash:v1",
@@ -68,6 +85,83 @@ function normalize(vector: number[]): number[] {
     return vector;
   }
   return vector.map((value) => value / magnitude);
+}
+
+function httpEmbedding(url: string, text: string): EmbeddingRecord | null {
+  const model = process.env.RECALL_EMBEDDING_MODEL?.trim() ?? "";
+  const backend = `http:${model || "default"}@${url}`;
+  if (failedBackends.has(backend)) {
+    return null;
+  }
+  const args = ["-sS", "--max-time", String(HTTP_TIMEOUT_SECONDS), "-H", "Content-Type: application/json"];
+  const apiKey = process.env.RECALL_EMBEDDING_API_KEY?.trim();
+  if (apiKey) {
+    args.push("-H", `Authorization: Bearer ${apiKey}`);
+  }
+  args.push("-d", "@-", url);
+  const result = spawnSync("curl", args, {
+    input: JSON.stringify(model ? { model, input: text } : { input: text }),
+    encoding: "utf8",
+    timeout: (HTTP_TIMEOUT_SECONDS + 5) * 1000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  if (result.error || result.status !== 0) {
+    return disableBackend(backend, result.error?.message ?? result.stderr?.trim() ?? `curl exit ${result.status}`);
+  }
+  const vector = parseEmbeddingHttpResponse(result.stdout);
+  if (!vector) {
+    return disableBackend(backend, "endpoint returned no usable embedding vector");
+  }
+  return { backend, dims: vector.length, vector: normalize(vector) };
+}
+
+export function parseEmbeddingHttpResponse(payload: string): number[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  // Accepted shapes: OpenAI-compatible {data:[{embedding}]}, Ollama
+  // /api/embed {embeddings:[[...]]}, bare {embedding:[...]}, bare array.
+  let vector: unknown = null;
+  if (Array.isArray(parsed)) {
+    vector = parsed;
+  } else if (isRecord(parsed)) {
+    if (Array.isArray(parsed.data) && isRecord(parsed.data[0])) {
+      vector = parsed.data[0].embedding;
+    } else if (Array.isArray(parsed.embeddings)) {
+      vector = parsed.embeddings[0];
+    } else if (Array.isArray(parsed.embedding)) {
+      vector = parsed.embedding;
+    }
+  }
+  if (
+    !Array.isArray(vector) ||
+    vector.length === 0 ||
+    vector.some((value) => typeof value !== "number" || !Number.isFinite(value))
+  ) {
+    return null;
+  }
+  return vector as number[];
+}
+
+function commandEmbeddingSafe(command: string, text: string, dims: number): EmbeddingRecord | null {
+  const backend = `command:${command}`;
+  if (failedBackends.has(backend)) {
+    return null;
+  }
+  try {
+    return commandEmbedding(command, text, dims);
+  } catch (error) {
+    return disableBackend(backend, error instanceof Error ? error.message : String(error));
+  }
+}
+
+function disableBackend(backend: string, reason: string): null {
+  failedBackends.add(backend);
+  process.stderr.write(`recall: embedding backend ${backend} unavailable (${reason}); using hash:v1 for the rest of this process\n`);
+  return null;
 }
 
 function commandEmbedding(command: string, text: string, dims: number): EmbeddingRecord {

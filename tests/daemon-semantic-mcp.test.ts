@@ -66,15 +66,11 @@ describe("daemon, semantic search, subgraphs, and MCP", () => {
       assert.equal(result.result.issues[0]?.code, "daemon_lease_active");
       assert.equal(result.result.issues[0]?.path, "daemon.lease");
       assert.equal(result.lease?.owner, "test-active-owner");
-      assert.deepEqual(store.stats(), {
-        nodes: 0,
-        relations: 0,
-        rollbackEntries: 0,
-        hyperedges: 0,
-        programs: 0,
-        dagOverlays: 0,
-        evalRuns: 0
-      });
+      const stats = store.stats();
+      assert.equal(stats.nodes, 0);
+      assert.equal(stats.relations, 0);
+      assert.equal(stats.rollbackEntries, 0);
+      assert.equal(stats.evalRuns, 0);
     } finally {
       releaseDaemonLease(activeLease);
       store.close();

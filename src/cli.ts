@@ -2,15 +2,25 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { admitWriteProposal } from "./core/admission.js";
+import { analyzeMemory, memoryHealthToProposal } from "./core/analysis.js";
+import { analyzeCalibration } from "./core/calibration.js";
+import { inspectCell } from "./core/cell-context.js";
 import { compileContext, formatContextPacket } from "./core/context-compiler.js";
+import { runCognitiveTick } from "./core/cognitive.js";
+import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle } from "./core/acp.js";
+import { runAcpLoop } from "./core/acp.js";
 import { runDaemonOnce } from "./core/daemon.js";
 import { defaultEvalSuite, type RecallEvalSuite } from "./core/evals.js";
+import { buildPageIndex, getRecallPage, type RecallPageName } from "./core/pages.js";
+import { runOperatingCycle } from "./core/operator.js";
 import { validateWriteProposal } from "./core/schema.js";
 import { SecretGraphStore } from "./core/secrets.js";
 import { installLaunchAgent, launchAgentStatus, renderLaunchAgentPlist, uninstallLaunchAgent } from "./core/service.js";
 import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput } from "./core/store.js";
+import { storageStats } from "./core/storage-stats.js";
 import { renderTui } from "./core/tui.js";
-import type { HyperedgeProgramSpec } from "./core/types.js";
+import { allocateWork, allocationToProposal, blindLockToProposal, type BlindLockInput, type WorkCandidateInput } from "./core/workflow.js";
+import type { AcpRequest, HyperedgeProgramSpec, OperatorRun } from "./core/types.js";
 
 interface ParsedArgs {
   command: string[];
@@ -42,8 +52,19 @@ interface ParsedArgs {
   nodeBin: string;
   cwd: string;
   limit: number;
+  limitProvided: boolean;
   watch: boolean;
   derive: boolean;
+  operatorCompact: boolean;
+  skipSemanticReindex: boolean;
+  skipEvalClosure: boolean;
+  skipCognitiveTick: boolean;
+  skipDaemonMaintenance: boolean;
+  inlineReferenceValues: boolean;
+  includeReferenceParameters: boolean;
+  acpStatus?: string;
+  acpManager?: string;
+  acpToAgent?: string;
 }
 
 function main(): void {
@@ -94,6 +115,110 @@ function main(): void {
 
     if (command === "status") {
       console.log(JSON.stringify({ db: args.db, stats: store.stats() }, null, 2));
+      return;
+    }
+
+    if (command === "storage") {
+      console.log(JSON.stringify(storageStats(store), null, 2));
+      return;
+    }
+
+    if (command === "acp" && (!subcommand || subcommand === "status")) {
+      console.log(JSON.stringify({ mode: "agent-communication-protocol", db: args.db, stats: store.stats() }, null, 2));
+      return;
+    }
+
+    if (command === "acp" && subcommand === "send") {
+      const request = readJsonArg(args);
+      console.log(JSON.stringify({ request: enqueueAcpRequest(store, normalizeAcpRequest(request)) }, null, 2));
+      return;
+    }
+
+    if (command === "acp" && subcommand === "list") {
+      console.log(JSON.stringify({ requests: store.listAcpRequests(args.limit, acpStatusFilter(args)).map(acpRequestListItem) }, null, 2));
+      return;
+    }
+
+    if (command === "acp" && subcommand === "show") {
+      const requestId = requireCommandValue(args.command, 2, "ACP request id");
+      console.log(JSON.stringify(store.getAcpRequest(requestId), null, 2));
+      return;
+    }
+
+    if (command === "acp" && subcommand === "process") {
+      console.log(JSON.stringify(runAcpCycle(store, new Date(), { limit: args.limit, manager: args.acpManager, toAgent: args.acpToAgent }), null, 2));
+      return;
+    }
+
+    if (command === "acp" && subcommand === "run") {
+      runAcpLoop(store, {
+        intervalMs: args.intervalMs,
+        limit: args.limit,
+        manager: args.acpManager,
+        toAgent: args.acpToAgent
+      });
+      return;
+    }
+
+    if (command === "compact") {
+      const result = store.compact();
+      console.log(JSON.stringify({ result, storage: storageStats(store) }, null, 2));
+      return;
+    }
+
+    if (command === "beliefs") {
+      const report = analyzeMemory(store);
+      console.log(JSON.stringify({ report }, null, 2));
+      return;
+    }
+
+    if (command === "maintenance") {
+      const report = analyzeMemory(store);
+      const result = args.derive
+        ? admitWriteProposal(
+            memoryHealthToProposal(report, {
+              project: "Recall",
+              tenant: "local",
+              session: "maintenance"
+            }),
+            store
+          )
+        : undefined;
+      console.log(JSON.stringify({ report, result }, null, 2));
+      process.exitCode = result && !result.accepted ? 1 : 0;
+      return;
+    }
+
+    if (command === "trust") {
+      const report = analyzeMemory(store);
+      console.log(JSON.stringify({ provenance: report.provenance, warnings: report.criticalWarnings }, null, 2));
+      return;
+    }
+
+    if (command === "calibration") {
+      console.log(JSON.stringify({ calibration: analyzeCalibration(store) }, null, 2));
+      return;
+    }
+
+    if (command === "tick") {
+      console.log(JSON.stringify(runCognitiveTick(store, new Date(), args.derive), null, 2));
+      return;
+    }
+
+    if (command === "page") {
+      const page = (subcommand ?? "index") as RecallPageName;
+      const output = page === "index"
+        ? buildPageIndex(store)
+        : getRecallPage(store, page, pageOptions(args));
+      console.log(JSON.stringify(output, null, 2));
+      return;
+    }
+
+    if (command === "cell" && (!subcommand || subcommand === "show")) {
+      const idOrAddress = subcommand === "show"
+        ? requireCommandValue(args.command, 2, "cell id or address")
+        : requireCommandValue(args.command, 1, "cell id or address");
+      console.log(JSON.stringify(inspectCell(store, idOrAddress), null, 2));
       return;
     }
 
@@ -160,8 +285,41 @@ function main(): void {
 
     if (command === "compile") {
       const task = args.query ?? args.command.slice(1).join(" ");
-      const packet = compileContext(store, { task, budgetWords: args.words });
+      const packet = compileContext(store, {
+        task,
+        budgetWords: args.words,
+        inlineReferenceValues: args.inlineReferenceValues,
+        includeReferenceParameters: args.includeReferenceParameters
+      });
       console.log(formatContextPacket(packet));
+      return;
+    }
+
+    if (command === "workflow" && subcommand === "allocate") {
+      const input = readJsonArg(args);
+      const candidates = parseWorkCandidates(input);
+      const limit = workflowLimit(input, args.limitProvided ? args.limit : 8);
+      const report = allocateWork(candidates, limit);
+      const result = args.derive
+        ? admitWriteProposal(
+            allocationToProposal(report, {
+              project: "Recall",
+              tenant: "local",
+              session: "workflow"
+            }),
+            store
+          )
+        : undefined;
+      console.log(JSON.stringify({ report, result }, null, 2));
+      process.exitCode = result && !result.accepted ? 1 : 0;
+      return;
+    }
+
+    if (command === "blind-lock" && subcommand === "add") {
+      const input = parseBlindLockInput(readJsonArg(args));
+      const result = admitWriteProposal(blindLockToProposal(input), store);
+      console.log(JSON.stringify({ result }, null, 2));
+      process.exitCode = result.accepted ? 0 : 1;
       return;
     }
 
@@ -271,6 +429,22 @@ function main(): void {
       return;
     }
 
+    if (command === "operate" && subcommand === "list") {
+      console.log(JSON.stringify({ runs: store.listOperatorRuns(args.limit).map(operatorRunListItem) }, null, 2));
+      return;
+    }
+
+    if (command === "operate" && subcommand === "show") {
+      const runId = requireCommandValue(args.command, 2, "operator run id");
+      console.log(JSON.stringify(store.getOperatorRun(runId), null, 2));
+      return;
+    }
+
+    if (command === "operate" && (!subcommand || subcommand === "once")) {
+      console.log(JSON.stringify(runOperatingCycle(store, new Date(), operatingCycleOptions(args)), null, 2));
+      return;
+    }
+
     if (command === "daemon" && (!subcommand || subcommand === "status")) {
       console.log(JSON.stringify({ mode: "outside-llm", db: args.db, stats: store.stats() }, null, 2));
       return;
@@ -322,8 +496,19 @@ function parseArgs(argv: string[]): ParsedArgs {
   let nodeBin = process.execPath;
   let cwd = process.cwd();
   let limit = 20;
+  let limitProvided = false;
   let watch = false;
   let derive = false;
+  let operatorCompact = false;
+  let skipSemanticReindex = false;
+  let skipEvalClosure = false;
+  let skipCognitiveTick = false;
+  let skipDaemonMaintenance = false;
+  let inlineReferenceValues = false;
+  let includeReferenceParameters = false;
+  let acpStatus: string | undefined;
+  let acpManager: string | undefined;
+  let acpToAgent: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -383,10 +568,31 @@ function parseArgs(argv: string[]): ParsedArgs {
       cwd = requireValue(argv, ++index, "--cwd");
     } else if (arg === "--limit") {
       limit = Number.parseInt(requireValue(argv, ++index, "--limit"), 10);
+      limitProvided = true;
     } else if (arg === "--watch") {
       watch = true;
     } else if (arg === "--derive") {
       derive = true;
+    } else if (arg === "--compact") {
+      operatorCompact = true;
+    } else if (arg === "--no-semantic") {
+      skipSemanticReindex = true;
+    } else if (arg === "--no-eval") {
+      skipEvalClosure = true;
+    } else if (arg === "--no-tick") {
+      skipCognitiveTick = true;
+    } else if (arg === "--no-daemon") {
+      skipDaemonMaintenance = true;
+    } else if (arg === "--inline-refs") {
+      inlineReferenceValues = true;
+    } else if (arg === "--reference-parameters") {
+      includeReferenceParameters = true;
+    } else if (arg === "--acp-status") {
+      acpStatus = requireValue(argv, ++index, "--acp-status");
+    } else if (arg === "--acp-manager") {
+      acpManager = requireValue(argv, ++index, "--acp-manager");
+    } else if (arg === "--acp-to-agent") {
+      acpToAgent = requireValue(argv, ++index, "--acp-to-agent");
     } else {
       command.push(arg);
     }
@@ -432,8 +638,19 @@ function parseArgs(argv: string[]): ParsedArgs {
     nodeBin,
     cwd,
     limit,
+    limitProvided,
     watch,
-    derive
+    derive,
+    operatorCompact,
+    skipSemanticReindex,
+    skipEvalClosure,
+    skipCognitiveTick,
+    skipDaemonMaintenance,
+    inlineReferenceValues,
+    includeReferenceParameters,
+    acpStatus,
+    acpManager,
+    acpToAgent
   };
 }
 
@@ -502,6 +719,77 @@ function readJsonArg(args: ParsedArgs): unknown {
   return JSON.parse(readFileSync(args.jsonPath, "utf8"));
 }
 
+function parseWorkCandidates(input: unknown): WorkCandidateInput[] {
+  const candidates = Array.isArray(input) ? input : isRecord(input) ? input.candidates : undefined;
+  if (!Array.isArray(candidates)) {
+    fail("Expected --json to contain an array of candidates or { \"candidates\": [...] }");
+  }
+  return candidates.map((candidate, index) => {
+    if (!isRecord(candidate) || typeof candidate.title !== "string" || candidate.title.trim() === "") {
+      fail(`Expected candidate ${index + 1} to contain a non-empty title`);
+    }
+    return {
+      id: typeof candidate.id === "string" ? candidate.id : undefined,
+      title: candidate.title,
+      description: typeof candidate.description === "string" ? candidate.description : undefined,
+      impact: optionalNumber(candidate.impact, "impact", index),
+      uncertainty: optionalNumber(candidate.uncertainty, "uncertainty", index),
+      concern: optionalNumber(candidate.concern, "concern", index),
+      dependencyWeight: optionalNumber(candidate.dependencyWeight, "dependencyWeight", index),
+      cost: optionalNumber(candidate.cost, "cost", index),
+      reversibility: optionalNumber(candidate.reversibility, "reversibility", index),
+      novelty: optionalNumber(candidate.novelty, "novelty", index),
+      tags: optionalStringArray(candidate.tags, "tags", index)
+    };
+  });
+}
+
+function workflowLimit(input: unknown, fallback: number): number {
+  const limit = isRecord(input) && typeof input.limit === "number" ? input.limit : fallback;
+  if (!Number.isFinite(limit) || limit <= 0) {
+    fail("workflow allocate limit must be a positive number");
+  }
+  return Math.floor(limit);
+}
+
+function parseBlindLockInput(input: unknown): BlindLockInput {
+  if (!isRecord(input) || typeof input.title !== "string" || typeof input.prediction !== "string") {
+    fail("Expected blind-lock JSON with title and prediction strings");
+  }
+  return {
+    title: input.title,
+    prediction: input.prediction,
+    expectedBy: typeof input.expectedBy === "string" ? input.expectedBy : undefined,
+    falsifier: typeof input.falsifier === "string" ? input.falsifier : undefined,
+    project: typeof input.project === "string" ? input.project : undefined,
+    path: typeof input.path === "string" ? input.path : undefined,
+    tenant: typeof input.tenant === "string" ? input.tenant : undefined,
+    confidence: optionalNumber(input.confidence, "confidence"),
+    createdAt: typeof input.createdAt === "string" ? input.createdAt : undefined,
+    tags: optionalStringArray(input.tags, "tags")
+  };
+}
+
+function optionalNumber(value: unknown, key: string, index?: number): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    fail(index === undefined ? `Expected ${key} to be a number` : `Expected candidate ${index + 1} ${key} to be a number`);
+  }
+  return value;
+}
+
+function optionalStringArray(value: unknown, key: string, index?: number): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    fail(index === undefined ? `Expected ${key} to be string[]` : `Expected candidate ${index + 1} ${key} to be string[]`);
+  }
+  return value;
+}
+
 function requireValue(argv: string[], index: number, flag: string): string {
   const value = argv[index];
   if (!value) {
@@ -524,6 +812,21 @@ function printHelp(): void {
 Commands:
   recall init [--db path]
   recall status [--db path]
+  recall storage [--db path]
+  recall acp [status] [--db path]
+  recall acp send --json request.json [--db path]
+  recall acp list [--limit 20] [--acp-status queued] [--db path]
+  recall acp show <request-id> [--db path]
+  recall acp process [--limit 20] [--acp-manager recall-acp-manager] [--acp-to-agent recall-acp-manager] [--db path]
+  recall acp run [--interval-ms 5000] [--limit 20] [--acp-manager recall-acp-manager] [--acp-to-agent recall-acp-manager] [--db path]
+  recall compact [--db path]
+  recall beliefs [--db path]
+  recall trust [--db path]
+  recall calibration [--db path]                                   per-actor stated-confidence vs contradiction outcomes
+  recall maintenance [--derive] [--db path]
+  recall tick [--derive] [--db path]
+  recall page [index|reflections|agent-profile|user-profile|team-metrics|witnesses|workbench|handoffs|objectives|acp-queue|acp-manager] [--project Recall] [--topic memory] [--identity agent:codex] [--limit 25]
+  recall cell show <cell-id-or-address> [--db path]
   recall validate --json proposal.json [--db path]
   recall admit --json proposal.json [--db path] [--review]        agent/debug path; normal memory uses MCP recall_write
   recall write-propose --json proposal.json [--db path] [--review] agent/debug alias; not the user-facing memory flow
@@ -532,7 +835,9 @@ Commands:
   recall semantic reindex [--db path]
   recall subgraph [--category memory] [--type witness] [--subject compiler] [--project Recall] [--idea active-memory] [--timestamp 2026-05-21]
   recall subgraph [--topic a,b] [--entity x] [--identity agent:codex] [--ring runtime]
-  recall compile "task" [--words 900] [--db path]
+  recall compile "task" [--words 900] [--inline-refs] [--reference-parameters] [--db path]
+  recall workflow allocate --json candidates.json [--limit 8] [--derive] [--db path]
+  recall blind-lock add --json blind-lock.json [--db path]
   recall rollback list [--db path]
   recall rollback show <journal-id> [--db path]
   recall rollback apply <journal-id> [--db path]
@@ -552,6 +857,9 @@ Commands:
   recall eval run [--derive] [--json suite.json] [--db path]
   recall eval list [--limit 20] [--db path]
   recall eval show <eval-run-id> [--db path]
+  recall operate once [--derive] [--compact] [--no-semantic] [--no-eval] [--no-tick] [--no-daemon] [--db path]
+  recall operate list [--limit 20] [--db path]
+  recall operate show <operator-run-id> [--db path]
   recall mcp config [--db path]
   recall tui [--watch] [--interval-ms 5000] [--db path]
   recall daemon status [--db path]
@@ -581,6 +889,10 @@ function splitCsv(value: string): string[] {
     .filter(Boolean);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function subgraphFilterForOutput(args: ParsedArgs): Record<string, string[]> {
   return {
     category: args.category,
@@ -593,6 +905,58 @@ function subgraphFilterForOutput(args: ParsedArgs): Record<string, string[]> {
     entities: args.entities,
     identities: args.identities,
     rings: args.rings
+  };
+}
+
+function normalizeAcpRequest(value: unknown): {
+  channel?: string;
+  fromAgent: string;
+  toAgent: string;
+  action: import("./core/types.js").AcpRequestAction;
+  payload?: Record<string, unknown>;
+} {
+  if (!isRecord(value)) {
+    fail("Expected ACP request JSON object");
+  }
+  if (typeof value.fromAgent !== "string" || typeof value.toAgent !== "string" || !isAcpRequestAction(value.action)) {
+    fail("ACP request JSON requires fromAgent, toAgent, and a supported action");
+  }
+  return {
+    channel: typeof value.channel === "string" ? value.channel : undefined,
+    fromAgent: value.fromAgent,
+    toAgent: value.toAgent,
+    action: value.action,
+    payload: isRecord(value.payload) ? value.payload : undefined
+  };
+}
+
+function acpStatusFilter(args: ParsedArgs): import("./core/types.js").AcpRequestStatus | undefined {
+  return isAcpRequestStatus(args.acpStatus) ? args.acpStatus : undefined;
+}
+
+function acpRequestListItem(request: AcpRequest): Record<string, unknown> {
+  return {
+    id: request.id,
+    status: request.status,
+    action: request.action,
+    channel: request.channel,
+    fromAgent: request.fromAgent,
+    toAgent: request.toAgent,
+    createdAt: request.createdAt,
+    updatedAt: request.updatedAt,
+    processedAt: request.processedAt,
+    payloadKeys: Object.keys(request.payload).length,
+    hasResponse: request.response !== null,
+    error: request.error
+  };
+}
+
+function pageOptions(args: ParsedArgs) {
+  return {
+    project: args.project[0],
+    topic: args.topics[0],
+    identity: args.identities[0],
+    limit: args.limitProvided ? args.limit : 25
   };
 }
 
@@ -651,6 +1015,36 @@ function derivationOptions(args: ParsedArgs) {
     actorId: "recall-cli",
     actorDisplay: "Recall CLI",
     producedBy: "recall-cli"
+  };
+}
+
+function operatingCycleOptions(args: ParsedArgs) {
+  return {
+    derive: args.derive,
+    compact: args.operatorCompact,
+    semanticReindex: !args.skipSemanticReindex,
+    evalClosure: !args.skipEvalClosure,
+    cognitiveTick: !args.skipCognitiveTick,
+    daemonMaintenance: !args.skipDaemonMaintenance,
+    lease: {
+      owner: "recall-cli"
+    }
+  };
+}
+
+function operatorRunListItem(run: OperatorRun): Record<string, unknown> {
+  const phases = Array.isArray(run.result.phases) ? run.result.phases.filter(isRecord) : [];
+  const writes = isRecord(run.result.writes) ? run.result.writes : {};
+  return {
+    id: run.id,
+    status: run.status,
+    createdAt: run.createdAt,
+    summary: run.summary,
+    phases: phases.length,
+    failedPhases: phases.filter((phase) => phase.status === "failed").length,
+    skippedPhases: phases.filter((phase) => phase.status === "skipped").length,
+    acceptedWrites: typeof writes.accepted === "number" ? writes.accepted : 0,
+    rejectedWrites: typeof writes.rejected === "number" ? writes.rejected : 0
   };
 }
 

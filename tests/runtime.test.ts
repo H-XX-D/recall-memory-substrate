@@ -25,11 +25,14 @@ test("hyperedges, sandboxed programs, DAG overlays, evals, rollback, and TUI sha
       kind: "supports",
       title: "Runtime support relation",
       members: [
-        { nodeId: first.node.id, role: "source" },
-        { nodeId: second.node.id, role: "target" }
+        { nodeId: `${first.node.cellAddress}#confidence.value`, role: "source" },
+        { nodeId: second.node.cellAddress, role: "target" }
       ],
       metadata: { purpose: "test" }
     });
+    assert.equal(hyperedge.members[0]?.nodeId, first.node.id);
+    assert.equal(hyperedge.members[0]?.metadata?.targetPath, "confidence.value");
+    assert.equal(hyperedge.members[1]?.nodeId, second.node.id);
     const program = store.attachProgram(hyperedge.id, {
       schemaVersion: "recall.program.v1",
       operation: "score"
@@ -39,6 +42,7 @@ test("hyperedges, sandboxed programs, DAG overlays, evals, rollback, and TUI sha
     const run = store.runProgram(program.id);
     assert.equal(run.hyperedgeId, hyperedge.id);
     assert.equal(run.output.memberCount, 2);
+    assert.equal(Array.isArray(run.output.memberReferences), true);
     assert.equal(run.output.averageConfidence, 0.72);
     assert.equal(run.output.maxConcern, 0.4);
     assert.equal(store.getProgramRun(run.id)?.id, run.id);
@@ -53,11 +57,11 @@ test("hyperedges, sandboxed programs, DAG overlays, evals, rollback, and TUI sha
 
     const overlay = store.addDagOverlay({
       title: "Two path overlay",
-      nodeIds: [first.node.id, second.node.id, "third"],
+      nodeIds: [first.node.cellAddress, second.node.cellAddress, "third"],
       edges: [
-        { from: first.node.id, to: second.node.id, label: "direct" },
-        { from: first.node.id, to: "third", label: "via" },
-        { from: "third", to: second.node.id, label: "indirect" }
+        { from: first.node.cellAddress, to: second.node.cellAddress, label: "direct" },
+        { from: first.node.cellAddress, to: "third", label: "via" },
+        { from: "third", to: second.node.cellAddress, label: "indirect" }
       ]
     });
     assert.equal(store.getDagOverlay(overlay.id)?.id, overlay.id);

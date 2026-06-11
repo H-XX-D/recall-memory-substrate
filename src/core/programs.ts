@@ -59,6 +59,7 @@ function executeSpec(
       operation: spec.operation,
       hyperedgeId: hyperedge.id,
       memberCount: members.length,
+      memberReferences: memberReferences(hyperedge, members),
       averageConfidence,
       maxConcern,
       score: round((averageConfidence + (1 - maxConcern)) / 2)
@@ -82,6 +83,7 @@ function executeSpec(
     return {
       operation: spec.operation,
       hyperedgeId: hyperedge.id,
+      memberReferences: memberReferences(hyperedge, members),
       family,
       values: [...values].sort()
     };
@@ -93,9 +95,25 @@ function executeSpec(
     witness: {
       title: `Program witness for ${hyperedge.title}`,
       summary: `Sandboxed program observed ${members.length} member cells.`,
-      memberAddresses: members.map((node) => node.cellAddress)
+      memberAddresses: members.map((node) => node.cellAddress),
+      memberReferences: memberReferences(hyperedge, members)
     }
   };
+}
+
+function memberReferences(hyperedge: Hyperedge, members: RecallNode[]): Record<string, unknown>[] {
+  const byId = new Map(members.map((node) => [node.id, node]));
+  return hyperedge.members.map((member) => {
+    const node = byId.get(member.nodeId);
+    const metadata = member.metadata ?? {};
+    return {
+      role: member.role,
+      nodeId: member.nodeId,
+      address: typeof metadata.targetAddress === "string" ? metadata.targetAddress : node?.cellAddress,
+      path: typeof metadata.targetPath === "string" ? metadata.targetPath : undefined,
+      reference: typeof metadata.targetRef === "string" ? metadata.targetRef : node?.cellAddress ?? member.nodeId
+    };
+  });
 }
 
 function confidenceValue(node: RecallNode): number | null {

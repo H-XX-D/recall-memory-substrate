@@ -31,6 +31,14 @@ try {
     subject: "daemon",
     idea: "outside-llm-maintenance"
   }));
+  const beliefProposal = writeJson("proposal-belief.json", proposal({
+    title: "E2E belief pressure target",
+    body: "Belief cells are scored with support, contradiction, uncertainty, and concern pressure.",
+    summary: "Belief pressure target exists.",
+    intent: "belief_update",
+    subject: "beliefs",
+    idea: "belief-pressure"
+  }));
 
   assertJson(runCli(["init"]), (value) => value.status === "initialized", "init creates the graph database");
   assertJson(runCli(["validate", "--json", firstProposal]), (value) => value.ok === true, "strict write proposal validates");
@@ -39,8 +47,24 @@ try {
   expect(firstAdmission.node?.cellAddress?.startsWith("recall://cell/"), "first node has an addressable cell");
   const secondAdmission = parseJson(runCli(["admit", "--json", secondProposal]));
   expect(secondAdmission.accepted === true, "second proposal admitted");
+  const beliefAdmission = parseJson(runCli(["admit", "--json", beliefProposal]));
+  expect(beliefAdmission.accepted === true, "belief proposal admitted");
+  const fieldReferenceProposal = writeJson("proposal-field-reference.json", proposal({
+    title: "E2E field reference witness",
+    body: "The compiler should return a short field handle by default and resolve the field only on demand.",
+    summary: "Field reference witness exists.",
+    intent: "witness",
+    subject: "compiler",
+    idea: "id-first-reference",
+    evidence: {
+      supports: [`${firstAdmission.node.cellAddress}#content.summary`]
+    }
+  }));
+  const fieldReferenceAdmission = parseJson(runCli(["admit", "--json", fieldReferenceProposal]));
+  expect(fieldReferenceAdmission.accepted === true, "field reference proposal admitted");
 
-  assertJson(runCli(["status"]), (value) => value.stats.nodes >= 2, "status reports admitted nodes");
+  assertJson(runCli(["status"]), (value) => value.stats.nodes >= 3, "status reports admitted nodes");
+  assertJson(runCli(["storage"]), (value) => value.cells >= 3 && value.averageCell.serializedBytes > 0, "storage reports average cell footprint");
   assertJson(runCli(["search", "context compiler"]), (value) => value.results.length >= 1, "lexical search returns memory");
   assertJson(runCli(["semantic", "reindex"]), (value) => value.indexed >= 2, "semantic reindex covers graph nodes");
   assertJson(runCli(["semantic", "compact packets"]), (value) => value.results.length >= 1, "semantic search returns memory");
@@ -50,8 +74,112 @@ try {
     "tag-composed subgraph returns the compiler witness"
   );
   expect(runCli(["compile", "context compiler packet", "--words", "120"]).includes("expansion_handles:"), "context compiler returns handles");
+  const fieldCompile = runCli(["compile", "field reference witness", "--words", "220"]);
+  expect(fieldCompile.includes("translated_references:"), "context compiler returns translated references section");
+  expect(fieldCompile.includes(`${firstAdmission.node.id}#content.summary`), "default compiler returns short id field handles");
+  expect(
+    !sectionText(fieldCompile, "translated_references").includes("Context compiler packet evidence exists."),
+    "default compiler does not inline referenced field values in translated references"
+  );
+  const inlineFieldCompile = runCli(["compile", "field reference witness", "--words", "260", "--inline-refs", "--reference-parameters"]);
+  expect(inlineFieldCompile.includes("Context compiler packet evidence exists."), "inline compiler option resolves referenced field values");
   expect(runCli(["tui"]).includes("Recall TUI"), "TUI renders a human inspection view");
   assertJson(runCli(["rollback", "list"]), (value) => value.rollback.length >= 2, "rollback journal is populated");
+  assertJson(runCli(["beliefs"]), (value) => Array.isArray(value.report.beliefs), "belief pressure command returns a report");
+  assertJson(runCli(["trust"]), (value) => typeof value.provenance.totalWitnesses === "number", "trust command returns provenance health");
+  assertJson(runCli(["maintenance"]), (value) => Array.isArray(value.report.nextActions), "maintenance command analyzes memory health");
+  const maintenanceWrite = parseJson(runCli(["maintenance", "--derive"]));
+  expect(maintenanceWrite.result.accepted === true, "maintenance health can derive into graph memory");
+  assertJson(runCli(["tick"]), (value) => Array.isArray(value.report.phases), "cognitive tick returns phase report");
+  const tickWrite = parseJson(runCli(["tick", "--derive"]));
+  expect(tickWrite.result.accepted === true, "cognitive tick can derive into graph memory");
+  assertJson(runCli(["page", "index"]), (value) => Array.isArray(value.pages), "paged graph index works");
+  assertJson(runCli(["page", "witnesses"]), (value) => value.name === "witnesses", "witness page works");
+  assertJson(runCli(["cell", "show", firstAdmission.node.cellAddress]), (value) => value.node.id === firstAdmission.node.id, "cell inspection works by address");
+  assertJson(
+    runCli(["cell", "show", `${firstAdmission.node.id}#content.summary`]),
+    (value) => value.requestedField?.valuePreview === "Context compiler packet evidence exists.",
+    "cell inspection resolves id field handles"
+  );
+  assertJson(runCli(["compact"]), (value) => value.storage.cells >= 1, "compact reports storage after vacuum");
+  const operatorRun = assertJson(
+    runCli(["operate", "once", "--no-eval", "--no-tick", "--no-daemon"]),
+    (value) =>
+      value.status === "ran" &&
+      value.ledger?.id &&
+      value.phases.some((phase) => phase.name === "semantic_reindex" && phase.status === "completed") &&
+      value.phases.some((phase) => phase.name === "postflight" && phase.status === "completed"),
+    "operator cycle runs a bounded mechanical pass"
+  );
+  assertJson(
+    runCli(["operate", "list"]),
+    (value) => value.runs.some((run) => run.id === operatorRun.ledger.id),
+    "operator ledger lists persisted mechanical reports"
+  );
+  assertJson(
+    runCli(["operate", "show", operatorRun.ledger.id]),
+    (value) => value.id === operatorRun.ledger.id && value.result.summary === operatorRun.summary,
+    "operator ledger shows a persisted mechanical report"
+  );
+  assertJson(runCli(["acp", "status"]), (value) => value.mode === "agent-communication-protocol", "ACP mode reports status");
+  const acpRequestFile = writeJson("acp-request.json", {
+    channel: "inbox",
+    fromAgent: "agent:e2e",
+    toAgent: "recall-acp-manager",
+    action: "search",
+    payload: {
+      query: "context compiler",
+      limit: 5
+    }
+  });
+  const acpSend = parseJson(runCli(["acp", "send", "--json", acpRequestFile]));
+  expect(acpSend.request.id, "ACP request can be enqueued");
+  const acpProcess = parseJson(runCli(["acp", "process", "--acp-manager", "recall-acp-manager", "--acp-to-agent", "recall-acp-manager", "--limit", "5"]));
+  expect(acpProcess.completed === 1, "ACP process handles a queued request");
+  assertJson(runCli(["acp", "list", "--acp-status", "completed"]), (value) => value.requests.some((request) => request.id === acpSend.request.id), "ACP list shows the processed request");
+  assertJson(runCli(["acp", "show", acpSend.request.id]), (value) => value.status === "completed", "ACP show returns the stored request");
+  assertJson(runCli(["page", "acp-queue"]), (value) => value.name === "acp-queue" && value.metrics.byStatus.completed >= 1, "ACP queue page works");
+  assertJson(runCli(["page", "acp-manager"]), (value) => value.name === "acp-manager" && value.metrics.identity === "agent:acp-manager", "ACP manager page works");
+
+  const workflowFile = writeJson("workflow-candidates.json", {
+    candidates: [
+      {
+        id: "docs",
+        title: "Polish install docs",
+        impact: 0.4,
+        uncertainty: 0.2,
+        concern: 0.2,
+        dependencyWeight: 0.2,
+        cost: 0.3,
+        reversibility: 0.9
+      },
+      {
+        id: "runtime",
+        title: "Verify runtime memory health",
+        impact: 0.9,
+        uncertainty: 0.8,
+        concern: 0.8,
+        dependencyWeight: 0.9,
+        cost: 0.4,
+        reversibility: 0.7,
+        novelty: 0.5
+      }
+    ]
+  });
+  const workflowAllocation = parseJson(runCli(["workflow", "allocate", "--json", workflowFile, "--limit", "1", "--derive"]));
+  expect(workflowAllocation.report.selected[0].id === "runtime", "workflow allocator selects highest pressure candidate");
+  expect(workflowAllocation.result.accepted === true, "workflow allocation derives into graph memory");
+
+  const blindLockFile = writeJson("blind-lock.json", {
+    title: "E2E compiler blind lock",
+    prediction: "Compiled packets include health-derived warnings after memory analysis.",
+    expectedBy: "2026-05-22T00:00:00.000Z",
+    falsifier: "Compiled packets omit stale or contradiction warnings when they exist.",
+    confidence: 0.7,
+    tags: ["compiler", "memory-health"]
+  });
+  const blindLock = parseJson(runCli(["blind-lock", "add", "--json", blindLockFile]));
+  expect(blindLock.result.accepted === true, "blind lock admits as a typed cell");
 
   const secretSave = parseJson(runCli(
     [
@@ -199,6 +327,236 @@ try {
       }
     }, store);
     expect(mcpCompile.error === undefined, "MCP recall_compile succeeds");
+    const mcpMaintenance = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "recall_maintenance",
+        arguments: {
+          derive: false
+        }
+      }
+    }, store);
+    expect(mcpMaintenance.error === undefined, "MCP recall_maintenance succeeds");
+    const mcpStorage = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: {
+        name: "recall_storage",
+        arguments: {}
+      }
+    }, store);
+    expect(mcpStorage.error === undefined, "MCP recall_storage succeeds");
+    const mcpPage = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 8,
+      method: "tools/call",
+      params: {
+        name: "recall_page",
+        arguments: {
+          page: "index"
+        }
+      }
+    }, store);
+    expect(mcpPage.error === undefined, "MCP recall_page succeeds");
+    const mcpCell = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "recall_cell",
+        arguments: {
+          idOrAddress: firstAdmission.node.cellAddress
+        }
+      }
+    }, store);
+    expect(mcpCell.error === undefined, "MCP recall_cell succeeds");
+    const mcpWorkflow = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "recall_workflow_allocate",
+        arguments: {
+          candidates: [
+            {
+              id: "mcp-runtime",
+              title: "MCP runtime check",
+              impact: 0.8,
+              uncertainty: 0.7,
+              concern: 0.7,
+              cost: 0.4
+            }
+          ],
+          limit: 1,
+          derive: true
+        }
+      }
+    }, store);
+    expect(mcpWorkflow.error === undefined, "MCP recall_workflow_allocate succeeds");
+    const mcpBlindLock = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: {
+        name: "recall_blind_lock",
+        arguments: {
+          blindLock: {
+            title: "MCP blind lock",
+            prediction: "MCP can admit blind locks as private typed cells.",
+            confidence: 0.6
+          }
+        }
+      }
+    }, store);
+    expect(mcpBlindLock.error === undefined, "MCP recall_blind_lock succeeds");
+    const mcpTick = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 12,
+      method: "tools/call",
+      params: {
+        name: "recall_tick",
+        arguments: {
+          derive: false
+        }
+      }
+    }, store);
+    expect(mcpTick.error === undefined, "MCP recall_tick succeeds");
+    const mcpOperate = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 13,
+      method: "tools/call",
+      params: {
+        name: "recall_operate_once",
+        arguments: {
+          derive: false,
+          semanticReindex: true,
+          evalClosure: false,
+          cognitiveTick: false,
+          daemonMaintenance: false
+        }
+      }
+    }, store);
+    expect(mcpOperate.error === undefined, "MCP recall_operate_once succeeds");
+    const mcpOperateJson = parseJson(mcpText(mcpOperate));
+    expect(mcpOperateJson.ledger?.id, "MCP recall_operate_once returns a ledger id");
+    const mcpAcpSend = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 14,
+      method: "tools/call",
+      params: {
+        name: "recall_acp_send",
+        arguments: {
+          request: {
+            channel: "inbox",
+            fromAgent: "agent:mcp",
+            toAgent: "recall-acp-manager",
+            action: "status",
+            payload: {}
+          }
+        }
+      }
+    }, store);
+    expect(mcpAcpSend.error === undefined, "MCP recall_acp_send succeeds");
+    const mcpAcpSendJson = parseJson(mcpText(mcpAcpSend));
+    const mcpAcpProcess = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 15,
+      method: "tools/call",
+      params: {
+        name: "recall_acp_process",
+        arguments: {
+          manager: "recall-acp-manager",
+          toAgent: "recall-acp-manager",
+          limit: 5
+        }
+      }
+    }, store);
+    expect(mcpAcpProcess.error === undefined, "MCP recall_acp_process succeeds");
+    const mcpAcpExchange = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 16,
+      method: "tools/call",
+      params: {
+        name: "recall_acp_exchange",
+        arguments: {
+          manager: "recall-acp-manager",
+          toAgent: "recall-acp-manager",
+          request: {
+            channel: "inbox",
+            fromAgent: "agent:mcp",
+            toAgent: "recall-acp-manager",
+            action: "status",
+            payload: {}
+          }
+        }
+      }
+    }, store);
+    expect(mcpAcpExchange.error === undefined, "MCP recall_acp_exchange succeeds");
+    const mcpAcpExchangeJson = parseJson(mcpText(mcpAcpExchange));
+    const mcpAcpList = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 17,
+      method: "tools/call",
+      params: {
+        name: "recall_acp_list",
+        arguments: {
+          status: "completed",
+          limit: 5
+        }
+      }
+    }, store);
+    expect(mcpAcpList.error === undefined, "MCP recall_acp_list succeeds");
+    const mcpAcpListJson = parseJson(mcpText(mcpAcpList));
+    expect(mcpAcpListJson.requests.some((request) => request.id === mcpAcpSendJson.request.id), "MCP recall_acp_list returns the processed ACP request");
+    expect(mcpAcpListJson.requests.some((request) => request.id === mcpAcpExchangeJson.request.id), "MCP recall_acp_list returns the exchanged ACP request");
+    const mcpAcpShow = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 18,
+      method: "tools/call",
+      params: {
+        name: "recall_acp_show",
+        arguments: {
+          requestId: mcpAcpExchangeJson.request.id
+        }
+      }
+    }, store);
+    expect(mcpAcpShow.error === undefined, "MCP recall_acp_show succeeds");
+    const mcpAcpShowJson = parseJson(mcpText(mcpAcpShow));
+    expect(mcpAcpShowJson.status === "completed", "MCP recall_acp_show returns the exchanged ACP request");
+    const mcpOperateList = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 18,
+      method: "tools/call",
+      params: {
+        name: "recall_operate_list",
+        arguments: {
+          limit: 5
+        }
+      }
+    }, store);
+    expect(mcpOperateList.error === undefined, "MCP recall_operate_list succeeds");
+    const mcpOperateListJson = parseJson(mcpText(mcpOperateList));
+    expect(
+      mcpOperateListJson.runs.some((run) => run.id === mcpOperateJson.ledger.id),
+      "MCP recall_operate_list returns the latest ledger id"
+    );
+    const mcpOperateShow = handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 19,
+      method: "tools/call",
+      params: {
+        name: "recall_operate_show",
+        arguments: {
+          runId: mcpOperateJson.ledger.id
+        }
+      }
+    }, store);
+    expect(mcpOperateShow.error === undefined, "MCP recall_operate_show succeeds");
+    const mcpOperateShowJson = parseJson(mcpText(mcpOperateShow));
+    expect(mcpOperateShowJson.result.status === "ran", "MCP recall_operate_show returns the stored report");
   } finally {
     store.close();
   }
@@ -236,10 +594,24 @@ function parseJson(text) {
   return JSON.parse(text);
 }
 
+function mcpText(response) {
+  return response.result?.content?.[0]?.text ?? "";
+}
+
 function assertJson(text, predicate, label) {
   const value = parseJson(text);
   expect(predicate(value), label);
   return value;
+}
+
+function sectionText(text, name) {
+  const start = text.indexOf(`${name}:\n`);
+  if (start < 0) {
+    return "";
+  }
+  const rest = text.slice(start + name.length + 2);
+  const next = rest.search(/\n\n[a-z_]+:\n/);
+  return next < 0 ? rest : rest.slice(0, next);
 }
 
 function expect(condition, label) {
@@ -249,7 +621,7 @@ function expect(condition, label) {
   steps.push(label);
 }
 
-function proposal({ title, body, summary, intent, subject, idea }) {
+function proposal({ title, body, summary, intent, subject, idea, evidence = {} }) {
   return {
     schema_version: "recall.write.v1",
     actor: {
@@ -293,7 +665,8 @@ function proposal({ title, body, summary, intent, subject, idea }) {
       depends_on: [],
       supports: [],
       contradicts: [],
-      concerns: []
+      concerns: [],
+      ...evidence
     },
     confidence: {
       value: 0.78,

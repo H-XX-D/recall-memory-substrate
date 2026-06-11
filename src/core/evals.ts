@@ -70,7 +70,7 @@ export function defaultEvalSuite(): RecallEvalSuite {
   };
 }
 
-export function runRecallEval(store: RecallStore, suite: RecallEvalSuite = defaultEvalSuite()): RecallEvalResult {
+export function runRecallEval(store: RecallStore, suite: RecallEvalSuite = defaultEvalSuite(), now = new Date()): RecallEvalResult {
   const cases = suite.cases.map((testCase) => runCase(store, testCase));
   const score = cases.length === 0 ? 1 : cases.reduce((sum, item) => sum + item.score, 0) / cases.length;
   return {
@@ -78,7 +78,7 @@ export function runRecallEval(store: RecallStore, suite: RecallEvalSuite = defau
     passed: cases.every((item) => item.passed),
     score: round(score),
     cases,
-    createdAt: new Date().toISOString()
+    createdAt: now.toISOString()
   };
 }
 

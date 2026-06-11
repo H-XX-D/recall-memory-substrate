@@ -1,7 +1,7 @@
 {
   "name": "recall-memory-substrate",
   "version": "0.1.0",
-  "description": "Local-first active memory substrate for LLM agents.",
+  "description": "Disciplined, operable memory for LLM agents — a local-first active memory substrate.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
@@ -35,10 +35,13 @@
     "scripts/install-local.sh",
     "AGENTS.md",
     "CHANGELOG.md",
+    "CITATION.cff",
+    "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "LICENSE",
     "NOTICE",
     "README.md",
+    "ROADMAP.md",
     "SECURITY.md"
   ],
   "engines": {
@@ -50,6 +53,8 @@
     "test": "npm run build && node --disable-warning=ExperimentalWarning --test \"dist/tests/**/*.test.js\"",
     "check": "npm run test",
     "e2e": "npm run build && node --disable-warning=ExperimentalWarning scripts/e2e.mjs",
+    "bench": "npm run build && node --disable-warning=ExperimentalWarning scripts/bench.mjs",
+    "bench:public": "npm run build && node --disable-warning=ExperimentalWarning scripts/public-bench.mjs",
     "install:local": "npm install && npm run build && npm link",
     "prepublishOnly": "npm test && npm run e2e",
     "smoke": "npm run build && node --disable-warning=ExperimentalWarning dist/src/cli.js init --db .recall/smoke.sqlite3 && node --disable-warning=ExperimentalWarning dist/src/cli.js status --db .recall/smoke.sqlite3"

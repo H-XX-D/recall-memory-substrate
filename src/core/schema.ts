@@ -15,22 +15,51 @@ import {
   type WriteProposal
 } from "./types.js";
 
-const ACTOR_KINDS: readonly ActorKind[] = ["llm", "human", "daemon", "adapter", "program"];
+const ACTOR_KINDS: readonly ActorKind[] = ["llm", "human", "daemon", "connector", "program"];
 const INTENT_KINDS: readonly IntentKind[] = [
   "observation",
   "witness",
   "belief_update",
   "task",
+  "objective",
+  "goal",
   "decision",
   "risk",
   "constraint",
+  "contradiction",
+  "conflict",
+  "hypothesis",
+  "lemma",
+  "question",
+  "assumption",
+  "preference",
+  "checkpoint",
+  "artifact",
+  "source",
+  "domain",
+  "transfer",
+  "action",
+  "trust",
+  "meta",
+  "reflection",
+  "identity",
+  "handoff",
+  "session",
+  "benchmark_run",
   "program",
-  "relation"
+  "relation",
+  "context_packet",
+  "work_candidate",
+  "proxy_score",
+  "verification_result",
+  "blind_lock",
+  "allocation_plan",
+  "miss"
 ];
 const INTENT_OPERATIONS: readonly IntentOperation[] = ["create", "update", "supersede", "link", "archive"];
 const SOURCE_QUALITIES: readonly SourceQuality[] = ["unknown", "low", "medium", "high"];
 const STABILITIES: readonly Stability[] = ["ephemeral", "volatile", "stable"];
-const ORIGINS: readonly ProvenanceOrigin[] = ["human", "llm", "daemon", "adapter", "program", "external"];
+const ORIGINS: readonly ProvenanceOrigin[] = ["human", "llm", "daemon", "connector", "program", "external"];
 const VERIFICATIONS: readonly Verification[] = ["unverified", "checked", "tested", "external"];
 const SIGNATURE_STATUSES: readonly SignatureStatus[] = ["unsigned", "signed", "verified"];
 const SENSITIVITIES: readonly Sensitivity[] = ["public", "private", "secret"];

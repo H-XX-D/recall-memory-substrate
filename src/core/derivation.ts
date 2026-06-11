@@ -45,6 +45,7 @@ export function programRunToWitnessProposal(
   const outputSummary = stringAt(witness, "summary");
   const score = numberAt(run.output, "score");
   const maxConcern = numberAt(run.output, "maxConcern");
+  const memberReferences = referencesFromProgramOutput(run.output);
 
   return makeDerivedProposal({
     options,
@@ -62,7 +63,7 @@ export function programRunToWitnessProposal(
       createdAt: run.createdAt
     }),
     sourceRefs: [`program_runs/${run.id}`, `programs/${run.programId}`, `hyperedges/${run.hyperedgeId}`],
-    dependsOn: [run.hyperedgeId],
+    dependsOn: unique([run.hyperedgeId, ...memberReferences]),
     topics: ["runtime", "program"],
     entities: [run.programId, run.hyperedgeId],
     rings: ["runtime"],
@@ -75,6 +76,34 @@ export function programRunToWitnessProposal(
     stability: "stable",
     verification: "checked"
   });
+}
+
+function referencesFromProgramOutput(output: Record<string, unknown>): string[] {
+  const direct = stringArrayAt(output, "memberAddresses");
+  const witness = recordAt(output, "witness");
+  const witnessAddresses = stringArrayAt(witness, "memberAddresses");
+  const memberReferences = arrayAt(output, "memberReferences")
+    .map(referenceFromMemberRecord)
+    .filter((reference): reference is string => reference !== null);
+  const witnessMemberReferences = arrayAt(witness, "memberReferences")
+    .map(referenceFromMemberRecord)
+    .filter((reference): reference is string => reference !== null);
+  return unique([...direct, ...witnessAddresses, ...memberReferences, ...witnessMemberReferences]);
+}
+
+function referenceFromMemberRecord(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const explicit = stringAt(value, "reference");
+  if (explicit) {
+    return explicit;
+  }
+  const address = stringAt(value, "address");
+  const nodeId = stringAt(value, "nodeId");
+  const path = stringAt(value, "path");
+  const target = address ?? nodeId;
+  return target ? (path ? `${target}#${path}` : target) : null;
 }
 
 export function dagAnalysisToProposals(
@@ -377,6 +406,16 @@ function numberAt(record: Record<string, unknown>, key: string): number | null {
 function stringAt(record: Record<string, unknown> | null, key: string): string | null {
   const value = record?.[key];
   return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function stringArrayAt(record: Record<string, unknown> | null, key: string): string[] {
+  const value = record?.[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "") : [];
+}
+
+function arrayAt(record: Record<string, unknown> | null, key: string): unknown[] {
+  const value = record?.[key];
+  return Array.isArray(value) ? value : [];
 }
 
 function recordAt(record: Record<string, unknown>, key: string): Record<string, unknown> | null {

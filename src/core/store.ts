@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { admitWriteProposal } from "./admission.js";
@@ -14,15 +14,22 @@ import {
 } from "./derivation.js";
 import { runRecallEval, type RecallEvalResult, type RecallEvalSuite } from "./evals.js";
 import { executeHyperedgeProgram, validateProgramSpec } from "./programs.js";
-import { cosine, embedTextRecord, textForEmbedding, type SemanticHit } from "./semantic.js";
+import { resolveCellReference, type ResolvedCellReference } from "./references.js";
+import { calibrationFactors, effectiveConfidence } from "./evidence.js";
+import { buildFtsMatchQuery, fuseCandidates, searchTerms, type FuseOptions, type LexicalCandidate } from "./retrieval.js";
+import { cosine, embedTextRecord, hashEmbedding, textForEmbedding, type SemanticHit } from "./semantic.js";
 import type {
   AdmissionResult,
   DagAnalysis,
   DagOverlay,
+  AcpRequest,
+  AcpRequestAction,
+  AcpRequestStatus,
   Hyperedge,
   HyperedgeMember,
   HyperedgeProgram,
   HyperedgeProgramSpec,
+  OperatorRun,
   ProgramRun,
   ProposalScope,
   RecallNode,
@@ -31,6 +38,12 @@ import type {
   StoreStats,
   WriteProposal
 } from "./types.js";
+
+export interface SimilarCell {
+  node: RecallNode;
+  titleJaccard: number;
+  contentCosine: number;
+}
 
 export interface SubgraphFilter {
   category?: string[];
@@ -88,6 +101,29 @@ export interface StoredEvalRun {
   createdAt: string;
 }
 
+export interface AcpRequestInput {
+  id?: string;
+  channel?: string;
+  fromAgent: string;
+  toAgent: string;
+  action: AcpRequestAction;
+  payload?: Record<string, unknown>;
+  status?: AcpRequestStatus;
+  response?: Record<string, unknown> | null;
+  error?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  processedAt?: string | null;
+}
+
+export interface OperatorRunInput {
+  id?: string;
+  status: OperatorRun["status"];
+  summary: string;
+  result: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface RecallStore {
   insertAdmittedWrite(
     node: RecallNode,
@@ -98,18 +134,23 @@ export interface RecallStore {
   ): void;
   getNodeByDerivationKey(derivationKey: string): RecallNode | null;
   stats(): StoreStats;
-  search(query: string, limit?: number): RecallNode[];
+  search(query: string, limit?: number, options?: FuseOptions): RecallNode[];
+  lexicalBackend?(): "fts5-bm25" | "like";
+  similarActiveCells?(title: string, body: string, limit?: number): SimilarCell[];
   semanticSearch(query: string, limit?: number): SemanticHit<RecallNode>[];
   reindexSemantic(): { indexed: number; backend: string; dims: number };
+  compact(): { beforeBytes?: number; afterBytes?: number; semanticReindex: { indexed: number; backend: string; dims: number } };
   subgraph(filter: SubgraphFilter): RecallNode[];
   getNode(id: string): RecallNode | null;
   getNodeByAddress(address: string): RecallNode | null;
+  listRelations(nodeId?: string, direction?: "in" | "out" | "both", limit?: number): RecallRelation[];
   listNodes(limit?: number): RecallNode[];
   listRollback(limit?: number): RollbackEntry[];
   applyRollback(id: string, apply?: boolean): { id: string; applied: boolean; actions: string[] };
   addHyperedge(input: HyperedgeInput): Hyperedge;
   getHyperedge(id: string): Hyperedge | null;
   listHyperedges(limit?: number): Hyperedge[];
+  hyperedgesForNode?(nodeId: string, limit?: number): Hyperedge[];
   attachProgram(hyperedgeId: string, spec: HyperedgeProgramSpec): HyperedgeProgram;
   getProgram(id: string): HyperedgeProgram | null;
   listPrograms(limit?: number): HyperedgeProgram[];
@@ -122,20 +163,32 @@ export interface RecallStore {
   listDagOverlays(limit?: number): DagOverlay[];
   analyzeDagOverlay(id: string): DagAnalysis;
   analyzeDagOverlayAndDerive(id: string, options?: Partial<DagDerivationProposalOptions>): DerivedDagAnalysisResult;
-  runEval(suite?: RecallEvalSuite): RecallEvalResult;
-  runEvalAndDerive(suite?: RecallEvalSuite, options?: Partial<DerivationProposalOptions>): DerivedEvalRunResult;
+  runEval(suite?: RecallEvalSuite, now?: Date): RecallEvalResult;
+  runEvalAndDerive(suite?: RecallEvalSuite, options?: Partial<DerivationProposalOptions>, now?: Date): DerivedEvalRunResult;
   getEvalRun(id: string): StoredEvalRun | null;
   listEvalRuns(limit?: number): StoredEvalRun[];
+  recordOperatorRun(input: OperatorRunInput): OperatorRun;
+  getOperatorRun(id: string): OperatorRun | null;
+  listOperatorRuns(limit?: number): OperatorRun[];
+  enqueueAcpRequest(input: AcpRequestInput): AcpRequest;
+  updateAcpRequest(id: string, patch: Partial<AcpRequestInput>): AcpRequest;
+  getAcpRequest(id: string): AcpRequest | null;
+  listAcpRequests(limit?: number, status?: AcpRequestStatus): AcpRequest[];
   close(): void;
 }
 
 export class SQLiteRecallStore implements RecallStore {
   private readonly db: DatabaseSync;
+  private ftsEnabled = false;
 
   constructor(readonly path: string = ".recall/recall.sqlite3") {
     const dbPath = resolve(path);
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA busy_timeout = 5000;");
+    // WAL: the same file is shared by CLI invocations, the long-running MCP
+    // server, the daemon, and ACP workers; readers must not block writers.
+    this.db.exec("PRAGMA journal_mode = WAL;");
     this.migrate();
   }
 
@@ -258,47 +311,155 @@ export class SQLiteRecallStore implements RecallStore {
       hyperedges: count(this.db, "hyperedges"),
       programs: count(this.db, "hyperedge_programs"),
       dagOverlays: count(this.db, "dag_overlays"),
-      evalRuns: count(this.db, "eval_runs")
+      evalRuns: count(this.db, "eval_runs"),
+      operatorRuns: count(this.db, "operator_runs"),
+      acpRequests: count(this.db, "acp_requests")
     };
   }
 
-  search(query: string, limit = 10): RecallNode[] {
-    const terms = query
-      .trim()
-      .split(/\s+/)
-      .filter((term) => term.length > 1)
-      .slice(0, 8);
+  search(query: string, limit = 10, options?: FuseOptions): RecallNode[] {
+    const terms = searchTerms(query);
+    if (this.ftsEnabled && terms.length > 0) {
+      const match = buildFtsMatchQuery(terms);
+      if (match) {
+        try {
+          const candidates = this.lexicalCandidates(match, Math.max(40, limit * 4));
+          if (candidates.length > 0) {
+            // Effective confidence is computed live per candidate, so ranking
+            // always reflects the current graph surface: challenged cells
+            // sink, supported cells hold, miscalibrated actors discount.
+            const factors = calibrationFactors(this);
+            for (const candidate of candidates) {
+              candidate.effectiveConfidence =
+                effectiveConfidence(this, candidate.node, factors).effective;
+            }
+            return fuseCandidates(candidates, limit, new Date(), options);
+          }
+        } catch {
+          // A MATCH string FTS5 rejects must degrade to substring search, never throw.
+        }
+      }
+    }
+    // The LIKE fallback scores in SQL and ignores kind factors — it only runs
+    // when FTS5 is unavailable, where degraded ranking is already accepted.
+    return this.searchLike(query, limit);
+  }
+
+  lexicalBackend(): "fts5-bm25" | "like" {
+    return this.ftsEnabled ? "fts5-bm25" : "like";
+  }
+
+  similarActiveCells(title: string, body: string, limit = 5): SimilarCell[] {
+    // Candidates come from the lexical index; similarity is computed locally
+    // (title token Jaccard + hash-embedding cosine over title+body) so the
+    // check stays deterministic and independent of external backends.
+    const candidates = this.search(title, Math.max(8, limit));
+    if (candidates.length === 0) {
+      return [];
+    }
+    const newTitleTokens = titleTokens(title);
+    const newVector = hashEmbedding(`${title}\n${body}`, 256);
+    return candidates
+      .map((node) => ({
+        node,
+        titleJaccard: jaccard(newTitleTokens, titleTokens(node.title)),
+        contentCosine: cosine(newVector, hashEmbedding(`${node.title}\n${node.body}`, 256))
+      }))
+      .sort((a, b) => Math.max(b.titleJaccard, b.contentCosine) - Math.max(a.titleJaccard, a.contentCosine))
+      .slice(0, limit);
+  }
+
+  private lexicalCandidates(match: string, poolSize: number): LexicalCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT n.*, f.bm25_score
+         FROM (
+           SELECT node_id, bm25(graph_nodes_fts, 4.0, 2.5, 2.0, 1.0) AS bm25_score
+           FROM graph_nodes_fts
+           WHERE graph_nodes_fts MATCH ?
+           ORDER BY bm25_score
+           LIMIT ?
+         ) f
+         JOIN graph_nodes n ON n.id = f.node_id
+         WHERE n.status = 'active'`
+      )
+      .all(match, poolSize) as unknown as (NodeRow & { bm25_score: number })[];
+    if (rows.length === 0) {
+      return [];
+    }
+    const degrees = this.relationDegrees(rows.map((row) => row.id));
+    return rows.map((row) => ({
+      node: rowToNode(row),
+      bm25: row.bm25_score,
+      degree: degrees.get(row.id) ?? 0
+    }));
+  }
+
+  private relationDegrees(ids: string[]): Map<string, number> {
+    const degrees = new Map<string, number>();
+    if (ids.length === 0) {
+      return degrees;
+    }
+    const wanted = new Set(ids);
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `SELECT source_id, target_id FROM graph_relations
+         WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`
+      )
+      .all(...ids, ...ids) as unknown as { source_id: string; target_id: string }[];
+    for (const row of rows) {
+      if (wanted.has(row.source_id)) {
+        degrees.set(row.source_id, (degrees.get(row.source_id) ?? 0) + 1);
+      }
+      if (wanted.has(row.target_id)) {
+        degrees.set(row.target_id, (degrees.get(row.target_id) ?? 0) + 1);
+      }
+    }
+    return degrees;
+  }
+
+  private searchLike(query: string, limit: number): RecallNode[] {
+    const terms = searchTerms(query);
     const effectiveTerms = terms.length > 0 ? terms : [query.trim()].filter(Boolean);
-    const clauses = effectiveTerms.map(() => "(title LIKE ? OR body LIKE ? OR tags_json LIKE ?)").join(" OR ");
-    const params = effectiveTerms.flatMap((term) => {
-      const like = `%${term}%`;
+    // Rank by distinct-term coverage weighted by field (title > tags > body) so a
+    // cell matching most of the query outranks newer cells matching one ubiquitous
+    // term; recency only breaks ties.
+    const scoreExpr = effectiveTerms.length > 0
+      ? effectiveTerms
+          .map(() => "(CASE WHEN title LIKE ? ESCAPE '\\' THEN 3 WHEN tags_json LIKE ? ESCAPE '\\' THEN 2 WHEN body LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)")
+          .join(" + ")
+      : "0";
+    const clauses = effectiveTerms
+      .map(() => "(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\' OR tags_json LIKE ? ESCAPE '\\')")
+      .join(" OR ");
+    const likeParams = effectiveTerms.flatMap((term) => {
+      const like = `%${escapeLikePattern(term)}%`;
       return [like, like, like];
     });
 
     const rows = this.db
       .prepare(
-        `SELECT * FROM graph_nodes
+        `SELECT *, (${scoreExpr}) AS lexical_score
+         FROM graph_nodes
          WHERE status = 'active'
          ${clauses.length > 0 ? `AND (${clauses})` : ""}
-         ORDER BY updated_at DESC
+         ORDER BY lexical_score DESC, updated_at DESC
          LIMIT ?`
       )
-      .all(...params, limit) as unknown as NodeRow[];
+      .all(...likeParams, ...likeParams, limit) as unknown as NodeRow[];
     return rows.map(rowToNode);
   }
 
   semanticSearch(query: string, limit = 10): SemanticHit<RecallNode>[] {
-    const queryEmbedding = embedTextRecord(query);
-    const rows = this.db
-      .prepare(
-        `SELECT n.*, s.backend, s.dims, s.vector_json
-         FROM graph_nodes n
-         JOIN semantic_index s ON s.node_id = n.id
-         WHERE n.status = 'active'
-         AND s.backend = ?
-         AND s.dims = ?`
-      )
-      .all(queryEmbedding.backend, queryEmbedding.dims) as unknown as SemanticRow[];
+    let queryEmbedding = embedTextRecord(query);
+    let rows = this.semanticRows(queryEmbedding.backend, queryEmbedding.dims);
+    if (rows.length === 0 && queryEmbedding.backend !== "hash:v1") {
+      // The configured backend has indexed nothing yet (run `recall compact`
+      // to reindex under it); degrade to whatever the hash index knows.
+      queryEmbedding = { backend: "hash:v1", dims: 256, vector: hashEmbedding(query, 256) };
+      rows = this.semanticRows(queryEmbedding.backend, queryEmbedding.dims);
+    }
     return rows
       .map((row) => ({
         item: rowToNode(row),
@@ -307,6 +468,19 @@ export class SQLiteRecallStore implements RecallStore {
       .filter((hit) => hit.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
+  }
+
+  private semanticRows(backend: string, dims: number): SemanticRow[] {
+    return this.db
+      .prepare(
+        `SELECT n.*, s.backend, s.dims, s.vector_json
+         FROM graph_nodes n
+         JOIN semantic_index s ON s.node_id = n.id
+         WHERE n.status = 'active'
+         AND s.backend = ?
+         AND s.dims = ?`
+      )
+      .all(backend, dims) as unknown as SemanticRow[];
   }
 
   reindexSemantic(): { indexed: number; backend: string; dims: number } {
@@ -336,6 +510,15 @@ export class SQLiteRecallStore implements RecallStore {
     return { indexed: rows.length, backend, dims };
   }
 
+  compact(): { beforeBytes?: number; afterBytes?: number; semanticReindex: { indexed: number; backend: string; dims: number } } {
+    const dbPath = resolve(this.path);
+    const beforeBytes = existsSync(dbPath) ? statSync(dbPath).size : undefined;
+    const semanticReindex = this.reindexSemantic();
+    this.db.exec("VACUUM");
+    const afterBytes = existsSync(dbPath) ? statSync(dbPath).size : undefined;
+    return { beforeBytes, afterBytes, semanticReindex };
+  }
+
   subgraph(filter: SubgraphFilter): RecallNode[] {
     const limit = filter.limit ?? 50;
     const families: (keyof Omit<SubgraphFilter, "limit">)[] = [
@@ -354,10 +537,12 @@ export class SQLiteRecallStore implements RecallStore {
     ];
     const activeFamilies = families.filter((family) => (filter[family]?.length ?? 0) > 0);
     const clauses = activeFamilies.flatMap((family) =>
-      filter[family]!.map(() => `tags_json LIKE ?`)
+      filter[family]!.map(() => `tags_json LIKE ? ESCAPE '\\'`)
     );
+    // JSON-escape first (quotes match their stored \" form), then LIKE-escape
+    // so the added backslashes and any % _ in the value stay literal.
     const params = activeFamilies.flatMap((family) =>
-      filter[family]!.map((value) => `%${escapeJsonLikeValue(value)}%`)
+      filter[family]!.map((value) => `%${escapeLikePattern(escapeJsonLikeValue(value))}%`)
     );
 
     const rows = this.db
@@ -380,6 +565,34 @@ export class SQLiteRecallStore implements RecallStore {
   getNodeByAddress(address: string): RecallNode | null {
     const row = this.db.prepare("SELECT * FROM graph_nodes WHERE cell_address = ?").get(address) as NodeRow | undefined;
     return row ? rowToNode(row) : null;
+  }
+
+  listRelations(nodeId?: string, direction: "in" | "out" | "both" = "both", limit = 100): RecallRelation[] {
+    if (!nodeId) {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM graph_relations
+           ORDER BY created_at DESC
+           LIMIT ?`
+        )
+        .all(limit) as unknown as RelationRow[];
+      return rows.map(rowToRelation);
+    }
+
+    const where =
+      direction === "in" ? "target_id = ?" :
+      direction === "out" ? "source_id = ?" :
+      "(source_id = ? OR target_id = ?)";
+    const params = direction === "both" ? [nodeId, nodeId, limit] : [nodeId, limit];
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM graph_relations
+         WHERE ${where}
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .all(...params) as unknown as RelationRow[];
+    return rows.map(rowToRelation);
   }
 
   listNodes(limit = 20): RecallNode[] {
@@ -464,7 +677,7 @@ export class SQLiteRecallStore implements RecallStore {
       id: input.id ?? cryptoRandomId(),
       kind: requireNonEmpty(input.kind, "hyperedge kind"),
       title: requireNonEmpty(input.title, "hyperedge title"),
-      members: normalizeMembers(input.members),
+      members: normalizeMembers(input.members, (reference) => this.resolveReference(reference)),
       metadata: input.metadata ?? {},
       createdAt: now
     };
@@ -499,6 +712,23 @@ export class SQLiteRecallStore implements RecallStore {
       )
       .all(limit) as unknown as HyperedgeRow[];
     return rows.map(rowToHyperedge);
+  }
+
+  hyperedgesForNode(nodeId: string, limit = 50): Hyperedge[] {
+    // Membership lives inside members_json; the LIKE prefilter narrows rows,
+    // the JS member check makes the match exact.
+    const needle = `"nodeId":${JSON.stringify(nodeId)}`;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM hyperedges
+         WHERE members_json LIKE ? ESCAPE '\\'
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .all(`%${escapeLikePattern(needle)}%`, limit) as unknown as HyperedgeRow[];
+    return rows
+      .map(rowToHyperedge)
+      .filter((edge) => edge.members.some((member) => member.nodeId === nodeId));
   }
 
   attachProgram(hyperedgeId: string, spec: HyperedgeProgramSpec): HyperedgeProgram {
@@ -599,8 +829,8 @@ export class SQLiteRecallStore implements RecallStore {
     const overlay: DagOverlay = {
       id: input.id ?? cryptoRandomId(),
       title: requireNonEmpty(input.title, "DAG overlay title"),
-      nodeIds: uniqueStrings(input.nodeIds),
-      edges: input.edges.map(normalizeDagEdge),
+      nodeIds: uniqueStrings(input.nodeIds.map((nodeId) => this.resolveReference(nodeId).targetId)),
+      edges: input.edges.map((edge) => normalizeDagEdge(edge, (reference) => this.resolveReference(reference).targetId)),
       metadata: input.metadata ?? {},
       createdAt: input.createdAt ?? new Date().toISOString()
     };
@@ -662,8 +892,8 @@ export class SQLiteRecallStore implements RecallStore {
     };
   }
 
-  runEval(suite?: RecallEvalSuite): RecallEvalResult {
-    const result = runRecallEval(this, suite);
+  runEval(suite?: RecallEvalSuite, now = new Date()): RecallEvalResult {
+    const result = runRecallEval(this, suite, now);
     this.db
       .prepare(
         `INSERT INTO eval_runs
@@ -674,8 +904,8 @@ export class SQLiteRecallStore implements RecallStore {
     return result;
   }
 
-  runEvalAndDerive(suite?: RecallEvalSuite, options: Partial<DerivationProposalOptions> = {}): DerivedEvalRunResult {
-    const result = this.runEval(suite);
+  runEvalAndDerive(suite?: RecallEvalSuite, options: Partial<DerivationProposalOptions> = {}, now = new Date()): DerivedEvalRunResult {
+    const result = this.runEval(suite, now);
     const proposal = evalResultToEvalRunProposal(result, {
       ...options,
       scope: options.scope ?? defaultDerivationScope()
@@ -702,8 +932,155 @@ export class SQLiteRecallStore implements RecallStore {
     return rows.map(rowToEvalRun);
   }
 
+  recordOperatorRun(input: OperatorRunInput): OperatorRun {
+    const run: OperatorRun = {
+      id: input.id ?? cryptoRandomId(),
+      status: input.status,
+      summary: input.summary,
+      result: input.result,
+      createdAt: input.createdAt
+    };
+    this.db
+      .prepare(
+        `INSERT INTO operator_runs
+          (id, status, summary, result_json, created_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(run.id, run.status, run.summary, stringify(run.result), run.createdAt);
+    return run;
+  }
+
+  getOperatorRun(id: string): OperatorRun | null {
+    const row = this.db.prepare("SELECT * FROM operator_runs WHERE id = ?").get(id) as OperatorRunRow | undefined;
+    return row ? rowToOperatorRun(row) : null;
+  }
+
+  listOperatorRuns(limit = 20): OperatorRun[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM operator_runs
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .all(limit) as unknown as OperatorRunRow[];
+    return rows.map(rowToOperatorRun);
+  }
+
+  enqueueAcpRequest(input: AcpRequestInput): AcpRequest {
+    const request: AcpRequest = {
+      id: input.id ?? cryptoRandomId(),
+      channel: requireNonEmpty(input.channel ?? "inbox", "acp channel"),
+      fromAgent: requireNonEmpty(input.fromAgent, "acp fromAgent"),
+      toAgent: requireNonEmpty(input.toAgent, "acp toAgent"),
+      action: input.action,
+      payload: input.payload ?? {},
+      status: input.status ?? "queued",
+      response: input.response ?? null,
+      error: input.error ?? null,
+      createdAt: input.createdAt ?? new Date().toISOString(),
+      updatedAt: input.updatedAt ?? new Date().toISOString(),
+      processedAt: input.processedAt ?? null
+    };
+    this.db
+      .prepare(
+        `INSERT INTO acp_requests
+          (id, channel, from_agent, to_agent, action, payload_json, status, response_json, error_text, created_at, updated_at, processed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        request.id,
+        request.channel,
+        request.fromAgent,
+        request.toAgent,
+        request.action,
+        stringify(request.payload),
+        request.status,
+        request.response === null ? null : stringify(request.response),
+        request.error,
+        request.createdAt,
+        request.updatedAt,
+        request.processedAt
+      );
+    return request;
+  }
+
+  updateAcpRequest(id: string, patch: Partial<AcpRequestInput>): AcpRequest {
+    const current = this.getAcpRequest(id);
+    if (!current) {
+      throw new Error(`Unknown ACP request: ${id}`);
+    }
+    const merged: AcpRequest = {
+      ...current,
+      channel: patch.channel ?? current.channel,
+      fromAgent: patch.fromAgent ?? current.fromAgent,
+      toAgent: patch.toAgent ?? current.toAgent,
+      action: patch.action ?? current.action,
+      payload: patch.payload ?? current.payload,
+      status: patch.status ?? current.status,
+      response: patch.response !== undefined ? patch.response : current.response,
+      error: patch.error !== undefined ? patch.error : current.error,
+      createdAt: patch.createdAt ?? current.createdAt,
+      updatedAt: patch.updatedAt ?? new Date().toISOString(),
+      processedAt: patch.processedAt !== undefined ? patch.processedAt : current.processedAt
+    };
+    this.db
+      .prepare(
+        `UPDATE acp_requests
+         SET channel = ?, from_agent = ?, to_agent = ?, action = ?, payload_json = ?, status = ?, response_json = ?, error_text = ?, created_at = ?, updated_at = ?, processed_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        merged.channel,
+        merged.fromAgent,
+        merged.toAgent,
+        merged.action,
+        stringify(merged.payload),
+        merged.status,
+        merged.response === null ? null : stringify(merged.response),
+        merged.error,
+        merged.createdAt,
+        merged.updatedAt,
+        merged.processedAt,
+        merged.id
+      );
+    return merged;
+  }
+
+  getAcpRequest(id: string): AcpRequest | null {
+    const row = this.db.prepare("SELECT * FROM acp_requests WHERE id = ?").get(id) as AcpRequestRow | undefined;
+    return row ? rowToAcpRequest(row) : null;
+  }
+
+  listAcpRequests(limit = 20, status?: AcpRequestStatus): AcpRequest[] {
+    const rows = status
+      ? (this.db
+          .prepare(
+            `SELECT * FROM acp_requests
+             WHERE status = ?
+             ORDER BY created_at DESC
+             LIMIT ?`
+          )
+          .all(status, limit) as unknown as AcpRequestRow[])
+      : (this.db
+          .prepare(
+            `SELECT * FROM acp_requests
+             ORDER BY created_at DESC
+             LIMIT ?`
+          )
+          .all(limit) as unknown as AcpRequestRow[]);
+    return rows.map(rowToAcpRequest);
+  }
+
   close(): void {
     this.db.close();
+  }
+
+  private resolveReference(reference: string): ResolvedCellReference {
+    return resolveCellReference(
+      reference,
+      (id) => this.getNode(id),
+      (address) => this.getNodeByAddress(address)
+    );
   }
 
   private migrate(): void {
@@ -790,6 +1167,27 @@ export class SQLiteRecallStore implements RecallStore {
         result_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS acp_requests (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        from_agent TEXT NOT NULL,
+        to_agent TEXT NOT NULL,
+        action TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        response_json TEXT,
+        error_text TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        processed_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS operator_runs (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS derivation_index (
         derivation_key TEXT PRIMARY KEY,
         node_id TEXT NOT NULL,
@@ -806,6 +1204,8 @@ export class SQLiteRecallStore implements RecallStore {
       CREATE INDEX IF NOT EXISTS idx_hyperedge_programs_edge ON hyperedge_programs(hyperedge_id);
       CREATE INDEX IF NOT EXISTS idx_program_runs_program ON program_runs(program_id);
       CREATE INDEX IF NOT EXISTS idx_eval_runs_created ON eval_runs(created_at);
+      CREATE INDEX IF NOT EXISTS idx_acp_requests_status ON acp_requests(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_operator_runs_created ON operator_runs(created_at);
       CREATE INDEX IF NOT EXISTS idx_derivation_index_node ON derivation_index(node_id);
     `);
     try {
@@ -823,11 +1223,88 @@ export class SQLiteRecallStore implements RecallStore {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_nodes_cell_address
       ON graph_nodes(cell_address)
       WHERE cell_address IS NOT NULL;
+      DELETE FROM acp_requests
+      WHERE status = 'queued'
+        AND id NOT IN (
+          SELECT id FROM acp_requests
+          WHERE status = 'queued'
+          ORDER BY created_at DESC
+          LIMIT 1000
+        );
       DELETE FROM derivation_index
       WHERE node_id NOT IN (
         SELECT id FROM graph_nodes WHERE status = 'active'
       );
     `);
+    this.ftsEnabled = this.migrateLexicalIndex();
+    this.migrateRelationTargets();
+  }
+
+  private migrateRelationTargets(): void {
+    // Older binaries stored relation targets as recall:// address strings,
+    // which made them invisible to every id-keyed lookup (incoming-challenge
+    // surfacing, rel in/out counts, search degree prior). Rewrite to bare
+    // node ids where the trailing segment resolves.
+    const rows = this.db
+      .prepare("SELECT id, target_id FROM graph_relations WHERE target_id LIKE 'recall://%'")
+      .all() as unknown as { id: string; target_id: string }[];
+    if (rows.length === 0) {
+      return;
+    }
+    const update = this.db.prepare("UPDATE graph_relations SET target_id = ? WHERE id = ?");
+    for (const row of rows) {
+      const withoutPath = row.target_id.split("#")[0];
+      const segments = withoutPath.split("/").filter((segment) => segment.length > 0);
+      const candidate = segments[segments.length - 1];
+      if (!candidate || candidate === row.target_id) {
+        continue;
+      }
+      const exists = this.db.prepare("SELECT 1 FROM graph_nodes WHERE id = ?").get(candidate);
+      if (exists) {
+        update.run(candidate, row.id);
+      }
+    }
+  }
+
+  private migrateLexicalIndex(): boolean {
+    // Triggers (not application-level sync) keep the index correct even when
+    // an older binary that predates FTS writes to this database file.
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS graph_nodes_fts USING fts5(
+          node_id UNINDEXED, title, tags, summary, body,
+          tokenize = 'porter unicode61'
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_graph_nodes_fts_insert
+        AFTER INSERT ON graph_nodes BEGIN
+          INSERT INTO graph_nodes_fts (node_id, title, tags, summary, body)
+          VALUES (new.id, new.title, new.tags_json, coalesce(new.summary, ''), new.body);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_graph_nodes_fts_update
+        AFTER UPDATE ON graph_nodes BEGIN
+          DELETE FROM graph_nodes_fts WHERE node_id = old.id;
+          INSERT INTO graph_nodes_fts (node_id, title, tags, summary, body)
+          VALUES (new.id, new.title, new.tags_json, coalesce(new.summary, ''), new.body);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_graph_nodes_fts_delete
+        AFTER DELETE ON graph_nodes BEGIN
+          DELETE FROM graph_nodes_fts WHERE node_id = old.id;
+        END;
+      `);
+      const nodes = count(this.db, "graph_nodes");
+      const indexed = count(this.db, "graph_nodes_fts");
+      if (indexed !== nodes) {
+        this.db.exec(`
+          DELETE FROM graph_nodes_fts;
+          INSERT INTO graph_nodes_fts (node_id, title, tags, summary, body)
+          SELECT id, title, tags_json, coalesce(summary, ''), body FROM graph_nodes;
+        `);
+      }
+      return true;
+    } catch {
+      // SQLite builds without FTS5 fall back to LIKE-based search.
+      return false;
+    }
   }
 }
 
@@ -861,6 +1338,15 @@ interface RollbackRow {
   after_json: string;
   created_at: string;
   applied_at?: string | null;
+}
+
+interface RelationRow {
+  id: string;
+  kind: RecallRelation["kind"];
+  source_id: string;
+  target_id: string;
+  data_json: string;
+  created_at: string;
 }
 
 interface HyperedgeRow {
@@ -904,6 +1390,29 @@ interface EvalRunRow {
   created_at: string;
 }
 
+interface AcpRequestRow {
+  id: string;
+  channel: string;
+  from_agent: string;
+  to_agent: string;
+  action: AcpRequestAction;
+  payload_json: string;
+  status: AcpRequestStatus;
+  response_json: string | null;
+  error_text: string | null;
+  created_at: string;
+  updated_at: string;
+  processed_at: string | null;
+}
+
+interface OperatorRunRow {
+  id: string;
+  status: OperatorRun["status"];
+  summary: string;
+  result_json: string;
+  created_at: string;
+}
+
 function rowToNode(row: NodeRow): RecallNode {
   return {
     id: row.id,
@@ -929,6 +1438,17 @@ function rowToRollback(row: RollbackRow): RollbackEntry {
     targetId: row.target_id,
     before: row.before_json === null ? null : (JSON.parse(row.before_json) as Record<string, unknown>),
     after: JSON.parse(row.after_json) as Record<string, unknown>,
+    createdAt: row.created_at
+  };
+}
+
+function rowToRelation(row: RelationRow): RecallRelation {
+  return {
+    id: row.id,
+    kind: row.kind,
+    sourceId: row.source_id,
+    targetId: row.target_id,
+    data: JSON.parse(row.data_json) as Record<string, unknown>,
     createdAt: row.created_at
   };
 }
@@ -984,6 +1504,55 @@ function rowToEvalRun(row: EvalRunRow): StoredEvalRun {
   };
 }
 
+function rowToAcpRequest(row: AcpRequestRow): AcpRequest {
+  return {
+    id: row.id,
+    channel: row.channel,
+    fromAgent: row.from_agent,
+    toAgent: row.to_agent,
+    action: row.action,
+    payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+    status: row.status,
+    response: row.response_json === null ? null : (JSON.parse(row.response_json) as Record<string, unknown>),
+    error: row.error_text,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    processedAt: row.processed_at
+  };
+}
+
+function rowToOperatorRun(row: OperatorRunRow): OperatorRun {
+  return {
+    id: row.id,
+    status: row.status,
+    summary: row.summary,
+    result: JSON.parse(row.result_json) as Record<string, unknown>,
+    createdAt: row.created_at
+  };
+}
+
+function titleTokens(title: string): Set<string> {
+  return new Set(
+    title
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .filter((token) => token.length > 1)
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) {
+    return 0;
+  }
+  let shared = 0;
+  for (const token of a) {
+    if (b.has(token)) {
+      shared += 1;
+    }
+  }
+  return shared / (a.size + b.size - shared);
+}
+
 function count(db: DatabaseSync, table: string): number {
   const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count: number };
   return row.count;
@@ -1001,6 +1570,12 @@ function escapeJsonLikeValue(value: string): string {
   return value.replaceAll('"', '\\"');
 }
 
+// Neutralizes LIKE wildcards in user terms; every LIKE consuming these
+// patterns must carry ESCAPE '\' or the added backslashes break matching.
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
 function rollbackActions(entry: RollbackEntry): string[] {
   if (entry.action === "insert_node") {
     return [`archive inserted node ${entry.targetId}`, `delete relations attached to ${entry.targetId}`, `delete derivation index rows for ${entry.targetId}`];
@@ -1014,26 +1589,53 @@ function rollbackActions(entry: RollbackEntry): string[] {
   return [`unsupported rollback action for ${entry.targetId}`];
 }
 
-function normalizeMembers(members: HyperedgeMember[]): Hyperedge["members"] {
+function normalizeMembers(
+  members: HyperedgeMember[],
+  resolveReference: (reference: string) => ResolvedCellReference
+): Hyperedge["members"] {
   if (!Array.isArray(members) || members.length === 0) {
     throw new Error("Hyperedge requires at least one member");
   }
-  return members.map((member, index) => ({
-    nodeId: requireNonEmpty(member.nodeId, "member nodeId"),
-    role: requireNonEmpty(member.role, "member role"),
-    ordinal: member.ordinal ?? index,
-    weight: member.weight,
-    metadata: member.metadata
-  }));
+  return members.map((member, index) => {
+    const resolved = resolveReference(requireNonEmpty(member.nodeId, "member nodeId"));
+    return {
+      nodeId: resolved.targetId,
+      role: requireNonEmpty(member.role, "member role"),
+      ordinal: member.ordinal ?? index,
+      weight: member.weight,
+      metadata: memberMetadata(member.metadata, resolved)
+    };
+  });
 }
 
-function normalizeDagEdge(edge: DagOverlay["edges"][number]): DagOverlay["edges"][number] {
+function normalizeDagEdge(
+  edge: DagOverlay["edges"][number],
+  resolveReference: (reference: string) => string
+): DagOverlay["edges"][number] {
   return {
-    from: requireNonEmpty(edge.from, "DAG edge from"),
-    to: requireNonEmpty(edge.to, "DAG edge to"),
+    from: resolveReference(requireNonEmpty(edge.from, "DAG edge from")),
+    to: resolveReference(requireNonEmpty(edge.to, "DAG edge to")),
     label: edge.label,
     weight: edge.weight
   };
+}
+
+function memberMetadata(
+  metadata: Record<string, unknown> | undefined,
+  resolved: ResolvedCellReference
+): Record<string, unknown> | undefined {
+  const referenceMetadata: Record<string, unknown> = {};
+  if (resolved.raw !== resolved.targetId) {
+    referenceMetadata.targetRef = resolved.raw;
+  }
+  if (resolved.targetAddress) {
+    referenceMetadata.targetAddress = resolved.targetAddress;
+  }
+  if (resolved.path) {
+    referenceMetadata.targetPath = resolved.path;
+  }
+  const merged = { ...(metadata ?? {}), ...referenceMetadata };
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 function uniqueStrings(values: string[]): string[] {
