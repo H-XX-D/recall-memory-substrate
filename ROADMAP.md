@@ -45,19 +45,30 @@ These don't change. They're the filter every roadmap item passes through:
 - ✅ Eval harness with persisted eval-result cells
 - 🛠️ Cross-platform daemon service helpers (Linux systemd + Windows in addition
   to the current macOS LaunchAgent)
-- 🛠️ Expanded eval suites and a reproducible benchmark harness, so the
-  comparison tables can graduate from *design properties* to *measured results*
+- ✅ Reproducible public benchmark harness (`npm run bench:public`)
+- 🛠️ Expanded eval suites and memory-*quality* benchmarks, so the comparison
+  tables can graduate from *design properties* to *measured results*
 - 🔭 Configurable maintenance policies (cadence, budgets, which passes run)
 
 ## Interfaces — CLI, TUI, MCP, bridges, importers, integrations
 
-- ✅ CLI, read-only TUI, stdio MCP server (17 tools)
+- ✅ CLI, read-only TUI, stdio MCP server (42 tools, idle self-exit)
 - ✅ Enforcement hook templates + compliance/longitudinal instrumentation
 - ✅ Real-embedding semantic backend via `RECALL_EMBEDDING_COMMAND`
 - 🛠️ **Publish to npm** so `npm install -g recall-memory-substrate` works
   directly (today's install is from GitHub)
-- 🛠️ Workflow-engine CLI surface (cell kinds exist today; commands are planned
-  for v0.2+ — see [`docs/09_WORKFLOW_ENGINE.md`](docs/09_WORKFLOW_ENGINE.md))
+- 🛠️ **Shared team graph** — one project graph served to a whole team. The
+  admission firewall already makes multi-writer memory safe: every write is
+  schema-gated, attributed (`actor`, `produced_by`), timestamped,
+  rollbackable, and calibration scores each writer separately — so a
+  teammate is never operating blind on what changed, who changed it, or
+  how much to trust it. WAL covers many processes on one host today; the
+  remaining work is transport and identity — an HTTP/SSE MCP endpoint in
+  front of the store, and authenticated actor identity (signed witnesses
+  are the existing upgrade path from declared identity).
+- 🛠️ Workflow-engine CLI surface (`recall workflow allocate` shipped; the
+  remaining commands are planned — see
+  [`docs/09_WORKFLOW_ENGINE.md`](docs/09_WORKFLOW_ENGINE.md))
 - 🛠️ Importers for common note/agent-log formats, writing through admission
 - 🔭 Additional embedding backends and external graph integrations
 - 🔭 A short, copy-pasteable "first 5 minutes" demo and a recorded walkthrough

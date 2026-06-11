@@ -40,3 +40,33 @@ benchmark-results-*.json
 patent-*-draft*.md
 patent-*-confidential*.md
 *-confidential*.md
+
+# Business / commercial planning — never in the user-facing OSS repo.
+# Strategy, pricing, enterprise, and investor material lives outside this
+# repository; these patterns are belt-and-suspenders for stray drafts.
+SOLVEPLANE*
+EXPANSION*
+INDUSTRY_COMPARISON*
+*PRICING*
+pricing-*.md
+*-pricing*.md
+strategy-*.md
+*-strategy*.md
+business-*.md
+*-business*.md
+enterprise-*.md
+*-enterprise*.md
+investor-*
+pitch-*
+revenue-*
+
+# Internal development exhaust — session logs, planning trees, spec scratch,
+# local verification ledgers. Workflow state, not product.
+SPRINT*.md
+.planning/
+.dogfood-log/
+docs/superpowers/
+scratch-*
+*.scratch.*
+.checker/*
+!.checker/checks.json
