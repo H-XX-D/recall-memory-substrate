@@ -13,6 +13,7 @@ coverage/
 *.db-wal
 tmp/
 .recall/
+.playwright-mcp/
 
 # Python (python/ subdir client toolkit)
 __pycache__/
