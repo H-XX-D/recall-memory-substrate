@@ -13,7 +13,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-94%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-99%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -248,7 +248,25 @@ watcher files a concern on the decision built on it, the decision's
 effective confidence falls, *its* watcher wakes — and belief revision
 propagates through your dependency graph one audited write at a time. Cron
 a watch and any standing decision becomes a monitored service: gate score
-in your dashboards, alerts in the channel your team already reads. Deeper concepts live in the
+in your dashboards, alerts in the channel your team already reads.
+
+Two more verbs in the vocabulary:
+
+- **`drift`** — watch with attribution: a tripped run names **which member
+  moved** (`topMover`, ranked `movers`), so the on-call question — *the
+  gate fell, because of what?* — is answered by the bundle itself.
+- **`quorum`** — k-of-m sign-off as a graph object: a member approves when
+  its live effective confidence clears `minEff`, counted across **distinct
+  actors** so one enthusiast can't stack the gate. Approvals are calibrated
+  cells, not checkbox clicks — when an approver's verification gets
+  contradicted, their approval *stops counting*, with no policy code
+  written anywhere. Quorum runs always derive their attestation.
+
+And the loop closes at read time: compile packets carry a
+`standing_programs:` section listing the gates, watches, and quorums
+covering each returned cell — with program and bundle handles — so an
+agent writing new evidence ties it into the existing fabric instead of
+orphaning it. Deeper concepts live in the
 [docs](docs/README.md): the [write schema](docs/02_WRITE_SCHEMA.md),
 [tagging & subgraphs](docs/03_TAGGING_AND_SUBGRAPHS.md), the
 [context compiler](docs/04_CONTEXT_COMPILER.md), and
@@ -394,7 +412,7 @@ audience. Highlights:
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 94 unit/integration tests
+npm test          # 99 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 ```

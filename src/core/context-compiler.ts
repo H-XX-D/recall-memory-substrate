@@ -28,6 +28,7 @@ export interface ContextPacket {
   risks: string[];
   tasks: string[];
   cellState: string[];
+  standingPrograms: string[];
   translatedReferences: string[];
   referenceParameters: string[];
   staleOrLowTrust: string[];
@@ -60,6 +61,7 @@ export function compileContext(store: RecallStore, options: ContextCompileOption
     risks: [],
     tasks: [],
     cellState: [],
+    standingPrograms: [],
     translatedReferences: [],
     referenceParameters: [],
     staleOrLowTrust: [],
@@ -71,9 +73,23 @@ export function compileContext(store: RecallStore, options: ContextCompileOption
   const seenChallenges = new Set<string>();
   // One calibration pass per packet; every cell-state line reuses it.
   const actorFactors = calibrationFactors(store);
+  // One program fetch per packet: standing programs (watch/drift/quorum/
+  // score) are surfaced on the cells they cover, so an agent writing new
+  // evidence knows which bundles to tie it into instead of orphaning it.
+  const programsByEdge = new Map<string, { id: string; operation: string; params?: Record<string, unknown> }[]>();
+  for (const program of store.listPrograms?.(200) ?? []) {
+    if (!program.enabled) {
+      continue;
+    }
+    const list = programsByEdge.get(program.hyperedgeId) ?? [];
+    list.push({ id: program.id, operation: program.spec.operation, params: program.spec.params });
+    programsByEdge.set(program.hyperedgeId, list);
+  }
+  const seenPrograms = new Set<string>();
   for (const node of nodes) {
     placeNode(packet, node);
     surfaceIncomingChallenges(packet, store, node, seenChallenges);
+    surfaceStandingPrograms(packet, store, node, programsByEdge, seenPrograms);
     pushUnique(packet.cellState, cellStateLine(store, node, actorFactors));
     pushUnique(packet.expansionHandles, node.id);
     translateNodeReferences(packet, store, node, options);
@@ -209,12 +225,62 @@ export function formatContextPacket(packet: ContextPacket): string {
     section("risks", packet.risks),
     section("tasks", packet.tasks),
     section("cell_state", packet.cellState),
+    section("standing_programs", packet.standingPrograms),
     section("translated_references", packet.translatedReferences),
     section("reference_parameters", packet.referenceParameters),
     section("stale_or_low_trust", packet.staleOrLowTrust),
     section("suggested_next_actions", packet.suggestedNextActions),
     section("expansion_handles", packet.expansionHandles)
   ].join("\n\n");
+}
+
+// Surface standing programs covering a selected cell. The line carries both
+// handles — program id and hyperedge id — so the reading agent can run the
+// gate, inspect the bundle, or wire fresh evidence into it.
+function surfaceStandingPrograms(
+  packet: ContextPacket,
+  store: RecallStore,
+  node: RecallNode,
+  programsByEdge: ReadonlyMap<string, { id: string; operation: string; params?: Record<string, unknown> }[]>,
+  seen: Set<string>
+): void {
+  if (programsByEdge.size === 0) {
+    return;
+  }
+  for (const edge of store.hyperedgesForNode?.(node.id, 50) ?? []) {
+    const programs = programsByEdge.get(edge.id);
+    if (!programs) {
+      continue;
+    }
+    for (const program of programs) {
+      if (seen.has(program.id)) {
+        continue;
+      }
+      seen.add(program.id);
+      packet.standingPrograms.push(
+        `${program.operation}${programParamsSummary(program.operation, program.params)} guards "${trimWords(edge.title, 8)}" covering ${node.kind}:${node.id} [program:${program.id} hyperedge:${edge.id}]`
+      );
+    }
+  }
+}
+
+function programParamsSummary(operation: string, params?: Record<string, unknown>): string {
+  if (!params) {
+    return "";
+  }
+  const parts: string[] = [];
+  if ((operation === "watch" || operation === "drift") && typeof params.delta === "number") {
+    parts.push(`delta=${params.delta}`);
+  }
+  if (operation === "quorum") {
+    if (typeof params.k === "number") {
+      parts.push(`k=${params.k}`);
+    }
+    if (typeof params.minEff === "number") {
+      parts.push(`minEff=${params.minEff}`);
+    }
+  }
+  return parts.length > 0 ? `(${parts.join(",")})` : "";
 }
 
 function placeNode(packet: ContextPacket, node: RecallNode): void {
@@ -433,6 +499,7 @@ function countPacketWords(packet: ContextPacket): number {
     ...packet.risks,
     ...packet.tasks,
     ...packet.cellState,
+    ...packet.standingPrograms,
     ...packet.translatedReferences,
     ...packet.referenceParameters,
     ...packet.staleOrLowTrust,

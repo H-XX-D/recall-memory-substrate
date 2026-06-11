@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { admitWriteProposal } from "../src/core/admission.js";
+import { compileContext, formatContextPacket } from "../src/core/context-compiler.js";
 import { SQLiteRecallStore } from "../src/core/store.js";
 import { makeProposal, tempDbPath } from "./helpers.js";
 
@@ -130,6 +131,42 @@ describe("watch reflexes", () => {
       // And the decision's effective confidence now reflects the concern.
       const challenged = store.search("Ship Friday", 3)[0];
       assert.ok(challenged);
+    } finally {
+      store.close?.();
+      temp.cleanup();
+    }
+  });
+
+  it("compile surfaces standing programs on the cells they cover", () => {
+    const { temp, store, admit } = setup();
+    try {
+      const decision = admit({
+        intent: { kind: "decision", operation: "create" },
+        content: {
+          title: "Guarded rollout decision for the billing flank",
+          body: "Rollout proceeds while the gate holds.",
+          summary: "Guarded rollout."
+        }
+      }, "2026-06-01T00:00:00.000Z");
+      const edge = store.addHyperedge({
+        kind: "evidence-bundle",
+        title: "Billing rollout gate",
+        members: [{ nodeId: decision.id, role: "claim" }]
+      });
+      const program = store.attachProgram(edge.id, {
+        schemaVersion: "recall.program.v1",
+        operation: "watch",
+        params: { delta: 0.2 }
+      });
+
+      const packet = compileContext(store, { task: "billing rollout guarded", budgetWords: 400 });
+      const formatted = formatContextPacket(packet);
+      assert.match(formatted, /standing_programs:/);
+      const line = packet.standingPrograms.find((entry) => entry.includes(program.id));
+      assert.ok(line, "packet must surface the watch guarding the selected cell");
+      assert.ok(line!.includes("watch(delta=0.2)"));
+      assert.ok(line!.includes(`hyperedge:${edge.id}`), "line must carry the bundle handle for tying in new evidence");
+      assert.ok(line!.includes(`${decision.kind}:${decision.id}`));
     } finally {
       store.close?.();
       temp.cleanup();

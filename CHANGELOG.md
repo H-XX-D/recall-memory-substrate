@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actor discounts use the overconfidence signal (contradicted rate × mean
   confidence-when-wrong) so humble-but-right writers are never penalized.
   Pinned by a new test suite and a new adversarial retrieval gate case.
+- **Standing programs surfaced at compile**: packets now carry a
+  `standing_programs:` section listing the enabled programs (watch, drift,
+  quorum, score) covering each selected cell, with program and hyperedge
+  handles — so agents wire new evidence into existing gates instead of
+  orphaning it.
+- **`drift` and `quorum` program operations**: `drift` is watch with
+  attribution — a tripped run names which member moved (`topMover`, ranked
+  `movers`); untripped runs derive nothing. `quorum` is k-of-m sign-off as
+  a graph object — members approve when live effective confidence clears
+  `minEff`, counted across distinct actors by default, so a contradicted
+  approver's approval stops counting with no policy code; quorum runs
+  always derive their attestation witness.
 - **Graph reflexes** (`watch` program operation): a hyperedge program that
   baselines against its own previous run, trips when the bundle's live
   effective confidence moves more than `delta`, and — with `--derive` —
@@ -107,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: `06_HYPEREDGE_PROGRAMS.md` reframed as `06_ADVANCED_GRAPH_OPERATIONS.md`,
   `14_ADDRESSABLE_CELLS_AND_HYPERNETWORKS.md` renamed to
   `14_ADDRESSABLE_CELLS_AND_GRAPH_VIEWS.md`, and `19_PUBLIC_BENCHMARK.md` added.
-- Test suite grew to 83 unit/integration tests and 94 end-to-end checks.
+- Test suite grew to 99 unit/integration tests and 94 end-to-end checks.
 
 ## [0.1.0] - 2026-06-01
 
