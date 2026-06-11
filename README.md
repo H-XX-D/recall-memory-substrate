@@ -26,6 +26,7 @@
 [How it works](#how-it-works) ·
 [Why Recall](#why-recall) ·
 [Compare](#how-recall-compares) ·
+[Teams](#one-graph-many-writers) ·
 [Checker & Solver](#beyond-memory-checker-and-solver) ·
 [Docs](docs/README.md) ·
 [Roadmap](ROADMAP.md)
@@ -246,8 +247,7 @@ refuted gets discounted by the same loop that scores humans and LLMs.
 Watches can chain: a verification collapses, its watcher files a concern
 on the decision built on it, that decision's effective confidence falls,
 and a watcher on the decision can fire next. Run a watch from cron and a
-standing decision becomes a monitored service, with the gate score in your
-dashboards and alerts in the channel your team already reads.
+standing decision becomes a monitored service.
 
 Two more operations round out the set:
 
@@ -329,8 +329,56 @@ may dig.
 
 Recall trades turnkey cloud convenience for local control and an audit
 trail. If you want a hosted, batteries-included memory service, projects
-like mem0, Letta, and Zep are excellent. If you want memory that lives on
-your machine and that you can interrogate write-by-write, that's Recall.
+like mem0, Letta, and Zep are excellent. Recall is the other kind of tool:
+the graph lives on your disk, every write comes with a receipt, and
+nothing in it is above being challenged.
+
+## One graph, many writers
+
+Most memory layers assume one user and one assistant. Recall's write path
+was built for traffic. Humans, agents, CI jobs, the daemon, and tripped
+reflexes all write through the same admission gate, so every cell lands
+schema-checked, attributed, timestamped, and rollbackable no matter who
+sent it. That is what makes a single project graph safe to share: when a
+decision changes overnight, a teammate does not ask around in chat, they
+compile. The packet says who changed it, when, on what evidence, and what
+it contradicts. Run `recall compile "what changed since Friday"` on Monday
+morning and the briefing writes itself.
+
+The gate is also vendor-blind. A proposal from GPT, Claude, Gemini, or a
+local model is the same `recall.write.v1` JSON, judged by the same rules,
+landing in the same graph. Calibration then scores every writer
+separately, human or model, on one ledger. Route work to whichever model
+is cheap this month, and let track records rather than logos decide how
+much to trust what comes back.
+
+It is tier-blind for the same reason. The write contract asks for
+discipline, not brilliance, so a small model can hold the same memory
+standards as a frontier one. And because the compile packet carries the
+team's accumulated judgment, including the calls, the risks, and the open
+contradictions, a cheap model starts its session with the same briefing an
+expensive one gets. The packet does the remembering so the model does not
+have to.
+
+Standing programs make the shared graph something a team can watch. Every
+program run prints plain JSON, so a tripped gate plugs into whatever the
+room already reads, with no integration to install:
+
+```bash
+# cron, hourly: ping the channel when the deploy gate trips
+recall program run <watch-id> --derive | jq -e '.run.output.tripped' >/dev/null &&
+  curl -s -X POST "$SLACK_WEBHOOK" -H 'content-type: application/json' \
+    -d '{"text":"Deploy gate tripped: the load-test verification moved."}'
+
+# run history is a time series of gate scores: chart it in Grafana
+recall program runs --limit 200
+```
+
+The tripped run has already filed its concern in the graph through
+admission; the webhook is just the echo into the room. Today multi-writer
+means many processes against one local store, which SQLite WAL handles.
+One graph served to a whole team over HTTP, with authenticated actor
+identity, is next on the [roadmap](ROADMAP.md).
 
 ## Beyond memory: Checker and Solver
 
