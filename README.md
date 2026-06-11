@@ -363,16 +363,19 @@ have to.
 Standing programs turn the shared graph into something a team can watch
 without opening a terminal. The fully actuated setup puts the store on a
 box everyone can reach and lets the tripwires do the talking. Point the
-team at one graph (agents via the MCP config block, which sets `RECALL_DB`;
-cron jobs and exporters via `--db`), then let a scheduler run each standing
-gate on a heartbeat. Every program run prints plain JSON, so it wires into
-whatever the room already watches with no integration to install:
+whole team at one graph by setting `RECALL_DB` once on the host: the CLI,
+the MCP server, and the helper scripts all read it, so agents, cron jobs,
+and exporters route to the same store with no per-command flag (pass
+`--db` when you want to override it). Then let a scheduler run each
+standing gate on a heartbeat. Every program run prints plain JSON, so it
+wires into whatever the room already watches with no integration to
+install:
 
 ```bash
-SRV=/srv/recall/payments.sqlite3          # one graph, one path, whole team
+export RECALL_DB=/srv/recall/payments.sqlite3   # one graph, whole team
 
 # cron, every 10 min: trip the deploy gate, ping the channel
-recall program run <watch-id> --derive --db "$SRV" \
+recall program run <watch-id> --derive \
   | jq -e '.run.output.tripped' >/dev/null &&
   curl -s -X POST "$SLACK_WEBHOOK" -H 'content-type: application/json' \
     -d '{"text":"Deploy gate tripped: the load-test verification moved."}'
@@ -380,7 +383,7 @@ recall program run <watch-id> --derive --db "$SRV" \
 # run history is a time series of gate scores (createdAt + output.current).
 # An exporter scrapes it into Prometheus/Grafana, where alerting fires when
 # a gate's effective confidence crosses your threshold.
-recall program runs --limit 200 --db "$SRV"
+recall program runs --limit 200
 ```
 
 A panel of gate scores is the project's live status, read straight off the

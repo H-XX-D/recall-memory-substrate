@@ -468,7 +468,11 @@ function main(): void {
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command: string[] = [];
-  let db = ".recall/recall.sqlite3";
+  // Precedence: explicit --db flag (set in the loop below) > RECALL_DB env
+  // > local default. RECALL_DB is the same escape hatch the MCP server reads,
+  // so a shared store set once in the environment routes both paths alike.
+  const envDb = process.env.RECALL_DB?.trim();
+  let db = envDb ? envDb : ".recall/recall.sqlite3";
   let secretsDb = ".recall/secrets.sqlite3";
   let jsonPath: string | undefined;
   let words = 900;

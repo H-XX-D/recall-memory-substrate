@@ -146,9 +146,13 @@ directory isn't on PATH. Find it with `npm prefix -g` (binaries are in
 Node 24's built-in SQLite is flagged experimental upstream. Recall's own
 scripts suppress it with `--disable-warning=ExperimentalWarning`.
 
-**Wrong database** — Recall operates on `./.recall/recall.sqlite3` relative
-to where you run it unless you pass `--db <path>`. `recall status` shows
-which database you're talking to.
+**Wrong database** — database routing has a clear precedence: an explicit
+`--db <path>` flag wins, otherwise the `RECALL_DB` environment variable is
+used if set, otherwise Recall falls back to `./.recall/recall.sqlite3`
+relative to where you run it. `RECALL_DB` is the same variable the MCP
+server reads, so setting it once points the CLI, agents, and helper
+scripts at one shared store. `recall status` shows which database you're
+talking to.
 
 ## Installability requirements (project policy)
 
