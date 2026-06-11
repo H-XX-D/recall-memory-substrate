@@ -818,9 +818,10 @@ export class SQLiteRecallStore implements RecallStore {
 
   runProgramAndDerive(programId: string, options: Partial<DerivationProposalOptions> = {}): DerivedProgramRunResult {
     const run = this.runProgram(programId);
-    // An untripped watch derives nothing: silence means verified stability,
+    // An untripped reflex derives nothing: silence means verified stability,
     // and a reflex that files paperwork on every quiet tick is alert fatigue.
-    if (run.output.operation === "watch" && run.output.tripped !== true) {
+    const reflexOps = ["watch", "drift"];
+    if (reflexOps.includes(run.output.operation as string) && run.output.tripped !== true) {
       return { run, derived: [] };
     }
     const proposal = programRunToWitnessProposal(run, {

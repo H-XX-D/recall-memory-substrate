@@ -47,18 +47,20 @@ export function validateProgramSpec(value: unknown): HyperedgeProgramSpec {
   if (value.schemaVersion !== "recall.program.v1") {
     throw new Error("Program spec schemaVersion must be recall.program.v1");
   }
+  const operations: HyperedgeProgramSpec["operation"][] = [
+    "score", "emit_witness", "tag_projection", "watch", "drift", "quorum"
+  ];
   if (
-    value.operation !== "score" &&
-    value.operation !== "emit_witness" &&
-    value.operation !== "tag_projection" &&
-    value.operation !== "watch"
+    typeof value.operation !== "string" ||
+    !operations.includes(value.operation as HyperedgeProgramSpec["operation"])
   ) {
-    throw new Error("Program operation must be score, emit_witness, tag_projection, or watch");
+    throw new Error(`Program operation must be one of: ${operations.join(", ")}`);
   }
+  const operation = value.operation as HyperedgeProgramSpec["operation"];
   const params = value.params === undefined ? undefined : assertRecord(value.params, "params");
   return {
     schemaVersion: "recall.program.v1",
-    operation: value.operation,
+    operation,
     description: typeof value.description === "string" ? value.description : undefined,
     params
   };
@@ -73,6 +75,12 @@ function executeSpec(
 ): Record<string, unknown> {
   if (spec.operation === "watch") {
     return executeWatch(spec, hyperedge, members, effective, previousRun ?? null);
+  }
+  if (spec.operation === "drift") {
+    return executeDrift(spec, hyperedge, members, effective, previousRun ?? null);
+  }
+  if (spec.operation === "quorum") {
+    return executeQuorum(spec, hyperedge, members, effective);
   }
   if (spec.operation === "score") {
     const confidenceValues = members
@@ -205,6 +213,166 @@ function executeWatch(
     };
   }
   return output;
+}
+
+// Drift: watch with attribution. Same trip semantics as watch, but the
+// baseline keeps per-member values, so a tripped run names WHICH member
+// moved — the on-call question ("the gate fell; because of what?") answered
+// by the bundle itself.
+function executeDrift(
+  spec: HyperedgeProgramSpec,
+  hyperedge: Hyperedge,
+  members: RecallNode[],
+  effective: ReadonlyMap<string, number> | undefined,
+  previousRun: ProgramRun | null
+): Record<string, unknown> {
+  const delta = typeof spec.params?.delta === "number" && spec.params.delta > 0
+    ? spec.params.delta
+    : 0.15;
+  const concernTarget =
+    typeof spec.params?.concernTarget === "string" ? spec.params.concernTarget : null;
+
+  const memberValues: Record<string, number> = {};
+  for (const node of members) {
+    const value = effective?.get(node.id) ?? confidenceValue(node);
+    if (value !== null) {
+      memberValues[node.id] = round(value);
+    }
+  }
+  const values = Object.values(memberValues);
+  const current = values.length === 0 ? 0 : round(values.reduce((s, v) => s + v, 0) / values.length);
+
+  const previousValues =
+    previousRun && isRecord(previousRun.output.memberValues)
+      ? (previousRun.output.memberValues as Record<string, number>)
+      : null;
+  const previous =
+    previousRun && typeof previousRun.output.current === "number"
+      ? (previousRun.output.current as number)
+      : null;
+  const change = previous === null ? 0 : round(current - previous);
+  const tripped = previous !== null && Math.abs(change) >= delta;
+
+  const byId = new Map(members.map((node) => [node.id, node]));
+  const movers = previousValues
+    ? Object.entries(memberValues)
+        .filter(([id]) => typeof previousValues[id] === "number")
+        .map(([id, value]) => ({
+          nodeId: id,
+          reference: byId.get(id)?.cellAddress ?? id,
+          title: byId.get(id)?.title ?? id,
+          previous: previousValues[id]!,
+          current: value,
+          change: round(value - previousValues[id]!)
+        }))
+        .filter((entry) => entry.change !== 0)
+        .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+        .slice(0, 5)
+    : [];
+  const topMover = movers[0] ?? null;
+
+  const output: Record<string, unknown> = {
+    operation: spec.operation,
+    hyperedgeId: hyperedge.id,
+    memberCount: members.length,
+    memberReferences: memberReferences(hyperedge, members),
+    current,
+    previous,
+    change,
+    delta,
+    tripped,
+    memberValues,
+    movers
+  };
+  if (topMover) {
+    output.topMover = topMover;
+  }
+  if (concernTarget) {
+    output.concernTarget = concernTarget;
+  }
+  if (tripped) {
+    const direction = change < 0 ? "fell" : "rose";
+    const culprit = topMover
+      ? ` Top mover: "${topMover.title}" (${topMover.previous} -> ${topMover.current}).`
+      : "";
+    output.witness = {
+      title: `Drift tripped: ${hyperedge.title} ${direction} ${Math.abs(change)} (delta ${delta})`,
+      summary:
+        `Bundle moved ${previous} -> ${current} since the last run.${culprit}`,
+      memberAddresses: members.map((node) => node.cellAddress),
+      memberReferences: memberReferences(hyperedge, members)
+    };
+  }
+  return output;
+}
+
+// Quorum: k-of-m sign-off as a graph object. A member "approves" when its
+// live effective confidence clears minEff; approvals are counted across
+// DISTINCT actors by default, so one enthusiast cannot stack the gate.
+// Approvals here are calibrated cells, not checkbox clicks — a chronically
+// wrong approver's effective confidence sinks, and their approval stops
+// counting, with no policy code written anywhere.
+function executeQuorum(
+  spec: HyperedgeProgramSpec,
+  hyperedge: Hyperedge,
+  members: RecallNode[],
+  effective: ReadonlyMap<string, number> | undefined
+): Record<string, unknown> {
+  const k = typeof spec.params?.k === "number" && spec.params.k >= 1
+    ? Math.floor(spec.params.k)
+    : 2;
+  const minEff = typeof spec.params?.minEff === "number" ? spec.params.minEff : 0.7;
+  const distinctActors = spec.params?.distinctActors !== false;
+  const role = typeof spec.params?.role === "string" ? spec.params.role : null;
+
+  const eligibleIds = new Set(
+    hyperedge.members
+      .filter((member) => role === null || member.role === role)
+      .map((member) => member.nodeId)
+  );
+  const eligible = members.filter((node) => eligibleIds.has(node.id));
+
+  const approving = eligible
+    .map((node) => ({
+      nodeId: node.id,
+      reference: node.cellAddress,
+      title: node.title,
+      actor: node.provenance?.produced_by ?? "unknown",
+      effective: round(effective?.get(node.id) ?? confidenceValue(node) ?? 0)
+    }))
+    .filter((entry) => entry.effective >= minEff);
+
+  const approverCount = distinctActors
+    ? new Set(approving.map((entry) => entry.actor)).size
+    : approving.length;
+  const passed = approverCount >= k;
+  const shortfall = Math.max(0, k - approverCount);
+
+  return {
+    operation: spec.operation,
+    hyperedgeId: hyperedge.id,
+    memberReferences: memberReferences(hyperedge, members),
+    k,
+    minEff,
+    distinctActors,
+    role,
+    eligibleCount: eligible.length,
+    approving,
+    approverCount,
+    passed,
+    shortfall,
+    score: round(Math.min(1, k === 0 ? 1 : approverCount / k)),
+    witness: {
+      title: passed
+        ? `Quorum passed: ${hyperedge.title} (${approverCount}/${k} distinct approvals at eff>=${minEff})`
+        : `Quorum SHORT: ${hyperedge.title} (${approverCount}/${k}, shortfall ${shortfall})`,
+      summary:
+        `${approving.length} of ${eligible.length} eligible members cleared minEff=${minEff}; ` +
+        `${approverCount} ${distinctActors ? "distinct actors" : "approvals"} toward k=${k}.`,
+      memberAddresses: members.map((node) => node.cellAddress),
+      memberReferences: memberReferences(hyperedge, members)
+    }
+  };
 }
 
 function memberReferences(hyperedge: Hyperedge, members: RecallNode[]): Record<string, unknown>[] {
