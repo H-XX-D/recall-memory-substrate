@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-06-12
+
 ### Added
 
 - **Effective confidence** (`src/core/evidence.ts`): every cell now carries a
@@ -168,5 +172,6 @@ memory.
   hook, PreToolUse guard) with rollout guidance and longitudinal
   metrics interpretation.
 
-[Unreleased]: https://github.com/H-XX-D/recall-memory-substrate/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/H-XX-D/recall-memory-substrate/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/H-XX-D/recall-memory-substrate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/H-XX-D/recall-memory-substrate/releases/tag/v0.1.0
