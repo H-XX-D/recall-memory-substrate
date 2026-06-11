@@ -174,6 +174,27 @@ DAGs, evals, ACP agent coordination, and calibration. The
 [LLM Integration Guide](docs/LLM_INTEGRATION.md) is the full operating
 contract, including the proposal shape.
 
+### The `/recall` command (Claude Code)
+
+The repo ships a Claude Code slash command at
+[`.claude/commands/recall.md`](.claude/commands/recall.md). Copy it into your
+own project, or make it global, and `/recall` becomes a one-word way to wire a
+session to Recall:
+
+```bash
+# global (available in every project):
+mkdir -p ~/.claude/commands && cp .claude/commands/recall.md ~/.claude/commands/
+
+# or per-project:
+cp .claude/commands/recall.md /path/to/your/project/.claude/commands/
+```
+
+After the one-time MCP setup above, typing `/recall` creates the project's
+memory db on first use (`.recall/recall.sqlite3`, one per project), compiles a
+context packet for what you are about to do, and hands the agent the compile,
+work, write-back loop. No schema to manage, no setup to repeat. `/recall <topic>`
+compiles for that topic; bare `/recall` orients on recent state.
+
 ## How it works
 
 <div align="center">
