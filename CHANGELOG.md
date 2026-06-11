@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actor discounts use the overconfidence signal (contradicted rate × mean
   confidence-when-wrong) so humble-but-right writers are never penalized.
   Pinned by a new test suite and a new adversarial retrieval gate case.
+- README: new "Beyond memory: Checker and Solver" section describing the
+  truth and compute organs that plug into the graph (git-native attestation,
+  gated solver library with optimality contracts) and the contact for
+  access.
 - **Standing programs surfaced at compile**: packets now carry a
   `standing_programs:` section listing the enabled programs (watch, drift,
   quorum, score) covering each selected cell, with program and hyperedge

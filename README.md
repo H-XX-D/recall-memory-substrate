@@ -26,6 +26,7 @@
 [How it works](#how-it-works) ·
 [Why Recall](#why-recall) ·
 [Compare](#how-recall-compares) ·
+[Checker & Solver](#beyond-memory-checker-and-solver) ·
 [Docs](docs/README.md) ·
 [Roadmap](ROADMAP.md)
 
@@ -332,6 +333,45 @@ Recall trades turnkey cloud convenience for **local control and an audit
 trail.** If you want a hosted, batteries-included memory service, projects
 like mem0, Letta, and Zep are excellent. If you want memory that lives on
 your machine and that you can interrogate write-by-write, that's Recall.
+
+## Beyond memory: Checker and Solver
+
+Recall is the memory organ of a three-part system. The other two organs
+plug into the same graph, through the same admission gate:
+
+**Checker** is the truth layer — a
+deterministic verification substrate built on one creed: *absence of
+refutation is not verification.* It runs declared checks and stores honest
+verdicts (`verified` / `refuted` / `unverifiable` / `error` / `partial`)
+in a ledger, attests **git-natively** — `verify-commit` refuses dirty
+trees and non-HEAD SHAs, `gate --ref` answers "is this exact commit
+verified?", and a fail-closed pre-push hook gates pushes on it — and emits
+typed `checker-supports` / `checker-contradicts` edges into the Recall
+graph. Recall already treats those edges as first-class: externally
+executed evidence outweighs peer testimony in effective confidence, and
+compile packets surface checker challenges on every affected cell. Checker
+is what turns *"the graph says"* into *"the graph says, attested against
+commit `abc123` on a clean tree."*
+
+**Solver** is the compute layer — a library of **96 small, fast, gated
+solvers** spanning control theory, signal processing, estimation, and
+optimization: Kalman filtering, FIR/biquad, CORDIC, Goertzel, count-min
+sketches, matrix-free conjugate gradient, and an Ising/simulated-annealing
+tier that makes QUBO formulations practical where hand-rolled heuristics
+used to be the only affordable option. The CPU tier is tight C, the GPU
+tier is CUDA, and every solver is validated against a reference oracle
+before any speed number is trusted — with a per-solver **optimality
+contract** declaring exactly what class of claim each answer carries
+(exact, tolerance-bounded, or heuristic). Results land in Recall as
+addressable, priced claims. The division of labor: *the model formulates,
+Solver computes, Recall remembers, Checker attests.*
+
+Together the three close a loop no single tool can: memory that prices its
+claims, verification pinned to commits, and computation with contracts —
+one admission gate, no model in the loop anywhere.
+
+**Checker org capabilities and Solver access:**
+[todd@hendrixxdesign.com](mailto:todd@hendrixxdesign.com)
 
 ## CLI cheat sheet
 
