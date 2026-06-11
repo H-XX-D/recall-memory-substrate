@@ -13,7 +13,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-83%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-94%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -192,7 +192,63 @@ contract, including the proposal shape.
    admission path as everyone else.
 
 The base structure is a hypernetwork; DAGs are optional overlays for ordered
-workflows, evidence chains, and execution traces. Deeper concepts live in the
+workflows, evidence chains, and execution traces.
+
+**Relations can also act.** A hyperedge can carry a declared, versioned,
+sandboxed operation (`recall.program.v1` — score, tag projection, witness
+emission) and be run on demand. Bind a decision to its risks and
+verifications, and the bundle audits itself — scored from **live effective
+confidence**, so it doubles as a tripwire:
+
+```text
+recall program run <program-id>     # Friday deploy gate
+  → averageEffectiveConfidence: 0.7, score: 0.827
+
+# …new evidence contradicts the load-test verification…
+
+recall program run <program-id>     # same gate — no model ran
+  → averageEffectiveConfidence: 0.322, score: 0.638
+
+recall program run <program-id> --derive
+  → derives a first-class witness cell, filed through the same admission
+    gate as every other write
+```
+
+No other memory system has active relations: passive triplets and prose
+blocks can only be acted *upon* by an external model. Here, a deploy gate's
+score falls on its own when any member is contradicted — by a teammate,
+another agent, or a failing test wired in through `test-contradicts` edges.
+The graph takes minutes of its own meetings, deterministically. See
+[Advanced Graph Operations](docs/06_ADVANCED_GRAPH_OPERATIONS.md).
+
+**And relations can stand guard.** The `watch` operation turns a bundle
+into a standing reflex: it baselines against its own previous run (history
+is state — no extra machinery), trips when the bundle's live effective
+confidence moves more than `delta`, and stays silent otherwise — silence
+means *verified* stability, not no-news:
+
+```text
+recall program add <hyperedge-id> --json watch.json
+  # { "schemaVersion": "recall.program.v1", "operation": "watch",
+  #   "params": { "delta": 0.15, "concernTarget": "<decision-cell-id>" } }
+
+recall program run <program-id> --derive
+  → untripped: derives nothing
+  → tripped:   files a concern against the target decision, through the
+               same admission gate as every other write, attributed to
+               program:<id>
+```
+
+A reflex never pokes values — it **files claims**. Tripped watches propose
+through admission like everyone else, which means reflexes carry
+`produced_by` and accumulate a calibration record: a trigger-happy watcher
+whose concerns keep getting refuted gets discounted by the same loop that
+disciplines humans and LLMs. Chain them — a verification collapses, its
+watcher files a concern on the decision built on it, the decision's
+effective confidence falls, *its* watcher wakes — and belief revision
+propagates through your dependency graph one audited write at a time. Cron
+a watch and any standing decision becomes a monitored service: gate score
+in your dashboards, alerts in the channel your team already reads. Deeper concepts live in the
 [docs](docs/README.md): the [write schema](docs/02_WRITE_SCHEMA.md),
 [tagging & subgraphs](docs/03_TAGGING_AND_SUBGRAPHS.md), the
 [context compiler](docs/04_CONTEXT_COMPILER.md), and
@@ -244,6 +300,15 @@ the tool that matches how much you care about auditability and local control.
 | Encrypted, segregated secrets store | ✗ | ✗ | varies | ✅ |
 | Single runtime, one memory API | ✗ | varies | n/a | ✅ |
 | Trust evolves with **no LLM in the loop** | ✗ | ✗ | ✗ | ✅ |
+| Tiered reads over **trust-annotated claims** (title → peek → full cell) | ✗ | partial | partial | ✅ |
+
+Tiered, agent-navigated retrieval is an emerging pattern across the field —
+Letta pages between memory tiers, and progressive-disclosure indexes are
+appearing elsewhere. Recall's difference is **what sits at each tier**: not
+auto-summaries of activity, but gate-vetted claims carrying live trust
+state, addressed in the same namespace the evidence machinery uses — so the
+index layer tells the agent *where* digging is warranted, not just that it
+may.
 
 Recall trades turnkey cloud convenience for **local control and an audit
 trail.** If you want a hosted, batteries-included memory service, projects
@@ -329,7 +394,7 @@ audience. Highlights:
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 83 unit/integration tests
+npm test          # 94 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 ```

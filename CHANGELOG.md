@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actor discounts use the overconfidence signal (contradicted rate × mean
   confidence-when-wrong) so humble-but-right writers are never penalized.
   Pinned by a new test suite and a new adversarial retrieval gate case.
+- **Graph reflexes** (`watch` program operation): a hyperedge program that
+  baselines against its own previous run, trips when the bundle's live
+  effective confidence moves more than `delta`, and — with `--derive` —
+  files a concern against a configured target cell through the admission
+  gate, attributed to `program:<id>` so reflexes accumulate per-actor
+  calibration like any other writer. Untripped watch runs derive nothing:
+  silence means verified stability. Consequents file claims, never value
+  assignments — belief revision propagates as audited evidence, one
+  admission at a time.
+- **Tripwire bundles**: scored hyperedge programs now price their members
+  from live effective confidence (`averageEffectiveConfidence` in the score
+  output; stated-confidence average retained for explainability). A scored
+  evidence bundle — a deploy gate, a launch review — loses score on its
+  next run when any member is contradicted anywhere in the graph, with no
+  model involved. Pinned by an end-to-end tripwire test.
 
 - Real HTTP embedding backends: `RECALL_EMBEDDING_URL` (+ `RECALL_EMBEDDING_MODEL`,
   `RECALL_EMBEDDING_API_KEY`) plug Ollama or any OpenAI-compatible embeddings
