@@ -360,25 +360,43 @@ contradictions, a cheap model starts its session with the same briefing an
 expensive one gets. The packet does the remembering so the model does not
 have to.
 
-Standing programs make the shared graph something a team can watch. Every
-program run prints plain JSON, so a tripped gate plugs into whatever the
-room already reads, with no integration to install:
+Standing programs turn the shared graph into something a team can watch
+without opening a terminal. The fully actuated setup puts the store on a
+box everyone can reach and lets the tripwires do the talking. Point the
+team at one graph (agents via the MCP config block, which sets `RECALL_DB`;
+cron jobs and exporters via `--db`), then let a scheduler run each standing
+gate on a heartbeat. Every program run prints plain JSON, so it wires into
+whatever the room already watches with no integration to install:
 
 ```bash
-# cron, hourly: ping the channel when the deploy gate trips
-recall program run <watch-id> --derive | jq -e '.run.output.tripped' >/dev/null &&
+SRV=/srv/recall/payments.sqlite3          # one graph, one path, whole team
+
+# cron, every 10 min: trip the deploy gate, ping the channel
+recall program run <watch-id> --derive --db "$SRV" \
+  | jq -e '.run.output.tripped' >/dev/null &&
   curl -s -X POST "$SLACK_WEBHOOK" -H 'content-type: application/json' \
     -d '{"text":"Deploy gate tripped: the load-test verification moved."}'
 
-# run history is a time series of gate scores: chart it in Grafana
-recall program runs --limit 200
+# run history is a time series of gate scores (createdAt + output.current).
+# An exporter scrapes it into Prometheus/Grafana, where alerting fires when
+# a gate's effective confidence crosses your threshold.
+recall program runs --limit 200 --db "$SRV"
 ```
 
-The tripped run has already filed its concern in the graph through
-admission; the webhook is just the echo into the room. Today multi-writer
-means many processes against one local store, which SQLite WAL handles.
-One graph served to a whole team over HTTP, with authenticated actor
-identity, is next on the [roadmap](ROADMAP.md).
+A panel of gate scores is the project's live status, read straight off the
+trust graph: each score is its bundle's effective confidence, so the board
+shows at a glance what is currently believed, what is contested, and what
+just moved. The tripped run has already filed its concern in the graph
+through admission, so Slack and Grafana are only the echo into the room,
+not the source of truth.
+
+One caveat, stated plainly: today "shared" means the writers are processes
+on that one host. Team SSH sessions, CI jobs, agents running there, and the
+cron watchers all hit the same store over SQLite WAL, which handles the
+concurrency. Putting the file on a network share for many separate machines
+to write is not safe, by SQLite's own guidance. One graph served over HTTP
+with authenticated actor identity, so remote machines write without sharing
+the host, is next on the [roadmap](ROADMAP.md).
 
 ## Beyond memory: Checker and Solver
 
