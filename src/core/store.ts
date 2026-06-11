@@ -786,7 +786,26 @@ export class SQLiteRecallStore implements RecallStore {
     const members = hyperedge.members
       .map((member) => this.getNode(member.nodeId))
       .filter((node): node is RecallNode => node !== null);
-    const run = executeHyperedgeProgram({ program, hyperedge, members });
+    // Price each member from the live graph surface so scored bundles act
+    // as tripwires (see ProgramExecutionInput.effectiveConfidence).
+    const factors = calibrationFactors(this);
+    const effective = new Map(
+      members.map((node) => [node.id, effectiveConfidence(this, node, factors).effective])
+    );
+    // Watch programs baseline against their own last run — history is state.
+    const previousRow = this.db
+      .prepare(
+        `SELECT * FROM program_runs WHERE program_id = ? ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(programId) as ProgramRunRow | undefined;
+    const previousRun = previousRow ? rowToProgramRun(previousRow) : null;
+    const run = executeHyperedgeProgram({
+      program,
+      hyperedge,
+      members,
+      effectiveConfidence: effective,
+      previousRun
+    });
     this.db
       .prepare(
         `INSERT INTO program_runs
@@ -799,6 +818,11 @@ export class SQLiteRecallStore implements RecallStore {
 
   runProgramAndDerive(programId: string, options: Partial<DerivationProposalOptions> = {}): DerivedProgramRunResult {
     const run = this.runProgram(programId);
+    // An untripped watch derives nothing: silence means verified stability,
+    // and a reflex that files paperwork on every quiet tick is alert fatigue.
+    if (run.output.operation === "watch" && run.output.tripped !== true) {
+      return { run, derived: [] };
+    }
     const proposal = programRunToWitnessProposal(run, {
       ...options,
       scope: options.scope ?? defaultDerivationScope()

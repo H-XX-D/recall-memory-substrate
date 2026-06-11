@@ -109,6 +109,60 @@ describe("effective confidence", () => {
     }
   });
 
+  it("tripwire: a scored bundle's score falls when a member is contradicted", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const decision = admit(store, {
+        intent: { kind: "decision", operation: "create" },
+        content: { title: "Ship the deploy Friday", body: "All checks green.", summary: "Ship it." }
+      }, "2026-06-01T00:00:00.000Z");
+      const verification = admit(store, {
+        content: { title: "Load test passed", body: "Held at 2x traffic.", summary: "Load OK." }
+      }, "2026-06-01T01:00:00.000Z");
+
+      const hyperedge = store.addHyperedge({
+        kind: "evidence-bundle",
+        title: "Friday deploy gate",
+        members: [
+          { nodeId: decision.id, role: "claim" },
+          { nodeId: verification.id, role: "verification" }
+        ]
+      });
+      const program = store.attachProgram(hyperedge.id, {
+        schemaVersion: "recall.program.v1",
+        operation: "score",
+        description: "Deploy gate health"
+      });
+
+      const before = store.runProgram(program.id);
+      const scoreBefore = before.output.score as number;
+
+      // The tripwire event: new evidence contradicts the verification.
+      admit(store, {
+        content: {
+          title: "Load test environment was misconfigured",
+          body: "The 2x run hit the cache-only path; results invalid.",
+          summary: "Load test invalid."
+        },
+        evidence: { contradicts: [verification.id] }
+      }, "2026-06-02T00:00:00.000Z");
+
+      const after = store.runProgram(program.id);
+      const scoreAfter = after.output.score as number;
+
+      assert.ok(
+        scoreAfter < scoreBefore,
+        `gate score must fall after a member is contradicted (before=${scoreBefore}, after=${scoreAfter})`
+      );
+      // Stated confidence remains untouched; only the live pricing moved.
+      assert.equal(before.output.averageConfidence, after.output.averageConfidence);
+    } finally {
+      store.close?.();
+      temp.cleanup();
+    }
+  });
+
   it("discounts actors with a record of confident wrongness, not humble ones", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);

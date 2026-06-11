@@ -4,12 +4,33 @@ export interface ProgramExecutionInput {
   program: HyperedgeProgram;
   hyperedge: Hyperedge;
   members: RecallNode[];
+  /**
+   * Live effective confidence per member node id (see evidence.ts). When
+   * present, the score operation prices the bundle from the current graph
+   * surface instead of the authors' stated claims — turning a scored bundle
+   * into a tripwire: contradict any member anywhere in the graph and the
+   * bundle's score falls on the next run, with no model involved.
+   */
+  effectiveConfidence?: ReadonlyMap<string, number>;
+  /**
+   * The program's most recent prior run, if any. Watch programs use it as
+   * their baseline: the run history IS the memory, so a reflex needs no
+   * extra state — it trips when the watched value moved more than `delta`
+   * since the last time anyone looked.
+   */
+  previousRun?: ProgramRun | null;
   now?: Date;
 }
 
 export function executeHyperedgeProgram(input: ProgramExecutionInput): ProgramRun {
   const now = input.now ?? new Date();
-  const output = executeSpec(input.program.spec, input.hyperedge, input.members);
+  const output = executeSpec(
+    input.program.spec,
+    input.hyperedge,
+    input.members,
+    input.effectiveConfidence,
+    input.previousRun ?? null
+  );
   return {
     id: globalThis.crypto.randomUUID(),
     programId: input.program.id,
@@ -26,8 +47,13 @@ export function validateProgramSpec(value: unknown): HyperedgeProgramSpec {
   if (value.schemaVersion !== "recall.program.v1") {
     throw new Error("Program spec schemaVersion must be recall.program.v1");
   }
-  if (value.operation !== "score" && value.operation !== "emit_witness" && value.operation !== "tag_projection") {
-    throw new Error("Program operation must be score, emit_witness, or tag_projection");
+  if (
+    value.operation !== "score" &&
+    value.operation !== "emit_witness" &&
+    value.operation !== "tag_projection" &&
+    value.operation !== "watch"
+  ) {
+    throw new Error("Program operation must be score, emit_witness, tag_projection, or watch");
   }
   const params = value.params === undefined ? undefined : assertRecord(value.params, "params");
   return {
@@ -41,8 +67,13 @@ export function validateProgramSpec(value: unknown): HyperedgeProgramSpec {
 function executeSpec(
   spec: HyperedgeProgramSpec,
   hyperedge: Hyperedge,
-  members: RecallNode[]
+  members: RecallNode[],
+  effective?: ReadonlyMap<string, number>,
+  previousRun?: ProgramRun | null
 ): Record<string, unknown> {
+  if (spec.operation === "watch") {
+    return executeWatch(spec, hyperedge, members, effective, previousRun ?? null);
+  }
   if (spec.operation === "score") {
     const confidenceValues = members
       .map((node) => confidenceValue(node))
@@ -51,6 +82,16 @@ function executeSpec(
       confidenceValues.length === 0
         ? 0
         : confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length;
+    // Live values: effective confidence when supplied, stated otherwise.
+    // The score is computed from these, so a contradiction landing against
+    // any member moves the bundle's score on the next run.
+    const liveValues = members
+      .map((node) => effective?.get(node.id) ?? confidenceValue(node))
+      .filter((value): value is number => value !== null);
+    const averageEffectiveConfidence =
+      liveValues.length === 0
+        ? 0
+        : liveValues.reduce((sum, value) => sum + value, 0) / liveValues.length;
     const concernValues = members
       .map((node) => concernValue(node))
       .filter((value): value is number => value !== null);
@@ -61,8 +102,9 @@ function executeSpec(
       memberCount: members.length,
       memberReferences: memberReferences(hyperedge, members),
       averageConfidence,
+      averageEffectiveConfidence: round(averageEffectiveConfidence),
       maxConcern,
-      score: round((averageConfidence + (1 - maxConcern)) / 2)
+      score: round((averageEffectiveConfidence + (1 - maxConcern)) / 2)
     };
   }
 
@@ -99,6 +141,70 @@ function executeSpec(
       memberReferences: memberReferences(hyperedge, members)
     }
   };
+}
+
+// Watch: the reflex primitive. Computes the bundle's live value (mean
+// effective confidence of members), compares it to the previous run's value,
+// and trips when the move exceeds `delta`. Consequents never poke values —
+// a tripped watch run derived with --derive files a CLAIM through admission
+// (a concern against `concernTarget` when configured, a witness otherwise),
+// attributed to the program, so reflexes are calibrated actors like everyone
+// else. First run establishes the baseline and never trips: silence means
+// stable, and there is no stability to compare against yet.
+function executeWatch(
+  spec: HyperedgeProgramSpec,
+  hyperedge: Hyperedge,
+  members: RecallNode[],
+  effective: ReadonlyMap<string, number> | undefined,
+  previousRun: ProgramRun | null
+): Record<string, unknown> {
+  const delta = typeof spec.params?.delta === "number" && spec.params.delta > 0
+    ? spec.params.delta
+    : 0.15;
+  const concernTarget =
+    typeof spec.params?.concernTarget === "string" ? spec.params.concernTarget : null;
+
+  const liveValues = members
+    .map((node) => effective?.get(node.id) ?? confidenceValue(node))
+    .filter((value): value is number => value !== null);
+  const current =
+    liveValues.length === 0
+      ? 0
+      : round(liveValues.reduce((sum, value) => sum + value, 0) / liveValues.length);
+
+  const previous =
+    previousRun && typeof previousRun.output.current === "number"
+      ? (previousRun.output.current as number)
+      : null;
+  const change = previous === null ? 0 : round(current - previous);
+  const tripped = previous !== null && Math.abs(change) >= delta;
+
+  const output: Record<string, unknown> = {
+    operation: spec.operation,
+    hyperedgeId: hyperedge.id,
+    memberCount: members.length,
+    memberReferences: memberReferences(hyperedge, members),
+    current,
+    previous,
+    change,
+    delta,
+    tripped
+  };
+  if (concernTarget) {
+    output.concernTarget = concernTarget;
+  }
+  if (tripped) {
+    const direction = change < 0 ? "fell" : "rose";
+    output.witness = {
+      title: `Watch tripped: ${hyperedge.title} ${direction} ${Math.abs(change)} (delta ${delta})`,
+      summary:
+        `Watched value moved ${previous} -> ${current} since the last run, ` +
+        `exceeding the ${delta} threshold. ${members.length} member cells observed.`,
+      memberAddresses: members.map((node) => node.cellAddress),
+      memberReferences: memberReferences(hyperedge, members)
+    };
+  }
+  return output;
 }
 
 function memberReferences(hyperedge: Hyperedge, members: RecallNode[]): Record<string, unknown>[] {

@@ -321,7 +321,7 @@ export interface Hyperedge {
 
 export interface HyperedgeProgramSpec {
   schemaVersion: "recall.program.v1";
-  operation: "score" | "emit_witness" | "tag_projection";
+  operation: "score" | "emit_witness" | "tag_projection" | "watch";
   description?: string;
   params?: Record<string, unknown>;
 }

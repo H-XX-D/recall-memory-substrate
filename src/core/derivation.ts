@@ -46,9 +46,20 @@ export function programRunToWitnessProposal(
   const score = numberAt(run.output, "score");
   const maxConcern = numberAt(run.output, "maxConcern");
   const memberReferences = referencesFromProgramOutput(run.output);
+  // A tripped watch files a claim, never an assignment: when the reflex
+  // names a concernTarget, the derived cell carries a concerns reference
+  // against it — evidence propagates through the gate, attributed to the
+  // program, so reflexes accumulate a calibration record like any actor.
+  const watchTripped = run.output.tripped === true;
+  const concernTarget = stringAt(run.output, "concernTarget");
+  const concerns = watchTripped && concernTarget !== null ? [concernTarget] : [];
 
   return makeDerivedProposal({
-    options,
+    options: {
+      ...options,
+      producedBy: options.producedBy ?? `program:${run.programId}`
+    },
+    concerns,
     createdAt: run.createdAt,
     actorKind: "program",
     intentKind: "witness",
