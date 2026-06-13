@@ -6,6 +6,7 @@ import { analyzeMemory, memoryHealthToProposal } from "./core/analysis.js";
 import { analyzeCalibration } from "./core/calibration.js";
 import { inspectCell } from "./core/cell-context.js";
 import { compileContext, formatContextPacket } from "./core/context-compiler.js";
+import { buildInceptionScaffold } from "./core/inception.js";
 import { runCognitiveTick } from "./core/cognitive.js";
 import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle } from "./core/acp.js";
 import { runAcpLoop } from "./core/acp.js";
@@ -292,6 +293,18 @@ function main(): void {
         includeReferenceParameters: args.includeReferenceParameters
       });
       console.log(formatContextPacket(packet));
+      return;
+    }
+
+    if (command === "incept") {
+      const objective = args.query ?? args.command.slice(1).join(" ");
+      const scaffold = buildInceptionScaffold(store, {
+        objective,
+        project: args.project?.[0] ?? "recall",
+        createdAt: new Date().toISOString(),
+        budgetWords: args.words
+      });
+      console.log(JSON.stringify(scaffold, null, 2));
       return;
     }
 
@@ -840,6 +853,7 @@ Commands:
   recall subgraph [--category memory] [--type witness] [--subject compiler] [--project Recall] [--idea active-memory] [--timestamp 2026-05-21]
   recall subgraph [--topic a,b] [--entity x] [--identity agent:codex] [--ring runtime]
   recall compile "task" [--words 900] [--inline-refs] [--reference-parameters] [--db path]
+  recall incept "open objective" [--words 700] [--project name] [--db path]
   recall workflow allocate --json candidates.json [--limit 8] [--derive] [--db path]
   recall blind-lock add --json blind-lock.json [--db path]
   recall rollback list [--db path]
