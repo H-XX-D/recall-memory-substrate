@@ -1,14 +1,17 @@
 ---
-description: Wire this session to Recall for the current project. Creates the project memory db if it does not exist, compiles a context packet for what you are about to do, and starts the compile, work, write-back loop.
+description: Wire this session to Recall for the current project. Routes to your Recall store (RECALL_DB if set, otherwise the local ./.recall), compiles a context packet for what you are about to do, and starts the compile, work, write-back loop.
 argument-hint: "[what you are about to work on]"
 allowed-tools: Bash(recall:*)
 ---
 
-## Ensure this project's Recall db exists (idempotent; creates ./.recall/recall.sqlite3 on first run)
-!`recall init --db .recall/recall.sqlite3`
+## Resolve the store and ensure it exists (idempotent). Routing: RECALL_DB if set,
+## otherwise ./.recall/recall.sqlite3. The output shows which db this resolved to.
+## If your memory already lives in a shared or global store, export RECALL_DB so
+## this targets it instead of minting an empty local db and orphaning it.
+!`recall init`
 
-## Compiled context for the task
-!`recall compile "$ARGUMENTS" --db .recall/recall.sqlite3 --words 600`
+## Compiled context for the task (same store as above)
+!`recall compile "$ARGUMENTS" --words 600`
 
 ## Operate Recall this session
 Recall is now wired for this project. The block above is your compiled context packet for "$ARGUMENTS": ranked relevant memory, open risks, open tasks, and any contradictions, fit to a word budget.

@@ -189,11 +189,13 @@ mkdir -p ~/.claude/commands && cp .claude/commands/recall.md ~/.claude/commands/
 cp .claude/commands/recall.md /path/to/your/project/.claude/commands/
 ```
 
-After the one-time MCP setup above, typing `/recall` creates the project's
-memory db on first use (`.recall/recall.sqlite3`, one per project), compiles a
-context packet for what you are about to do, and hands the agent the compile,
-work, write-back loop. No schema to manage, no setup to repeat. `/recall <topic>`
-compiles for that topic; bare `/recall` orients on recent state.
+After the one-time MCP setup above, typing `/recall` resolves your store
+(`RECALL_DB` if set, otherwise the local `.recall/recall.sqlite3`), ensures it
+exists, compiles a context packet for what you are about to do, and hands the
+agent the compile, work, write-back loop. No schema to manage, no setup to
+repeat. `/recall <topic>` compiles for that topic; bare `/recall` orients on
+recent state. If your memory already lives in a shared or global store, export
+`RECALL_DB` so `/recall` targets it instead of minting an empty local db.
 
 ## How it works
 
