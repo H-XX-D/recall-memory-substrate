@@ -291,6 +291,28 @@ bundle instead of orphaning it. Deeper concepts live in the
 [context compiler](docs/04_CONTEXT_COMPILER.md), and
 [cells & graph views](docs/14_ADDRESSABLE_CELLS_AND_GRAPH_VIEWS.md).
 
+### Inception: grounded synthesis
+
+`recall incept` is an experimental primitive for synthesis rather than
+retrieval. It compiles a slice of the graph for an open objective, then emits
+a write-back template whose `depends_on` is pre-populated with the slice's
+cell ids. A model fills in the synthesis (a method, a connection, an insight
+implied by a contradiction between cells) and admits it. Because the template
+is pre-grounded, any cell created this way is born linked to the sources it was
+synthesized from.
+
+The generative step stays in the model on purpose. Recall gathers the slice,
+guarantees the grounding, and admits the result, but it does not synthesize,
+because putting a model in the runtime would break the no-model trust loop. The
+new cell lands as a `hypothesis` at conservative confidence, marked unverified,
+so it enters the graph and earns or loses trust over time through the same
+effective-confidence machinery as any other write. The model synthesizes,
+Recall grounds it and lets the graph vet it.
+
+```bash
+recall incept "novel approaches given what we know about X and Y"
+```
+
 ## Why Recall
 
 Recall makes a few opinionated bets that most memory layers don't:
@@ -471,6 +493,7 @@ recall search "query"
 recall semantic "query"
 recall subgraph --project Recall --category memory --subject compiler
 recall compile "task description" --words 900
+recall incept "open objective"        # compile a slice into a grounded synthesis template
 
 # write (agent/debug path; normal memory flows through MCP recall_write)
 recall validate --json proposal.json
