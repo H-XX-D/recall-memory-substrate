@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { deriveCellAddress } from "./cells.js";
 import { reviewFirewall } from "./firewall.js";
-import { cellReferencePath, cellReferenceTarget, resolveCellReference } from "./references.js";
+import { cellReferencePath, cellReferenceTarget, formatCellReference, resolveCellReference } from "./references.js";
 import { validateWriteProposal } from "./schema.js";
 import type {
   AdmissionResult,
@@ -64,7 +64,7 @@ export function admitWriteProposal(
 
   const now = (options.now ?? new Date()).toISOString();
   const node = proposalToNode(proposal, now);
-  const relations = proposalToRelations(proposal, node.id, now);
+  const relations = proposalToRelations(proposal, node.id, now, store, warnings);
   const rollbackEntries = rollbackFor(node, relations, now);
 
   try {
@@ -197,11 +197,29 @@ function normalizeEvidenceTargets(proposal: WriteProposal, store: RecallStore): 
 }
 
 function normalizeTarget(target: string, store: RecallStore): string {
-  return resolveCellReference(
+  const resolved = resolveCellReference(
     target,
     (id) => store.getNode(id),
     (address) => store.getNodeByAddress(address)
-  ).canonical;
+  );
+  if (resolved.node) {
+    return resolved.canonical;
+  }
+  // Resolution miss: try unique id-prefix expansion. A truncated id (e.g. an
+  // 8-char prefix written where a full UUID belongs, a common write-path slip)
+  // would otherwise dangle and stay invisible to effective-confidence reads.
+  const bare = cellReferenceTarget(target);
+  if (looksLikeIdPrefix(bare)) {
+    const byPrefix = store.getNodeByPrefix(bare);
+    if (byPrefix) {
+      return formatCellReference(byPrefix.id, cellReferencePath(target));
+    }
+  }
+  return resolved.canonical;
+}
+
+function looksLikeIdPrefix(value: string): boolean {
+  return value.length >= 6 && value.length < 36 && /^[0-9a-fA-F]+$/.test(value);
 }
 
 function proposalToNode(proposal: WriteProposal, now: string): RecallNode {
@@ -228,12 +246,20 @@ function proposalToNode(proposal: WriteProposal, now: string): RecallNode {
   };
 }
 
-function proposalToRelations(proposal: WriteProposal, sourceId: string, now: string): RecallRelation[] {
+const TRUST_RELATION_KINDS: ReadonlySet<RelationKind> = new Set(["supports", "contradicts", "concerns"]);
+
+function proposalToRelations(
+  proposal: WriteProposal,
+  sourceId: string,
+  now: string,
+  store: RecallStore,
+  warnings: string[]
+): RecallRelation[] {
   const relations: RecallRelation[] = [];
-  pushRelations(relations, "depends_on", sourceId, proposal.evidence.depends_on, now);
-  pushRelations(relations, "supports", sourceId, proposal.evidence.supports, now);
-  pushRelations(relations, "contradicts", sourceId, proposal.evidence.contradicts, now);
-  pushRelations(relations, "concerns", sourceId, proposal.evidence.concerns, now);
+  pushRelations(relations, "depends_on", sourceId, proposal.evidence.depends_on, now, store, warnings);
+  pushRelations(relations, "supports", sourceId, proposal.evidence.supports, now, store, warnings);
+  pushRelations(relations, "contradicts", sourceId, proposal.evidence.contradicts, now, store, warnings);
+  pushRelations(relations, "concerns", sourceId, proposal.evidence.concerns, now, store, warnings);
   return relations;
 }
 
@@ -242,15 +268,28 @@ function pushRelations(
   kind: RelationKind,
   sourceId: string,
   targetIds: string[],
-  now: string
+  now: string,
+  store: RecallStore,
+  warnings: string[]
 ): void {
   for (const targetId of targetIds) {
     const targetPath = cellReferencePath(targetId);
+    const resolvedId = cellReferenceTarget(targetId);
+    // Trust-bearing edges (supports/contradicts/concerns) feed effective
+    // confidence; a target that resolves to no node is inert pollution that
+    // silently distorts the graph surface. Drop it and surface a warning
+    // rather than materialize a dangling edge. depends_on stays lenient: it is
+    // documentary grounding and is never read by the score.
+    if (TRUST_RELATION_KINDS.has(kind) && !store.getNode(resolvedId)) {
+      const shown = targetId.length > 60 ? `${targetId.slice(0, 57)}...` : targetId;
+      warnings.push(`dropped unresolved ${kind} reference: ${shown}`);
+      continue;
+    }
     relations.push({
       id: randomUUID(),
       kind,
       sourceId,
-      targetId: cellReferenceTarget(targetId),
+      targetId: resolvedId,
       data: targetPath ? { targetPath, targetRef: targetId } : {},
       createdAt: now
     });

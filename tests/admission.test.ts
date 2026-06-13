@@ -99,11 +99,24 @@ describe("admission", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);
     try {
+      // Trust-bearing edges must resolve to a real node, so the references
+      // below point at admitted cells rather than free-text labels (which are
+      // dropped with a warning — see evidence-target-resolution.test.ts).
+      const supportTarget = admitWriteProposal(
+        makeProposal({ content: { title: "Recall active memory", body: "support target", summary: "support" } }),
+        store
+      ).node!.id;
+      const concernTarget = admitWriteProposal(
+        makeProposal({ content: { title: "Context flooding risk", body: "concern target", summary: "concern" } }),
+        store
+      ).node!.id;
+
       const result = admitWriteProposal(
         makeProposal({
+          content: { title: "Cell carrying evidence edges", body: "edges", summary: "edges" },
           evidence: {
-            supports: ["belief:recall-active-memory"],
-            concerns: ["risk:context-flooding"]
+            supports: [supportTarget],
+            concerns: [concernTarget]
           }
         }),
         store
@@ -112,6 +125,8 @@ describe("admission", () => {
       assert.equal(result.accepted, true);
       assert.equal(store.stats().relations, 2);
       assert.equal(result.relations.map((relation) => relation.kind).sort().join(","), "concerns,supports");
+      assert.equal(result.relations.find((relation) => relation.kind === "supports")!.targetId, supportTarget);
+      assert.equal(result.relations.find((relation) => relation.kind === "concerns")!.targetId, concernTarget);
     } finally {
       store.close();
       temp.cleanup();

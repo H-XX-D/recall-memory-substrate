@@ -143,6 +143,7 @@ export interface RecallStore {
   subgraph(filter: SubgraphFilter): RecallNode[];
   getNode(id: string): RecallNode | null;
   getNodeByAddress(address: string): RecallNode | null;
+  getNodeByPrefix(prefix: string): RecallNode | null;
   listRelations(nodeId?: string, direction?: "in" | "out" | "both", limit?: number): RecallRelation[];
   listNodes(limit?: number): RecallNode[];
   listRollback(limit?: number): RollbackEntry[];
@@ -565,6 +566,16 @@ export class SQLiteRecallStore implements RecallStore {
   getNodeByAddress(address: string): RecallNode | null {
     const row = this.db.prepare("SELECT * FROM graph_nodes WHERE cell_address = ?").get(address) as NodeRow | undefined;
     return row ? rowToNode(row) : null;
+  }
+
+  getNodeByPrefix(prefix: string): RecallNode | null {
+    // Unique id-prefix resolution. Returns null on no match OR ambiguity (two
+    // or more rows), so a short or colliding prefix never resolves to the
+    // wrong node — only an unambiguous prefix expands to its full id.
+    const rows = this.db
+      .prepare("SELECT * FROM graph_nodes WHERE id LIKE ? ESCAPE '\\' LIMIT 2")
+      .all(`${escapeLikePattern(prefix)}%`) as unknown as NodeRow[];
+    return rows.length === 1 ? rowToNode(rows[0]) : null;
   }
 
   listRelations(nodeId?: string, direction: "in" | "out" | "both" = "both", limit = 100): RecallRelation[] {
@@ -1266,18 +1277,16 @@ export class SQLiteRecallStore implements RecallStore {
   }
 
   private migrateRelationTargets(): void {
-    // Older binaries stored relation targets as recall:// address strings,
-    // which made them invisible to every id-keyed lookup (incoming-challenge
-    // surfacing, rel in/out counts, search degree prior). Rewrite to bare
-    // node ids where the trailing segment resolves.
-    const rows = this.db
+    const update = this.db.prepare("UPDATE graph_relations SET target_id = ? WHERE id = ?");
+
+    // Pass 1: older binaries stored relation targets as recall:// address
+    // strings, which made them invisible to every id-keyed lookup (incoming-
+    // challenge surfacing, rel in/out counts, search degree prior). Rewrite to
+    // bare node ids where the trailing segment resolves.
+    const addressRows = this.db
       .prepare("SELECT id, target_id FROM graph_relations WHERE target_id LIKE 'recall://%'")
       .all() as unknown as { id: string; target_id: string }[];
-    if (rows.length === 0) {
-      return;
-    }
-    const update = this.db.prepare("UPDATE graph_relations SET target_id = ? WHERE id = ?");
-    for (const row of rows) {
+    for (const row of addressRows) {
       const withoutPath = row.target_id.split("#")[0];
       const segments = withoutPath.split("/").filter((segment) => segment.length > 0);
       const candidate = segments[segments.length - 1];
@@ -1287,6 +1296,28 @@ export class SQLiteRecallStore implements RecallStore {
       const exists = this.db.prepare("SELECT 1 FROM graph_nodes WHERE id = ?").get(candidate);
       if (exists) {
         update.run(candidate, row.id);
+      }
+    }
+
+    // Pass 2: repair bare id-prefix targets (e.g. truncated 8-char ids written
+    // where a full UUID belongs) to the full node id, but only where the prefix
+    // resolves to exactly one node. Free-text anchors (non-hex) and ambiguous
+    // prefixes are left untouched. Idempotent: a repaired 36-char id no longer
+    // matches the length filter.
+    const prefixRows = this.db
+      .prepare(
+        "SELECT id, target_id FROM graph_relations WHERE target_id NOT LIKE 'recall://%' AND length(target_id) BETWEEN 6 AND 35"
+      )
+      .all() as unknown as { id: string; target_id: string }[];
+    for (const row of prefixRows) {
+      if (/[^0-9a-fA-F]/.test(row.target_id)) {
+        continue;
+      }
+      const matches = this.db
+        .prepare("SELECT id FROM graph_nodes WHERE id LIKE ? ESCAPE '\\' LIMIT 2")
+        .all(`${escapeLikePattern(row.target_id)}%`) as unknown as { id: string }[];
+      if (matches.length === 1 && matches[0].id !== row.target_id) {
+        update.run(matches[0].id, row.id);
       }
     }
   }

@@ -341,6 +341,53 @@ describe("sqlite store and compiler", () => {
     }
   });
 
+  it("backfills bare id-prefix relation targets to full ids on open", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    let raw: DatabaseSync | null = null;
+    try {
+      const target = admitWriteProposal(makeProposal(), store);
+      assert.ok(target.node);
+      const targetId = target.node.id;
+      store.close();
+
+      // Plant the two pre-fix dangling shapes directly: a truncated 8-char
+      // prefix (recoverable) and a free-text anchor (not a cell id).
+      raw = new DatabaseSync(temp.path);
+      const insert = raw.prepare(
+        "INSERT INTO graph_relations (id, kind, source_id, target_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      );
+      insert.run("prefix-rel-1", "supports", "some-source-id", targetId.slice(0, 8), "{}", "2026-06-01T00:00:00.000Z");
+      insert.run("anchor-rel-1", "contradicts", "some-source-id", "HIERARCHY_FORCED", "{}", "2026-06-01T00:00:00.000Z");
+      raw.close();
+      raw = null;
+
+      // Reopening runs the Pass 2 backfill.
+      const reopened = new SQLiteRecallStore(temp.path);
+      try {
+        const incoming = reopened.listRelations(targetId, "in", 10);
+        assert.ok(
+          incoming.some((relation) => relation.kind === "supports" && relation.targetId === targetId),
+          `expected the bare prefix to expand to the full id, got: ${JSON.stringify(incoming.map((r) => [r.kind, r.targetId]))}`
+        );
+      } finally {
+        reopened.close();
+      }
+
+      // The free-text anchor is unrecoverable and must be left untouched.
+      raw = new DatabaseSync(temp.path);
+      const anchor = raw.prepare("SELECT target_id FROM graph_relations WHERE id = ?").get("anchor-rel-1") as {
+        target_id: string;
+      };
+      raw.close();
+      raw = null;
+      assert.equal(anchor.target_id, "HIERARCHY_FORCED");
+    } finally {
+      raw?.close();
+      temp.cleanup();
+    }
+  });
+
   it("surfaces incoming challenges against selected cells in the packet", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);
