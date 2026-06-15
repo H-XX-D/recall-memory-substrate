@@ -61,15 +61,26 @@ export function cellReferencePath(reference: string): string | undefined {
 export function resolveCellReference(
   reference: string,
   getNode: (id: string) => RecallNode | null,
-  getNodeByAddress: (address: string) => RecallNode | null
+  getNodeByAddress: (address: string) => RecallNode | null,
+  getNodeByPrefix?: (prefix: string) => RecallNode | null
 ): ResolvedCellReference {
   const parsed = parseCellReference(reference);
   // Full addresses resolve by address lookup; the short recall://cell/<id>
   // form (what the write helper emits) falls back to an id lookup on the
   // trailing segment.
-  const node = parsed.target.startsWith("recall://")
+  let node = parsed.target.startsWith("recall://")
     ? getNodeByAddress(parsed.target) ?? getNode(trailingSegment(parsed.target))
     : getNode(parsed.target) ?? getNodeByAddress(parsed.target);
+  // Final fallback: a truncated id-prefix (e.g. an 8-char id where a full UUID
+  // belongs) resolves to a unique node. Keeps read-time resolution consistent
+  // with admission and the on-open backfill, so prefix/prefix-address refs do
+  // not dangle as "unresolved" in compile packets.
+  if (!node && getNodeByPrefix) {
+    const segment = trailingSegment(parsed.target);
+    if (segment.length >= 6 && segment.length < 36 && /^[0-9a-fA-F]+$/.test(segment)) {
+      node = getNodeByPrefix(segment);
+    }
+  }
   const targetId = node?.id ?? parsed.target;
   return {
     ...parsed,

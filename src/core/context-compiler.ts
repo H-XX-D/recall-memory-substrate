@@ -386,7 +386,8 @@ function translateReference(
   const resolved = resolveCellReference(
     reference,
     (id) => store.getNode(id),
-    (address) => store.getNodeByAddress(address)
+    (address) => store.getNodeByAddress(address),
+    (prefix) => store.getNodeByPrefix(prefix)
   );
   if (!resolved.node) {
     pushUnique(packet.translatedReferences, `${sourceTitle} ${relation} unresolved reference ${reference} [${source.id}->${resolved.targetId}]`);

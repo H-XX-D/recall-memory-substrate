@@ -860,9 +860,11 @@ Commands:
   recall rollback show <journal-id> [--db path]
   recall rollback apply <journal-id> [--db path]
   recall hyperedge add --json hyperedge.json [--db path]
+      hyperedge.json = { "kind": "evidence-bundle", "title": "<required>", "members": [{ "nodeId": "<cell-id>", "role": "claim|verification" }] }
   recall hyperedge show <hyperedge-id> [--db path]
   recall hyperedge list [--limit 20] [--db path]
   recall program add <hyperedge-id> --json program.json [--db path]
+      program.json = { "schemaVersion": "recall.program.v1", "operation": "score|watch|drift|quorum", "params": { "delta": 0.1, "concernTarget": "<cell-id>", "k": 2, "minEff": 0.7 } }
   recall program list [--limit 20] [--db path]
   recall program show <program-id> [--db path]
   recall program run <program-id> [--derive] [--db path]

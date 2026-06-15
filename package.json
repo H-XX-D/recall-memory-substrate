@@ -49,6 +49,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "postbuild": "chmod +x dist/src/cli.js dist/src/mcp/cli.js",
     "prepare": "npm run build",
     "test": "npm run build && node --disable-warning=ExperimentalWarning --test \"dist/tests/**/*.test.js\"",
     "check": "npm run test",

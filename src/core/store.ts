@@ -1115,7 +1115,8 @@ export class SQLiteRecallStore implements RecallStore {
     return resolveCellReference(
       reference,
       (id) => this.getNode(id),
-      (address) => this.getNodeByAddress(address)
+      (address) => this.getNodeByAddress(address),
+      (prefix) => this.getNodeByPrefix(prefix)
     );
   }
 
@@ -1296,6 +1297,20 @@ export class SQLiteRecallStore implements RecallStore {
       const exists = this.db.prepare("SELECT 1 FROM graph_nodes WHERE id = ?").get(candidate);
       if (exists) {
         update.run(candidate, row.id);
+        continue;
+      }
+      // Address form carrying a truncated id-prefix (recall://cell/<8-char>):
+      // the trailing segment is a prefix, not a full id, so the exact match
+      // above misses AND Pass 2 skips it (it excludes recall:// rows), leaving
+      // it dangling. Resolve the unique hex prefix to the full node id (same
+      // rule as Pass 2) so prefix-in-address targets resolve uniformly.
+      if (candidate.length >= 6 && candidate.length < 36 && !/[^0-9a-fA-F]/.test(candidate)) {
+        const matches = this.db
+          .prepare("SELECT id FROM graph_nodes WHERE id LIKE ? ESCAPE '\\' LIMIT 2")
+          .all(`${escapeLikePattern(candidate)}%`) as unknown as { id: string }[];
+        if (matches.length === 1 && matches[0].id !== candidate) {
+          update.run(matches[0].id, row.id);
+        }
       }
     }
 
