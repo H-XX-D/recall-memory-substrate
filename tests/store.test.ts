@@ -358,6 +358,7 @@ describe("sqlite store and compiler", () => {
         "INSERT INTO graph_relations (id, kind, source_id, target_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?)"
       );
       insert.run("prefix-rel-1", "supports", "some-source-id", targetId.slice(0, 8), "{}", "2026-06-01T00:00:00.000Z");
+      insert.run("addr-prefix-rel-1", "supports", "some-source-id", `recall://cell/${targetId.slice(0, 8)}`, "{}", "2026-06-01T00:00:00.000Z");
       insert.run("anchor-rel-1", "contradicts", "some-source-id", "HIERARCHY_FORCED", "{}", "2026-06-01T00:00:00.000Z");
       raw.close();
       raw = null;
@@ -369,6 +370,13 @@ describe("sqlite store and compiler", () => {
         assert.ok(
           incoming.some((relation) => relation.kind === "supports" && relation.targetId === targetId),
           `expected the bare prefix to expand to the full id, got: ${JSON.stringify(incoming.map((r) => [r.kind, r.targetId]))}`
+        );
+        // Both the bare prefix AND the recall://cell/<prefix> address form must
+        // resolve (the address-prefix form previously fell through both passes).
+        assert.equal(
+          incoming.filter((relation) => relation.kind === "supports" && relation.targetId === targetId).length,
+          2,
+          `expected both bare-prefix and address-prefix forms to resolve, got: ${JSON.stringify(incoming.map((r) => [r.kind, r.targetId]))}`
         );
       } finally {
         reopened.close();
