@@ -709,8 +709,36 @@ export class SQLiteRecallStore implements RecallStore {
     return hyperedge;
   }
 
+  // Resolve a hyperedge/program/run id from either its full id or a unique
+  // truncated id-prefix (e.g. the 8-char form shown in listings). Exact id
+  // wins; a prefix expands ONLY when exactly one row matches, so a short or
+  // colliding prefix resolves to null rather than the wrong row. Mirrors
+  // getNodeByPrefix's unique-prefix discipline for cells, so `program run`,
+  // `program show`, `program show-run`, and `hyperedge show` accept a prefix
+  // the same way cell references do.
+  private resolveStoredId(table: "hyperedges" | "hyperedge_programs" | "program_runs", id: string): string | null {
+    const exact = this.db.prepare(`SELECT id FROM ${table} WHERE id = ?`).get(id) as { id: string } | undefined;
+    if (exact) {
+      return exact.id;
+    }
+    // Only an id-shaped prefix (hex + hyphens, shorter than a full id) is
+    // eligible for prefix expansion — never a full-length id that simply
+    // does not exist.
+    if (id.length < 6 || id.length >= 36 || !/^[0-9a-fA-F-]+$/.test(id)) {
+      return null;
+    }
+    const rows = this.db
+      .prepare(`SELECT id FROM ${table} WHERE id LIKE ? ESCAPE '\\' LIMIT 2`)
+      .all(`${escapeLikePattern(id)}%`) as Array<{ id: string }>;
+    return rows.length === 1 ? rows[0].id : null;
+  }
+
   getHyperedge(id: string): Hyperedge | null {
-    const row = this.db.prepare("SELECT * FROM hyperedges WHERE id = ?").get(id) as HyperedgeRow | undefined;
+    const resolvedId = this.resolveStoredId("hyperedges", id);
+    if (!resolvedId) {
+      return null;
+    }
+    const row = this.db.prepare("SELECT * FROM hyperedges WHERE id = ?").get(resolvedId) as HyperedgeRow | undefined;
     return row ? rowToHyperedge(row) : null;
   }
 
@@ -765,7 +793,11 @@ export class SQLiteRecallStore implements RecallStore {
   }
 
   getProgram(id: string): HyperedgeProgram | null {
-    const row = this.db.prepare("SELECT * FROM hyperedge_programs WHERE id = ?").get(id) as
+    const resolvedId = this.resolveStoredId("hyperedge_programs", id);
+    if (!resolvedId) {
+      return null;
+    }
+    const row = this.db.prepare("SELECT * FROM hyperedge_programs WHERE id = ?").get(resolvedId) as
       | HyperedgeProgramRow
       | undefined;
     return row ? rowToProgram(row) : null;
@@ -804,11 +836,13 @@ export class SQLiteRecallStore implements RecallStore {
       members.map((node) => [node.id, effectiveConfidence(this, node, factors).effective])
     );
     // Watch programs baseline against their own last run — history is state.
+    // Key on the resolved program.id (not the raw arg, which may be a prefix)
+    // so a prefix-invoked run still finds its own history.
     const previousRow = this.db
       .prepare(
         `SELECT * FROM program_runs WHERE program_id = ? ORDER BY created_at DESC LIMIT 1`
       )
-      .get(programId) as ProgramRunRow | undefined;
+      .get(program.id) as ProgramRunRow | undefined;
     const previousRun = previousRow ? rowToProgramRun(previousRow) : null;
     const run = executeHyperedgeProgram({
       program,
@@ -846,7 +880,11 @@ export class SQLiteRecallStore implements RecallStore {
   }
 
   getProgramRun(id: string): ProgramRun | null {
-    const row = this.db.prepare("SELECT * FROM program_runs WHERE id = ?").get(id) as ProgramRunRow | undefined;
+    const resolvedId = this.resolveStoredId("program_runs", id);
+    if (!resolvedId) {
+      return null;
+    }
+    const row = this.db.prepare("SELECT * FROM program_runs WHERE id = ?").get(resolvedId) as ProgramRunRow | undefined;
     return row ? rowToProgramRun(row) : null;
   }
 

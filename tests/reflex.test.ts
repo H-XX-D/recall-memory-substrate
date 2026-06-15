@@ -198,4 +198,52 @@ describe("watch reflexes", () => {
       temp.cleanup();
     }
   });
+
+  it("resolves program/hyperedge/run lookups from a unique id-prefix", () => {
+    const { temp, store, admit } = setup();
+    try {
+      const claim = admit({
+        content: { title: "Prefix resolves", body: "Run by short id.", summary: "Prefix." }
+      }, "2026-06-01T00:00:00.000Z");
+      const edge = store.addHyperedge({
+        kind: "evidence-bundle",
+        title: "Prefix gate",
+        members: [{ nodeId: claim.id, role: "claim" }]
+      });
+      const program = store.attachProgram(edge.id, {
+        schemaVersion: "recall.program.v1",
+        operation: "watch",
+        params: { delta: 0.1 }
+      });
+
+      const edgePrefix = edge.id.slice(0, 8);
+      const programPrefix = program.id.slice(0, 8);
+
+      // hyperedge show / program show accept a prefix and expand to the full id.
+      assert.equal(store.getHyperedge(edgePrefix)?.id, edge.id);
+      assert.equal(store.getProgram(programPrefix)?.id, program.id);
+
+      // program run by prefix no longer throws "Unknown program" and reports
+      // the full program id on the run.
+      const baseline = store.runProgram(programPrefix);
+      assert.equal(baseline.programId, program.id);
+      assert.equal(baseline.output.previous, null);
+
+      // The baseline-history lookup keys on the resolved id, so a second
+      // prefix-invoked run finds its own prior run (previous is populated).
+      const second = store.runProgram(programPrefix);
+      assert.notEqual(second.output.previous, null);
+
+      // program show-run accepts a run-id prefix too.
+      assert.equal(store.getProgramRun(baseline.id.slice(0, 8))?.id, baseline.id);
+
+      // A non-matching prefix resolves to null (and run throws), never the
+      // wrong row.
+      assert.equal(store.getProgram("ffffffff"), null);
+      assert.throws(() => store.runProgram("ffffffff"), /Unknown program/);
+    } finally {
+      store.close?.();
+      temp.cleanup();
+    }
+  });
 });
