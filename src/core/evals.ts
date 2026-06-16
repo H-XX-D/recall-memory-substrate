@@ -1,5 +1,18 @@
 import { compileContext } from "./context-compiler.js";
+import { calibrationFactors, effectiveConfidence } from "./evidence.js";
+import { cellReferenceTarget } from "./references.js";
 import type { RecallStore, SubgraphFilter } from "./store.js";
+
+// Model-free structural self-audits of the substrate's own guarantees. Each is
+// deterministic and read-only, so `recall eval run` audits the floor with no
+// LLM in the loop. First-class + extensible: add a checker here and a case to
+// defaultEvalSuite, and the regression becomes self-catching.
+export type RecallEvalInvariant =
+  | "prefix-resolution"
+  | "relation-targets-resolve"
+  | "address-id-consistency"
+  | "effective-confidence-bounds"
+  | "depends-on-acyclic";
 
 export interface RecallEvalSuite {
   name: string;
@@ -32,7 +45,7 @@ export type RecallEvalCase =
       // model-independent invariant of the store holds on the live graph.
       name: string;
       kind: "invariant";
-      invariant: "prefix-resolution";
+      invariant: RecallEvalInvariant;
     };
 
 export interface RecallEvalCaseResult {
@@ -73,11 +86,11 @@ export function defaultEvalSuite(): RecallEvalSuite {
         task: "Use Recall memory for a coding task",
         maxWords: 900
       },
-      {
-        name: "id-prefix resolution invariant",
-        kind: "invariant",
-        invariant: "prefix-resolution"
-      }
+      { name: "invariant: id-prefix resolution", kind: "invariant", invariant: "prefix-resolution" },
+      { name: "invariant: relation targets resolve", kind: "invariant", invariant: "relation-targets-resolve" },
+      { name: "invariant: address/id consistency", kind: "invariant", invariant: "address-id-consistency" },
+      { name: "invariant: effective-confidence bounds", kind: "invariant", invariant: "effective-confidence-bounds" },
+      { name: "invariant: depends_on acyclic", kind: "invariant", invariant: "depends-on-acyclic" }
     ]
   };
 }
@@ -122,11 +135,12 @@ function runCase(store: RecallStore, testCase: RecallEvalCase): RecallEvalCaseRe
       });
     }
     case "invariant": {
-      if (testCase.invariant === "prefix-resolution") {
-        const { passed, details } = checkPrefixResolution(store);
-        return result(testCase, passed, details);
+      const check = INVARIANTS[testCase.invariant];
+      if (!check) {
+        return result(testCase, false, { error: `unknown invariant: ${testCase.invariant}` });
       }
-      return result(testCase, false, { error: `unknown invariant: ${testCase.invariant}` });
+      const { passed, details } = check(store);
+      return result(testCase, passed, details);
     }
     case "compile": {
       const packet = compileContext(store, { task: testCase.task, budgetWords: testCase.maxWords ?? 900 });
@@ -148,31 +162,93 @@ function runCase(store: RecallStore, testCase: RecallEvalCase): RecallEvalCaseRe
   }
 }
 
-// Invariant: every id-keyed lookup resolves a unique truncated id-prefix to its
-// full row (cells via getNodeByPrefix; hyperedges/programs/program-runs/eval-runs/
-// operator-runs via their getters). Samples the most-recent row of each entity
-// that has data and checks its 8-char prefix expands back to the full id; entities
-// with no rows are skipped (vacuously fine). Pure, deterministic, model-free — so a
-// regression of this class is caught by `recall eval run` without an LLM noticing.
-function checkPrefixResolution(store: RecallStore): { passed: boolean; details: Record<string, unknown> } {
-  const checked: string[] = [];
-  const failed: string[] = [];
-  const probe = (label: string, id: string | undefined, get: (prefix: string) => { id: string } | null): void => {
-    if (typeof id !== "string" || id.length < 9) return;
-    checked.push(label);
-    const resolved = get(id.slice(0, 8));
-    if (!resolved || resolved.id !== id) {
-      failed.push(label);
+type InvariantResult = { passed: boolean; details: Record<string, unknown> };
+
+// First-class registry of model-free structural self-audits. Each samples the
+// live graph (bounded reads) and asserts a guarantee the substrate is supposed
+// to hold by construction.
+const INVARIANTS: Record<RecallEvalInvariant, (store: RecallStore) => InvariantResult> = {
+  // Every id-keyed lookup resolves a unique truncated id-prefix to its full row.
+  // Samples the most-recent row of each entity with data; empty entities skip.
+  "prefix-resolution": (store) => {
+    const checked: string[] = [];
+    const failed: string[] = [];
+    const probe = (label: string, id: string | undefined, get: (prefix: string) => { id: string } | null): void => {
+      if (typeof id !== "string" || id.length < 9) return;
+      checked.push(label);
+      const resolved = get(id.slice(0, 8));
+      if (!resolved || resolved.id !== id) failed.push(label);
+    };
+    probe("node", store.listNodes(1)[0]?.id, (p) => store.getNodeByPrefix(p));
+    probe("hyperedge", store.listHyperedges(1)[0]?.id, (p) => store.getHyperedge(p));
+    probe("program", store.listPrograms(1)[0]?.id, (p) => store.getProgram(p));
+    probe("program_run", store.listProgramRuns(1)[0]?.id, (p) => store.getProgramRun(p));
+    probe("eval_run", store.listEvalRuns(1)[0]?.id, (p) => store.getEvalRun(p));
+    probe("operator_run", store.listOperatorRuns(1)[0]?.id, (p) => store.getOperatorRun(p));
+    return { passed: failed.length === 0, details: { checked, failed } };
+  },
+
+  // No dangling relations: every relation's source and target resolve to a real
+  // node. Admission normalizes evidence targets to node ids, so a dangling edge
+  // is corruption, not a legitimate cross-project reference.
+  "relation-targets-resolve": (store) => {
+    const relations = store.listRelations(undefined, "both", 2000);
+    let dangling = 0;
+    for (const relation of relations) {
+      const target = cellReferenceTarget(relation.targetId);
+      if (!store.getNode(relation.sourceId) || !store.getNode(target)) dangling += 1;
     }
-  };
-  probe("node", store.listNodes(1)[0]?.id, (p) => store.getNodeByPrefix(p));
-  probe("hyperedge", store.listHyperedges(1)[0]?.id, (p) => store.getHyperedge(p));
-  probe("program", store.listPrograms(1)[0]?.id, (p) => store.getProgram(p));
-  probe("program_run", store.listProgramRuns(1)[0]?.id, (p) => store.getProgramRun(p));
-  probe("eval_run", store.listEvalRuns(1)[0]?.id, (p) => store.getEvalRun(p));
-  probe("operator_run", store.listOperatorRuns(1)[0]?.id, (p) => store.getOperatorRun(p));
-  return { passed: failed.length === 0, details: { checked, failed } };
-}
+    return { passed: dangling === 0, details: { relations: relations.length, dangling } };
+  },
+
+  // Every node's cellAddress ends in its own id — the addressable-cell guarantee
+  // that lets address handles and id lookups agree.
+  "address-id-consistency": (store) => {
+    const nodes = store.listNodes(1000);
+    const mismatched = nodes.filter((node) => !node.cellAddress || !node.cellAddress.endsWith(node.id)).length;
+    return { passed: mismatched === 0, details: { nodes: nodes.length, mismatched } };
+  },
+
+  // Effective confidence stays in [0,1] for every active node (no NaN/overflow
+  // from the support/challenge arithmetic).
+  "effective-confidence-bounds": (store) => {
+    const nodes = store.listNodes(1000).filter((node) => node.status === "active");
+    const factors = calibrationFactors(store);
+    const outOfBounds = nodes.filter((node) => {
+      const eff = effectiveConfidence(store, node, factors).effective;
+      return !(Number.isFinite(eff) && eff >= 0 && eff <= 1);
+    }).length;
+    return { passed: outOfBounds === 0, details: { nodes: nodes.length, outOfBounds } };
+  },
+
+  // depends_on must be a DAG: a cell transitively depending on itself is graph
+  // corruption. Cycle-detect via DFS over depends_on edges.
+  "depends-on-acyclic": (store) => {
+    const adjacency = new Map<string, string[]>();
+    for (const relation of store.listRelations(undefined, "both", 4000)) {
+      if (relation.kind !== "depends_on") continue;
+      const target = cellReferenceTarget(relation.targetId);
+      (adjacency.get(relation.sourceId) ?? adjacency.set(relation.sourceId, []).get(relation.sourceId)!).push(target);
+    }
+    const WHITE = 0, GREY = 1, BLACK = 2;
+    const color = new Map<string, number>();
+    let cycle = false;
+    const visit = (node: string): void => {
+      color.set(node, GREY);
+      for (const next of adjacency.get(node) ?? []) {
+        const c = color.get(next) ?? WHITE;
+        if (c === GREY) { cycle = true; return; }
+        if (c === WHITE) { visit(next); if (cycle) return; }
+      }
+      color.set(node, BLACK);
+    };
+    for (const node of adjacency.keys()) {
+      if ((color.get(node) ?? WHITE) === WHITE) visit(node);
+      if (cycle) break;
+    }
+    return { passed: !cycle, details: { dependsOnNodes: adjacency.size, cycle } };
+  }
+};
 
 function matches(text: string, count: number, expectContains: string | undefined, minResults: number | undefined): boolean {
   return count >= (minResults ?? 0) && (expectContains === undefined || text.includes(expectContains));

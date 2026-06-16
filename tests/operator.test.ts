@@ -61,12 +61,23 @@ test("operator cycle orchestrates mechanical runtime phases with closure and pos
     assert.equal(store.getOperatorRun(result.ledger!.id.slice(0, 8))?.id, result.ledger!.id, "operator run resolves by id-prefix");
     assert.equal(store.getEvalRun("ffffffff"), null, "non-matching prefix stays null");
 
-    // The prefix-resolution invariant is now a deterministic eval case: on this
-    // populated graph (nodes + eval_runs + operator_runs present) `recall eval run`
-    // catches a regression of this class model-free, no LLM noticing required.
-    const inv = runRecallEval(store, { name: "inv", cases: [{ name: "prefix", kind: "invariant", invariant: "prefix-resolution" }] });
-    assert.equal(inv.passed, true, "prefix-resolution invariant holds on the populated graph");
-    assert.equal((inv.cases[0]!.details.checked as string[]).includes("eval_run"), true, "invariant actually exercised eval_run/operator_run");
+    // The structural self-audit invariants are deterministic eval cases: on this
+    // populated graph (nodes + relations + eval_runs + operator_runs present)
+    // `recall eval run` audits the substrate's own guarantees model-free, so a
+    // regression of any of these classes is self-catching (no LLM noticing).
+    const inv = runRecallEval(store, {
+      name: "inv",
+      cases: [
+        { name: "prefix-resolution", kind: "invariant", invariant: "prefix-resolution" },
+        { name: "relation-targets-resolve", kind: "invariant", invariant: "relation-targets-resolve" },
+        { name: "address-id-consistency", kind: "invariant", invariant: "address-id-consistency" },
+        { name: "effective-confidence-bounds", kind: "invariant", invariant: "effective-confidence-bounds" },
+        { name: "depends-on-acyclic", kind: "invariant", invariant: "depends-on-acyclic" }
+      ]
+    });
+    assert.equal(inv.passed, true, "all structural self-audit invariants hold on the populated graph");
+    const prefixCase = inv.cases.find((item) => item.name === "prefix-resolution");
+    assert.equal((prefixCase!.details.checked as string[]).includes("eval_run"), true, "prefix invariant exercised eval_run/operator_run");
 
     const followUp = runOperatingCycle(store, new Date("2026-05-22T12:05:00.000Z"), {
       derive: true,
