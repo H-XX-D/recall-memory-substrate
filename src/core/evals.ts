@@ -26,6 +26,13 @@ export type RecallEvalCase =
       kind: "subgraph";
       filter: SubgraphFilter;
       minResults?: number;
+    }
+  | {
+      // Deterministic structural self-check (no model, no query): asserts a
+      // model-independent invariant of the store holds on the live graph.
+      name: string;
+      kind: "invariant";
+      invariant: "prefix-resolution";
     };
 
 export interface RecallEvalCaseResult {
@@ -65,6 +72,11 @@ export function defaultEvalSuite(): RecallEvalSuite {
         kind: "compile",
         task: "Use Recall memory for a coding task",
         maxWords: 900
+      },
+      {
+        name: "id-prefix resolution invariant",
+        kind: "invariant",
+        invariant: "prefix-resolution"
       }
     ]
   };
@@ -109,6 +121,13 @@ function runCase(store: RecallStore, testCase: RecallEvalCase): RecallEvalCaseRe
         resultCount: results.length
       });
     }
+    case "invariant": {
+      if (testCase.invariant === "prefix-resolution") {
+        const { passed, details } = checkPrefixResolution(store);
+        return result(testCase, passed, details);
+      }
+      return result(testCase, false, { error: `unknown invariant: ${testCase.invariant}` });
+    }
     case "compile": {
       const packet = compileContext(store, { task: testCase.task, budgetWords: testCase.maxWords ?? 900 });
       const text = JSON.stringify(packet);
@@ -127,6 +146,32 @@ function runCase(store: RecallStore, testCase: RecallEvalCase): RecallEvalCaseRe
       });
     }
   }
+}
+
+// Invariant: every id-keyed lookup resolves a unique truncated id-prefix to its
+// full row (cells via getNodeByPrefix; hyperedges/programs/program-runs/eval-runs/
+// operator-runs via their getters). Samples the most-recent row of each entity
+// that has data and checks its 8-char prefix expands back to the full id; entities
+// with no rows are skipped (vacuously fine). Pure, deterministic, model-free — so a
+// regression of this class is caught by `recall eval run` without an LLM noticing.
+function checkPrefixResolution(store: RecallStore): { passed: boolean; details: Record<string, unknown> } {
+  const checked: string[] = [];
+  const failed: string[] = [];
+  const probe = (label: string, id: string | undefined, get: (prefix: string) => { id: string } | null): void => {
+    if (typeof id !== "string" || id.length < 9) return;
+    checked.push(label);
+    const resolved = get(id.slice(0, 8));
+    if (!resolved || resolved.id !== id) {
+      failed.push(label);
+    }
+  };
+  probe("node", store.listNodes(1)[0]?.id, (p) => store.getNodeByPrefix(p));
+  probe("hyperedge", store.listHyperedges(1)[0]?.id, (p) => store.getHyperedge(p));
+  probe("program", store.listPrograms(1)[0]?.id, (p) => store.getProgram(p));
+  probe("program_run", store.listProgramRuns(1)[0]?.id, (p) => store.getProgramRun(p));
+  probe("eval_run", store.listEvalRuns(1)[0]?.id, (p) => store.getEvalRun(p));
+  probe("operator_run", store.listOperatorRuns(1)[0]?.id, (p) => store.getOperatorRun(p));
+  return { passed: failed.length === 0, details: { checked, failed } };
 }
 
 function matches(text: string, count: number, expectContains: string | undefined, minResults: number | undefined): boolean {
