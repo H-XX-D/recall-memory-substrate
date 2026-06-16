@@ -52,6 +52,14 @@ test("operator cycle orchestrates mechanical runtime phases with closure and pos
     assert.equal(result.recommendations.length >= 1, true);
     assert.equal(store.subgraph({ category: ["derivation"], type: ["eval_run"] }).length >= 1, true);
 
+    // id-prefix resolution for eval/operator run lookups (regression): a unique
+    // truncated id must resolve, matching program/hyperedge/program-run lookups.
+    const evalRunId = store.listEvalRuns(1)[0]?.id;
+    assert.ok(evalRunId, "eval closure recorded an eval run");
+    assert.equal(store.getEvalRun(evalRunId.slice(0, 8))?.id, evalRunId, "eval run resolves by id-prefix");
+    assert.equal(store.getOperatorRun(result.ledger!.id.slice(0, 8))?.id, result.ledger!.id, "operator run resolves by id-prefix");
+    assert.equal(store.getEvalRun("ffffffff"), null, "non-matching prefix stays null");
+
     const followUp = runOperatingCycle(store, new Date("2026-05-22T12:05:00.000Z"), {
       derive: true,
       semanticReindex: false,
