@@ -56,6 +56,7 @@
     "e2e": "npm run build && node --disable-warning=ExperimentalWarning scripts/e2e.mjs",
     "bench": "npm run build && node --disable-warning=ExperimentalWarning scripts/bench.mjs",
     "bench:public": "npm run build && node --disable-warning=ExperimentalWarning scripts/public-bench.mjs",
+    "bench:sentinel": "npm run build && node --disable-warning=ExperimentalWarning scripts/sentinel-bench.mjs",
     "install:local": "npm install && npm run build && npm link",
     "prepublishOnly": "npm test && npm run e2e",
     "smoke": "npm run build && node --disable-warning=ExperimentalWarning dist/src/cli.js init --db .recall/smoke.sqlite3 && node --disable-warning=ExperimentalWarning dist/src/cli.js status --db .recall/smoke.sqlite3"
