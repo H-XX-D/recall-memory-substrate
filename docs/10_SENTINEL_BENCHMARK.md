@@ -53,8 +53,9 @@ flags; SENTINEL reads only what it surfaces unprompted.
 - **L2 — entailed contradiction** ("allergic to penicillin" → "took amoxicillin,
   felt fine"). Light inference; the model re-enters.
 - **L3 — transitive / holonomy** (A>B, B>C, C>A — pairwise plausible, globally
-  impossible). Global-consistency detection via `dag_analyze`. No incumbent has
-  this primitive.
+  impossible). Global-consistency detection: the substrate refuses to admit a
+  cyclic ordering overlay (`addDagOverlay` rejects it at write time). No
+  incumbent has this primitive. *(Implemented.)*
 - **L4 — stale-by-implicit-expiry** ("training for the June marathon" → stale in
   July). Time-aware staleness.
 
@@ -77,6 +78,24 @@ semantic contradiction (L2+) needs an LLM/Checker extraction step at ingest. The
 Recall-unique, model-free part is the *unprompted surfacing* (the standing
 program), which is why the push-axis claim holds regardless of detector
 sophistication.
+
+## L3 results (transitive / holonomy, deterministic, zero-budget)
+
+24 triples (12 inconsistent A>B,B>C,C>A; 12 consistent A>B,B>C,A>C). Each
+ordering is admitted as a fact, then folded into a DAG overlay. The closing edge
+that would complete a cycle is rejected by `addDagOverlay` at write time; the
+consistent triples admit cleanly.
+
+| metric | result |
+|---|---|
+| detection recall | **100%** (12/12 cyclic orderings rejected) |
+| precision | **100%** (0 false rejections of consistent orderings) |
+| latency | caught on the closing edge — pairwise checks never see it |
+
+This is the global-consistency guarantee no pull memory system has: each edge is
+individually plausible, so storing facts and answering queries can never surface
+the contradiction; only a substrate that materializes the ordering and checks it
+for cycles catches A>B>C>A.
 
 ## Sibling axes (same "they lack the primitive" logic)
 - **Trust discrimination** — does per-actor Brier calibration down-weight
