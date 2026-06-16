@@ -716,7 +716,7 @@ export class SQLiteRecallStore implements RecallStore {
   // getNodeByPrefix's unique-prefix discipline for cells, so `program run`,
   // `program show`, `program show-run`, and `hyperedge show` accept a prefix
   // the same way cell references do.
-  private resolveStoredId(table: "hyperedges" | "hyperedge_programs" | "program_runs", id: string): string | null {
+  private resolveStoredId(table: "hyperedges" | "hyperedge_programs" | "program_runs" | "eval_runs" | "operator_runs", id: string): string | null {
     const exact = this.db.prepare(`SELECT id FROM ${table} WHERE id = ?`).get(id) as { id: string } | undefined;
     if (exact) {
       return exact.id;
@@ -991,7 +991,11 @@ export class SQLiteRecallStore implements RecallStore {
   }
 
   getEvalRun(id: string): StoredEvalRun | null {
-    const row = this.db.prepare("SELECT * FROM eval_runs WHERE id = ?").get(id) as EvalRunRow | undefined;
+    const resolvedId = this.resolveStoredId("eval_runs", id);
+    if (!resolvedId) {
+      return null;
+    }
+    const row = this.db.prepare("SELECT * FROM eval_runs WHERE id = ?").get(resolvedId) as EvalRunRow | undefined;
     return row ? rowToEvalRun(row) : null;
   }
 
@@ -1025,7 +1029,11 @@ export class SQLiteRecallStore implements RecallStore {
   }
 
   getOperatorRun(id: string): OperatorRun | null {
-    const row = this.db.prepare("SELECT * FROM operator_runs WHERE id = ?").get(id) as OperatorRunRow | undefined;
+    const resolvedId = this.resolveStoredId("operator_runs", id);
+    if (!resolvedId) {
+      return null;
+    }
+    const row = this.db.prepare("SELECT * FROM operator_runs WHERE id = ?").get(resolvedId) as OperatorRunRow | undefined;
     return row ? rowToOperatorRun(row) : null;
   }
 
