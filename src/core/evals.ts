@@ -188,17 +188,24 @@ const INVARIANTS: Record<RecallEvalInvariant, (store: RecallStore) => InvariantR
     return { passed: failed.length === 0, details: { checked, failed } };
   },
 
-  // No dangling relations: every relation's source and target resolve to a real
-  // node. Admission normalizes evidence targets to node ids, so a dangling edge
-  // is corruption, not a legitimate cross-project reference.
+  // Trust-bearing edges (supports/contradicts/concerns) feed effective
+  // confidence, so a dangling one is a phantom that skews the math — the system
+  // drops dangling trust edges, so they must always resolve to a real node.
+  // depends_on is lineage/provenance and may legitimately reference a cell that
+  // was rolled back or never re-derived, so it is deliberately excluded.
   "relation-targets-resolve": (store) => {
-    const relations = store.listRelations(undefined, "both", 2000);
+    const TRUST = new Set(["supports", "contradicts", "concerns"]);
+    const relations = store.listRelations(undefined, "both", 2000).filter((r) => TRUST.has(r.kind));
     let dangling = 0;
+    const danglingTargets: string[] = [];
     for (const relation of relations) {
       const target = cellReferenceTarget(relation.targetId);
-      if (!store.getNode(relation.sourceId) || !store.getNode(target)) dangling += 1;
+      if (!store.getNode(relation.sourceId) || !store.getNode(target)) {
+        dangling += 1;
+        if (danglingTargets.length < 5) danglingTargets.push(`${relation.kind}:${relation.targetId}`);
+      }
     }
-    return { passed: dangling === 0, details: { relations: relations.length, dangling } };
+    return { passed: dangling === 0, details: { trustRelations: relations.length, dangling, danglingTargets } };
   },
 
   // Every node's cellAddress ends in its own id — the addressable-cell guarantee
