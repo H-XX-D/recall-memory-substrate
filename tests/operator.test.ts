@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { admitWriteProposal } from "../src/core/admission.js";
 import { acquireDaemonLease, releaseDaemonLease } from "../src/core/daemon-scheduler.js";
 import { runOperatingCycle } from "../src/core/operator.js";
+import { runRecallEval } from "../src/core/evals.js";
 import { SQLiteRecallStore } from "../src/core/store.js";
 import { handleMcpRequest } from "../src/mcp/server.js";
 import { makeProposal, tempDbPath } from "./helpers.js";
@@ -59,6 +60,13 @@ test("operator cycle orchestrates mechanical runtime phases with closure and pos
     assert.equal(store.getEvalRun(evalRunId.slice(0, 8))?.id, evalRunId, "eval run resolves by id-prefix");
     assert.equal(store.getOperatorRun(result.ledger!.id.slice(0, 8))?.id, result.ledger!.id, "operator run resolves by id-prefix");
     assert.equal(store.getEvalRun("ffffffff"), null, "non-matching prefix stays null");
+
+    // The prefix-resolution invariant is now a deterministic eval case: on this
+    // populated graph (nodes + eval_runs + operator_runs present) `recall eval run`
+    // catches a regression of this class model-free, no LLM noticing required.
+    const inv = runRecallEval(store, { name: "inv", cases: [{ name: "prefix", kind: "invariant", invariant: "prefix-resolution" }] });
+    assert.equal(inv.passed, true, "prefix-resolution invariant holds on the populated graph");
+    assert.equal((inv.cases[0]!.details.checked as string[]).includes("eval_run"), true, "invariant actually exercised eval_run/operator_run");
 
     const followUp = runOperatingCycle(store, new Date("2026-05-22T12:05:00.000Z"), {
       derive: true,
