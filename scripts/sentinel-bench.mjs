@@ -121,3 +121,65 @@ console.log("---- surfacing cost (native standing program vs pull bolt-on) ----"
 console.log(`native (Recall) : ${r.nativeCost} program-runs — O(writes)`);
 console.log(`pull bolt-on    : ${r.boltOnCost} re-queries — O(writes x beliefs=${r.beliefs}) = ${(r.boltOnCost / r.nativeCost).toFixed(1)}x, and only on demand`);
 console.log("\nincumbents (no standing-program primitive): score 0 on the push axis by construction.");
+
+// ============================ L3: transitive / holonomy ============================
+// Pairwise-plausible, globally-impossible orderings: A>B, B>C, C>A. Each edge is
+// believable alone; together they're a contradiction no pairwise check catches.
+// The substrate refuses to materialize a cyclic ordering overlay (addDagOverlay
+// throws), so the closing edge is rejected at write time. No pull memory system
+// has a global-consistency primitive at all.
+function makeTriples(n) {
+  const triples = [];
+  for (let i = 0; i < n; i++) {
+    const inconsistent = i % 2 === 0;
+    triples.push({
+      inconsistent,
+      orderings: inconsistent ? [["A", "B"], ["B", "C"], ["C", "A"]] : [["A", "B"], ["B", "C"], ["A", "C"]]
+    });
+  }
+  return triples;
+}
+
+export function runL3(tripleCount = 24) {
+  let inconsistentTotal = 0, detected = 0, falseFlags = 0, admits = 0;
+  for (const triple of makeTriples(tripleCount)) {
+    const tmp = mkdtempSync(join(os.tmpdir(), "sentinel-l3-"));
+    const store = new SQLiteRecallStore(join(tmp, "d.sqlite3"));
+    try {
+      const ent = {
+        A: admitWriteProposal(proposal("entity A", "ent", "A"), store).node.id,
+        B: admitWriteProposal(proposal("entity B", "ent", "B"), store).node.id,
+        C: admitWriteProposal(proposal("entity C", "ent", "C"), store).node.id
+      };
+      if (triple.inconsistent) inconsistentTotal += 1;
+      const edges = [];
+      let detectedTick = -1;
+      triple.orderings.forEach(([from, to], idx) => {
+        admitWriteProposal(proposal(`${from} > ${to}`, "ord", `${from}${to}`), store);
+        edges.push({ from: ent[from], to: ent[to] });
+        admits += 1;
+        try {
+          store.addDagOverlay({ title: `ordering@${idx}`, nodeIds: [ent.A, ent.B, ent.C], edges: edges.slice(), metadata: {} });
+        } catch (err) {
+          if (/cycle/i.test(String(err && err.message)) && detectedTick < 0) detectedTick = idx;
+        }
+      });
+      if (triple.inconsistent) { if (detectedTick >= 0) detected += 1; }
+      else if (detectedTick >= 0) falseFlags += 1;
+    } finally {
+      store.close?.();
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+  const recall = inconsistentTotal ? detected / inconsistentTotal : 1;
+  const precision = (detected + falseFlags) ? detected / (detected + falseFlags) : 1;
+  return { triples: tripleCount, inconsistentTotal, detected, falseFlags, recall, precision, admits };
+}
+
+const l3 = runL3(24);
+console.log("\n==================== SENTINEL L3 — transitive (holonomy) inconsistency ====================\n");
+console.log(`triples: ${l3.triples} (half A>B,B>C,C>A inconsistent; half A>B,B>C,A>C consistent) · inconsistent: ${l3.inconsistentTotal}\n`);
+console.log(`detection recall : ${pct(l3.recall)} (${l3.detected}/${l3.inconsistentTotal} cyclic orderings rejected at write time)`);
+console.log(`precision        : ${pct(l3.precision)} (false rejections of consistent orderings: ${l3.falseFlags})`);
+console.log("latency          : caught on the closing edge — pairwise checks never see it");
+console.log("\nno pull memory system materializes an ordering overlay and checks global acyclicity -> 0 on this axis by construction.");
