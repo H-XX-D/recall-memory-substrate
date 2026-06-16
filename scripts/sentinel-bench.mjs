@@ -19,7 +19,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
-import { SQLiteRecallStore, admitWriteProposal } from "../dist/src/index.js";
+import { SQLiteRecallStore, admitWriteProposal, analyzeMemory } from "../dist/src/index.js";
 
 function proposal(title, attr, value, contradicts) {
   const body = `${attr}=${value}`;
@@ -253,3 +253,65 @@ console.log(`  literal baseline (L1-style)  : recall ${pct(litS.recall)} precisi
 console.log(`  entailment detector (KB/LLM) : recall ${pct(entS.recall)} precision ${pct(entS.precision)}  (amoxicillin vs ibuprofen, lives vs visited)`);
 console.log(`SURFACING (floor): recall ${pct(surfS.recall)} (${surfS.total}/${trueN}), false trips ${surfS.falseTrips}`);
 console.log("\nL2 needs the ceiling (literal ~0); the floor surfaces model-free once linked. KB stands in for an LLM/Checker.");
+
+// ============================ L4: stale-by-implicit-expiry ============================
+// "training for the June marathon" is stale in July — not a value-conflict, an
+// expired implicit scope. Floor+ceiling: the ceiling extracts the implicit expiry
+// into policy.expires_at; the floor (analyzeMemory) surfaces it as "expired" when
+// now passes it, unprompted. Contrast: a naive AGE baseline misses recent-but-
+// expired beliefs and false-flags timeless-but-old ones.
+const L4_NOW = new Date("2023-07-15T00:00:00.000Z");
+const L4_CASES = [
+  { text: "training for the June marathon", createdAt: "2023-06-28", gold: true },
+  { text: "is vegetarian", createdAt: "2023-05-01", gold: false },
+  { text: "attending the March 2023 developer conference", createdAt: "2023-03-01", gold: true },
+  { text: "lives in Paris", createdAt: "2023-01-01", gold: false },
+  { text: "Q2 budget freeze in effect", createdAt: "2023-04-01", gold: true },
+  { text: "subscribed to the annual plan through December 2023", createdAt: "2023-06-01", gold: false },
+  { text: "rehearsing for the May recital", createdAt: "2023-05-10", gold: true },
+  { text: "planning a vacation in August 2023", createdAt: "2023-07-10", gold: false }
+];
+const MONTH_END = { january: "01-31", february: "02-28", march: "03-31", april: "04-30", may: "05-31", june: "06-30", july: "07-31", august: "08-31", september: "09-30", october: "10-31", november: "11-30", december: "12-31" };
+function extractExpiry(text) {
+  const t = text.toLowerCase();
+  const year = (t.match(/\b(20\d{2})\b/) || [])[1] || "2023";
+  if (/\bq2\b/.test(t)) return `${year}-06-30T23:59:59.000Z`;
+  if (/\bq1\b/.test(t)) return `${year}-03-31T23:59:59.000Z`;
+  for (const [month, end] of Object.entries(MONTH_END)) if (t.includes(month)) return `${year}-${end}T23:59:59.000Z`;
+  return null;
+}
+function l4Proposal(title, expiresAt, createdAt) {
+  return { schema_version: "recall.write.v1", actor: { kind: "llm", id: "l4", display: "l4" },
+    intent: { kind: "observation", operation: "create" }, content: { title, body: title, summary: title },
+    scope: { project: "l4", path: ".", tenant: "local" },
+    tags: { category: ["memory"], type: ["observation"], subject: ["belief"], project: ["l4"], idea: ["expiry"],
+      timestamp: [createdAt], topics: ["belief"], entities: ["x"], identities: ["a"], rings: ["adapter"],
+      lifecycle: ["active"], quality: ["source-grounded"], sensitivity: ["public"], permission: ["read"] },
+    evidence: { source_refs: [], depends_on: [], supports: [], contradicts: [], concerns: [] },
+    confidence: { value: 0.8, uncertainty: 0.1, concern: 0.05, source_quality: "high", stability: "stable" },
+    provenance: { created_at: new Date(createdAt).toISOString(), origin: "llm", produced_by: "l4", verification: "checked", signature_status: "unsigned" },
+    policy: { sensitivity: "public", allow_background_use: true, requires_review: false, expires_at: expiresAt, reverify_after: null } };
+}
+function runL4() {
+  const tmp = mkdtempSync(join(os.tmpdir(), "sentinel-l4-"));
+  const store = new SQLiteRecallStore(join(tmp, "d.sqlite3"));
+  const idToCase = new Map();
+  try {
+    for (const c of L4_CASES) idToCase.set(admitWriteProposal(l4Proposal(c.text, extractExpiry(c.text), c.createdAt), store).node.id, c);
+    const expiredIds = new Set(analyzeMemory(store, L4_NOW).stale.filter((s) => s.reason === "expired").map((s) => s.nodeId));
+    let exp = { tp: 0, fp: 0, fn: 0 }, age = { tp: 0, fp: 0, fn: 0 };
+    for (const [id, c] of idToCase) {
+      const sExp = expiredIds.has(id);
+      const sAge = (L4_NOW.getTime() - new Date(c.createdAt).getTime()) / 86_400_000 > 30;
+      for (const [d, s] of [[exp, sExp], [age, sAge]]) { if (s && c.gold) d.tp++; else if (s) d.fp++; else if (c.gold) d.fn++; }
+    }
+    const sc = (d) => ({ recall: d.tp + d.fn ? d.tp / (d.tp + d.fn) : 1, precision: d.tp + d.fp ? d.tp / (d.tp + d.fp) : 1 });
+    return { exp: sc(exp), age: sc(age), trueN: L4_CASES.filter((c) => c.gold).length };
+  } finally { store.close?.(); rmSync(tmp, { recursive: true, force: true }); }
+}
+const l4 = runL4();
+console.log("\n==================== SENTINEL L4 — stale-by-implicit-expiry (floor + ceiling) ====================\n");
+console.log(`${L4_CASES.length} beliefs (${l4.trueN} expired by NOW=2023-07-15, ${L4_CASES.length - l4.trueN} timeless-or-future)\n`);
+console.log(`  naive age baseline (flag if old)      : recall ${pct(l4.age.recall)} precision ${pct(l4.age.precision)}  <- misses recent-expired, false-flags timeless-old`);
+console.log(`  expiry-aware (ceiling extract + floor): recall ${pct(l4.exp.recall)} precision ${pct(l4.exp.precision)}  (analyzeMemory flags expires_at <= now, unprompted)`);
+console.log("\npull memory systems have no staleness model -> return the stale belief on query as if current (0 on this axis).");

@@ -57,7 +57,7 @@ flags; SENTINEL reads only what it surfaces unprompted.
   cyclic ordering overlay (`addDagOverlay` rejects it at write time). No
   incumbent has this primitive. *(Implemented.)*
 - **L4 — stale-by-implicit-expiry** ("training for the June marathon" → stale in
-  July). Time-aware staleness.
+  July). Time-aware staleness. *(Implemented.)*
 
 ## L1 results (deterministic, zero-budget)
 
@@ -117,6 +117,41 @@ mechanism as L1. The KB is a deterministic stand-in for the LLM/Checker;
 independent judgment by a strong model agrees with all 12 gold labels, though at
 scale on adversarial data a real model is high-but-imperfect (NLI-level). The
 floor is unaffected by detector imperfection — it surfaces exactly what it's told.
+
+## L4 results (stale-by-implicit-expiry — floor + ceiling)
+
+8 beliefs (4 expired by NOW=2023-07-15, 4 timeless-or-future). The ceiling
+extracts an implicit expiry from the text ("June marathon" → 2023-06-30) into
+`policy.expires_at`; the floor (`analyzeMemory`) surfaces the belief as `expired`
+when `now` passes it — unprompted (the maintenance/daemon loop). Contrasted with
+a naive age baseline (flag if older than 30 days):
+
+| detector | recall | precision |
+|---|---|---|
+| naive age baseline | 75% | 50% |
+| expiry-aware (ceiling extract + floor) | **100%** | **100%** |
+
+The age baseline fails *both* ways — it **misses** a recent-but-expired belief
+(June marathon written June 28, stale by July 2) and **false-flags** timeless-but-
+old ones ("is vegetarian", "lives in Paris") and future-dated ones (annual plan
+through December). Time-aware staleness is not age: the ceiling does the temporal
+extraction, the floor does the `expires_at <= now` comparison deterministically.
+Pull memory systems have no staleness model — they return the stale belief on
+query as if it were current.
+
+## Summary — the four axes
+
+| level | axis | mechanism | pull-system score |
+|---|---|---|---|
+| L1 | unprompted value-flip | standing `watch` program | 0 (no standing program) |
+| L2 | entailed contradiction | model detects → program surfaces | 0 (no push surface) |
+| L3 | transitive / holonomy | write-time cyclic-overlay rejection | 0 (no consistency check) |
+| L4 | stale-by-implicit-expiry | `expires_at` + `analyzeMemory` | 0 (no staleness model) |
+
+L1/L3 are pure floor (deterministic detection + surfacing); L2/L4 are
+floor+ceiling (a model detects the semantic/temporal trigger, the model-free
+floor surfaces it). Every axis is a write-time/standing capability the
+pull-architecture incumbents lack by construction.
 
 ## Sibling axes (same "they lack the primitive" logic)
 - **Trust discrimination** — does per-actor Brier calibration down-weight
