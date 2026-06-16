@@ -1,0 +1,87 @@
+# 10 · SENTINEL — the Unprompted-Contradiction Benchmark
+
+**Thesis.** Every shipping memory benchmark (LoCoMo, LongMemEval, …) tests
+*read accuracy*: given history, answer a query. They are **pull** tests, and the
+systems built for them (Mem0, Zep, Letta, LangMem) are pull architectures —
+information flows only in response to a question.
+
+SENTINEL is a **push** test. It measures whether a memory system, as new
+information arrives over time, **autonomously surfaces that a newly-stored fact
+invalidates a previously-held belief — without being asked**. That is the
+reliability-floor-over-time capability: a model-independent invariant, not
+model-dependent navigation.
+
+Harness: `scripts/sentinel-bench.mjs` (`npm run bench:sentinel`).
+
+## Why the incumbents don't compete (structural, not rigged)
+
+A pull system has no place to emit a signal nobody queried for. To score on
+SENTINEL at all, a system needs a **write-time evaluation hook** that runs on
+admission and can re-price/flag prior beliefs. Recall has this natively (reflex
+programs `watch`/`drift`/`score` + contradiction-on-admission + effective-
+confidence demotion). Mem0/Zep/Letta do not, so they score **0 by construction**
+— not because they're weak, but because the capability is outside their shape.
+
+**Fairness guardrails (so it isn't a strawman):**
+1. The capability is *independently valuable* — silently serving a stale fact is
+   a top production failure mode; users need to be told "the thing you believed
+   changed" without re-auditing.
+2. Anyone can compete by bolting on a hook. SENTINEL provides the **fair bolt-on
+   baseline**: re-query every prior belief after each write. It can score — at
+   **O(beliefs × writes)** cost. Detection *and* cost are reported, so
+   "native vs bolted-on" is an honest axis.
+3. **Precision is scored** — a system that flags everything is useless and loses.
+
+## Task & metrics
+
+Input: a chronologically-ordered stream of claims for one subject. A subset are
+**contradictors** (a value-flip of an earlier belief); the rest are
+**distractors** (reinforcements of the same value, or unrelated facts). No
+questions are asked. After each event the system may surface contradiction
+flags; SENTINEL reads only what it surfaces unprompted.
+
+- **Detection recall** — flagged contradictions / total contradictions
+- **Precision** — true flags / all flags (distractors must not fire)
+- **Latency** — events between a contradictor's arrival and its flag
+- **Surfacing cost** — native (standing program, O(writes)) vs pull bolt-on
+  (O(writes × beliefs)); never collapsed into the capability score
+
+## Difficulty ladder (floor → floor+ceiling)
+
+- **L1 — explicit value-flip** ("Chicago" → "Denver"). Pure floor; deterministic
+  detection, no model. *(Implemented.)*
+- **L2 — entailed contradiction** ("allergic to penicillin" → "took amoxicillin,
+  felt fine"). Light inference; the model re-enters.
+- **L3 — transitive / holonomy** (A>B, B>C, C>A — pairwise plausible, globally
+  impossible). Global-consistency detection via `dag_analyze`. No incumbent has
+  this primitive.
+- **L4 — stale-by-implicit-expiry** ("training for the June marathon" → stale in
+  July). Time-aware staleness.
+
+## L1 results (deterministic, zero-budget)
+
+24 synthetic streams (12 with one value-flip, 12 distractor-only), isolated
+store per stream. A deterministic value-flip detector links the contradictor on
+admission → the belief's effective confidence collapses (0.7 → ~0.14) → a
+standing `watch` program trips on the next tick, surfacing it unprompted.
+
+| metric | result |
+|---|---|
+| detection recall | **100%** (12/12) |
+| precision | **100%** (0 false trips) |
+| median latency | **0 ticks** |
+| cost | native O(writes); pull bolt-on O(writes × beliefs) = 24× here |
+
+**Honest scope.** L1 *linking* uses a deterministic value-flip detector; general
+semantic contradiction (L2+) needs an LLM/Checker extraction step at ingest. The
+Recall-unique, model-free part is the *unprompted surfacing* (the standing
+program), which is why the push-axis claim holds regardless of detector
+sophistication.
+
+## Sibling axes (same "they lack the primitive" logic)
+- **Trust discrimination** — does per-actor Brier calibration down-weight
+  systematically-unreliable sources?
+- **Belief-revision audit** — "what did you believe X was at t2, and what changed
+  it?" (supersede chains + rollback journal)
+- **Poisoned-memory quarantine** — does admission + contradiction + trust isolate
+  an injected false fact?
