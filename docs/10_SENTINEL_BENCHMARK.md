@@ -51,7 +51,7 @@ flags; SENTINEL reads only what it surfaces unprompted.
 - **L1 — explicit value-flip** ("Chicago" → "Denver"). Pure floor; deterministic
   detection, no model. *(Implemented.)*
 - **L2 — entailed contradiction** ("allergic to penicillin" → "took amoxicillin,
-  felt fine"). Light inference; the model re-enters.
+  felt fine"). Light inference; the model re-enters. *(Implemented.)*
 - **L3 — transitive / holonomy** (A>B, B>C, C>A — pairwise plausible, globally
   impossible). Global-consistency detection: the substrate refuses to admit a
   cyclic ordering overlay (`addDagOverlay` rejects it at write time). No
@@ -96,6 +96,27 @@ This is the global-consistency guarantee no pull memory system has: each edge is
 individually plausible, so storing facts and answering queries can never surface
 the contradiction; only a substrate that materializes the ordering and checks it
 for cycles catches A>B>C>A.
+
+## L2 results (entailed contradiction — floor + ceiling)
+
+12 cases (6 true entailment-contradictions, 6 superficially-similar distractors:
+amoxicillin vs ibuprofen, lives-in vs visited, spent-$1500 vs $800). Detection is
+reported separately from surfacing, because L2's whole point is that detection
+needs the *ceiling*:
+
+| competency | result |
+|---|---|
+| literal baseline (L1-style) detection | recall **0%** — cannot see entailments (different words) |
+| entailment detector (KB stand-in for LLM/Checker) | recall **100%**, precision **100%** |
+| unprompted surfacing (floor, given links) | recall **100%** (6/6), 0 false trips |
+
+The literal-vs-entailment contrast is the result: a value-flip detector scores 0
+here, so L2 genuinely requires a model/Checker to *detect* the contradiction —
+but once linked, the *surfacing* is the same model-free standing-program
+mechanism as L1. The KB is a deterministic stand-in for the LLM/Checker;
+independent judgment by a strong model agrees with all 12 gold labels, though at
+scale on adversarial data a real model is high-but-imperfect (NLI-level). The
+floor is unaffected by detector imperfection — it surfaces exactly what it's told.
 
 ## Sibling axes (same "they lack the primitive" logic)
 - **Trust discrimination** — does per-actor Brier calibration down-weight
