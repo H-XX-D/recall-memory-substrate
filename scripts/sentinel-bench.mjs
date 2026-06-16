@@ -183,3 +183,73 @@ console.log(`detection recall : ${pct(l3.recall)} (${l3.detected}/${l3.inconsist
 console.log(`precision        : ${pct(l3.precision)} (false rejections of consistent orderings: ${l3.falseFlags})`);
 console.log("latency          : caught on the closing edge — pairwise checks never see it");
 console.log("\nno pull memory system materializes an ordering overlay and checks global acyclicity -> 0 on this axis by construction.");
+
+// ============================ L2: entailed contradiction ============================
+// The contradiction needs an ENTAILMENT step (amoxicillin IS a penicillin), so a
+// literal detector can't see it. L2 tests COMPOSITION: a model/Checker (ceiling)
+// detects the entailment; the standing program (floor) surfaces it. The KB below
+// is a deterministic stand-in for the LLM/Checker; its job is to discriminate
+// true entailment-contradictions from superficially-similar non-contradictions.
+const PENICILLINS = new Set(["amoxicillin", "ampicillin", "penicillin"]);
+const ANIMAL_PRODUCTS = new Set(["cheese", "egg", "omelette", "milk", "steak", "beef", "bacon"]);
+const L2_CASES = [
+  { b: { type: "allergy", allergen: "penicillin", text: "allergic to penicillin" }, f: { type: "took", drug: "amoxicillin", text: "took amoxicillin and felt fine" }, gold: true },
+  { b: { type: "allergy", allergen: "penicillin", text: "allergic to penicillin" }, f: { type: "took", drug: "ibuprofen", text: "took ibuprofen and felt fine" }, gold: false },
+  { b: { type: "vegan", text: "is vegan" }, f: { type: "ate", food: "omelette", text: "had a cheese omelette" }, gold: true },
+  { b: { type: "vegan", text: "is vegan" }, f: { type: "ate", food: "kale", text: "had a kale salad" }, gold: false },
+  { b: { type: "lives", place: "paris", text: "lives in Paris" }, f: { type: "lives", place: "lyon", text: "commutes from her home in Lyon daily" }, gold: true },
+  { b: { type: "lives", place: "paris", text: "lives in Paris" }, f: { type: "visited", place: "lyon", text: "visited Lyon for the weekend" }, gold: false },
+  { b: { type: "budgetMax", amount: 1000, text: "budget under $1000" }, f: { type: "spent", amount: 1500, text: "spent $1500" }, gold: true },
+  { b: { type: "budgetMax", amount: 1000, text: "budget under $1000" }, f: { type: "spent", amount: 800, text: "spent $800" }, gold: false },
+  { b: { type: "vegan", text: "is vegan" }, f: { type: "ate", food: "steak", text: "ordered the steak" }, gold: true },
+  { b: { type: "allergy", allergen: "penicillin", text: "allergic to penicillin" }, f: { type: "took", drug: "ampicillin", text: "prescribed ampicillin, no reaction" }, gold: true },
+  { b: { type: "lives", place: "berlin", text: "lives in Berlin" }, f: { type: "visited", place: "munich", text: "day trip to Munich" }, gold: false },
+  { b: { type: "budgetMax", amount: 50, text: "lunch under $50" }, f: { type: "spent", amount: 42, text: "lunch was $42" }, gold: false }
+];
+function l2Literal(b, f) {
+  const tok = (s) => new Set(s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !["the", "and", "for", "her", "was", "had"].includes(w)));
+  const A = tok(b.text), B = tok(f.text);
+  const jac = [...A].filter((x) => B.has(x)).length / new Set([...A, ...B]).size;
+  const nA = (b.text.match(/\d+/) || [])[0], nB = (f.text.match(/\d+/) || [])[0];
+  return jac >= 0.4 && nA !== undefined && nB !== undefined && nA !== nB;
+}
+function l2Entail(b, f) {
+  if (b.type === "allergy" && f.type === "took") return b.allergen === "penicillin" && PENICILLINS.has(f.drug);
+  if (b.type === "vegan" && f.type === "ate") return ANIMAL_PRODUCTS.has(f.food);
+  if (b.type === "lives" && f.type === "lives") return f.place !== b.place;
+  if (b.type === "lives" && f.type === "visited") return false;
+  if (b.type === "budgetMax" && f.type === "spent") return f.amount > b.amount;
+  return false;
+}
+function l2Score(detect) {
+  let tp = 0, fp = 0, fn = 0;
+  for (const c of L2_CASES) { const flagged = detect(c.b, c.f); if (flagged && c.gold) tp++; else if (flagged) fp++; else if (c.gold) fn++; }
+  return { recall: tp + fn ? tp / (tp + fn) : 1, precision: tp + fp ? tp / (tp + fp) : 1 };
+}
+function l2Surfacing() {
+  let surfaced = 0, total = 0, falseTrips = 0;
+  for (const c of L2_CASES) {
+    const tmp = mkdtempSync(join(os.tmpdir(), "sentinel-l2-"));
+    const store = new SQLiteRecallStore(join(tmp, "d.sqlite3"));
+    try {
+      const anchor = admitWriteProposal(proposal(`belief:${c.b.text}`, "belief", "1"), store).node;
+      const edge = store.addHyperedge({ kind: "evidence-bundle", title: "belief", members: [{ nodeId: anchor.id, role: "claim" }] });
+      const program = store.attachProgram(edge.id, { schemaVersion: "recall.program.v1", operation: "watch", params: { delta: 0.1 } });
+      store.runProgram(program.id);
+      const isContra = l2Entail(c.b, c.f);
+      admitWriteProposal(proposal(`fact:${c.f.text}`, "fact", "1", isContra ? [anchor.id] : []), store);
+      const tripped = store.runProgram(program.id).output.tripped === true;
+      if (c.gold) { total++; if (tripped) surfaced++; } else if (tripped) falseTrips++;
+    } finally { store.close?.(); rmSync(tmp, { recursive: true, force: true }); }
+  }
+  return { recall: total ? surfaced / total : 1, falseTrips, total };
+}
+const litS = l2Score(l2Literal), entS = l2Score(l2Entail), surfS = l2Surfacing();
+const trueN = L2_CASES.filter((c) => c.gold).length;
+console.log("\n==================== SENTINEL L2 — entailed contradiction (floor + ceiling) ====================\n");
+console.log(`${L2_CASES.length} cases (${trueN} true entailment-contradictions, ${L2_CASES.length - trueN} superficial distractors)\n`);
+console.log("DETECTION (ceiling):");
+console.log(`  literal baseline (L1-style)  : recall ${pct(litS.recall)} precision ${pct(litS.precision)}  <- cannot see entailments`);
+console.log(`  entailment detector (KB/LLM) : recall ${pct(entS.recall)} precision ${pct(entS.precision)}  (amoxicillin vs ibuprofen, lives vs visited)`);
+console.log(`SURFACING (floor): recall ${pct(surfS.recall)} (${surfS.total}/${trueN}), false trips ${surfS.falseTrips}`);
+console.log("\nL2 needs the ceiling (literal ~0); the floor surfaces model-free once linked. KB stands in for an LLM/Checker.");
