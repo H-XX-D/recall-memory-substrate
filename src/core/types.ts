@@ -58,6 +58,11 @@ export const RELATION_KINDS = [
 export type NodeKind = (typeof NODE_KINDS)[number];
 export type RelationKind = (typeof RELATION_KINDS)[number];
 
+// Trust-bearing relations whose source/target resolution feeds effective
+// confidence. Shared so admission's drop-on-write, the relation-targets-resolve
+// eval, and the repair pruner all agree on exactly which edges are "trust" edges.
+export const TRUST_RELATION_KINDS = ["supports", "contradicts", "concerns"] as const;
+
 export type ActorKind = "llm" | "human" | "daemon" | "connector" | "program";
 export type IntentKind =
   | "observation"

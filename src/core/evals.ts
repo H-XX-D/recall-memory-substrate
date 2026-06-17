@@ -2,6 +2,7 @@ import { compileContext } from "./context-compiler.js";
 import { calibrationFactors, effectiveConfidence } from "./evidence.js";
 import { cellReferenceTarget } from "./references.js";
 import type { RecallStore, SubgraphFilter } from "./store.js";
+import { TRUST_RELATION_KINDS } from "./types.js";
 
 // Model-free structural self-audits of the substrate's own guarantees. Each is
 // deterministic and read-only, so `recall eval run` audits the floor with no
@@ -194,7 +195,7 @@ const INVARIANTS: Record<RecallEvalInvariant, (store: RecallStore) => InvariantR
   // depends_on is lineage/provenance and may legitimately reference a cell that
   // was rolled back or never re-derived, so it is deliberately excluded.
   "relation-targets-resolve": (store) => {
-    const TRUST = new Set(["supports", "contradicts", "concerns"]);
+    const TRUST = new Set<string>(TRUST_RELATION_KINDS);
     const relations = store.listRelations(undefined, "both", 2000).filter((r) => TRUST.has(r.kind));
     let dangling = 0;
     const danglingTargets: string[] = [];
