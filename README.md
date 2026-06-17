@@ -13,7 +13,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-138%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-140%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -666,7 +666,7 @@ by audience. Highlights:
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 138 unit/integration tests
+npm test          # 140 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 npm run smoke:mcp # stdio MCP initialize + tools/list smoke
@@ -688,9 +688,9 @@ Read [SECURITY.md](SECURITY.md) before using Recall with sensitive data.
 Important defaults:
 
 - runtime databases and logs are git-ignored
-- primary-graph writes flag and reject common secret-looking content (a
-  high-recall heuristic backstop, not a guarantee — real secrets belong in the
-  encrypted side graph)
+- primary-graph writes reject secret-looking content, matched against a broad
+  set of credential shapes (cloud keys, vendor tokens, JWTs, private-key blocks,
+  and secret-named assignments) and tuned to never trip on the graph's own cell ids
 - encrypted secret saves require explicit confirmation
 - primary-graph writes are schema-validated and rollbackable
 
