@@ -58,7 +58,9 @@
     "bench": "npm run build && node --disable-warning=ExperimentalWarning scripts/bench.mjs",
     "bench:public": "npm run build && node --disable-warning=ExperimentalWarning scripts/public-bench.mjs",
     "bench:sentinel": "npm run build && node --disable-warning=ExperimentalWarning scripts/sentinel-bench.mjs",
-    "install:local": "npm install && npm run build && npm link",
+    "bench:automemory": "npm run build && node --disable-warning=ExperimentalWarning scripts/automemory-bench.mjs",
+    "ab:automemory": "npm run build && node --disable-warning=ExperimentalWarning scripts/automemory-ab.mjs",
+    "install:local": "bash scripts/install-local.sh",
     "prepublishOnly": "npm test && npm run e2e",
     "smoke": "npm run build && node --disable-warning=ExperimentalWarning dist/src/cli.js init --db .recall/smoke.sqlite3 && node --disable-warning=ExperimentalWarning dist/src/cli.js status --db .recall/smoke.sqlite3",
     "demo": "npm run build && bash scripts/demo-cross-session.sh"

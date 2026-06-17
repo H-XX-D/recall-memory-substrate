@@ -7,7 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`npm run bench:automemory`** (`scripts/automemory-bench.mjs`): a store-level,
+  deterministic head-to-head capability battery against Claude Code's native
+  auto-memory (the flat `MEMORY.md` index + per-fact `.md` store). Models
+  auto-memory faithfully (real nested-frontmatter format, overwrite-in-place on
+  correction) and drives Recall via the repo's own built CLI on an isolated
+  `--db`. Eight scenarios (B1–B8): ties on the basics (persist/recall, correction
+  reaches current value), Recall wins on supersession audit trail,
+  cross-session resolution inheritance, structured confidence/provenance, and
+  bounded context cost at scale; auto-memory is cheaper at small store sizes
+  (B7 crossover ≈ N=50). Adversarially fairness-audited; scores Recall 6.5/7 vs
+  auto-memory 3.5/7 on this graph. Honest finding: Recall surfaces a near-dup
+  similarity warning, not automatic value-contradiction detection between
+  unlinked facts (B5 = partial).
+- **`npm run ab:automemory`** (`scripts/automemory-ab.mjs`): an end-to-end agent
+  A/B harness that runs real headless `claude -p` agents through a 3-session
+  correction protocol and scores whether a cold session surfaces the corrected
+  value. The recall arm isolates the graph via an injected MCP (`RECALL_DB`) with
+  tools constrained to the recall MCP; the auto-memory arm requires an isolated,
+  API-key-authenticated Claude config.
+
+### Fixed
+
+- **Claude Code hook** (`integrations/claude/hooks/recall-session-start.py`): the
+  SessionStart activity summary no longer mislabels a graph-wide diff as "scoped
+  to this directory" — the scope is now derived from `recall project where` and
+  labelled accurately (`graph-wide (global memory)` vs `scoped to project '<x>'`).
+  The hook now also gates the diff on a clean subprocess exit, so a failed diff
+  that prints partial/garbage text to stdout can never be injected into model
+  context, and emits a one-time stderr diagnostic when the diff script is missing.
+- **`scripts/install-local.sh`** and the `install:local` npm script now run
+  `recall claude sync` (fail-soft), so local installs also wire the hook/skill/MCP
+  and disable native auto-memory, matching `scripts/install.sh`.
 
 ## [0.2.0] - 2026-06-12
 
