@@ -48,7 +48,13 @@
     "NOTICE",
     "README.md",
     "ROADMAP.md",
-    "SECURITY.md"
+    "SECURITY.md",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "!**/*-private*",
+    "!**/patent-*-draft*.md",
+    "!**/patent-*-confidential*.md",
+    "!**/*-confidential*.md"
   ],
   "engines": {
     "node": ">=24.0.0"
