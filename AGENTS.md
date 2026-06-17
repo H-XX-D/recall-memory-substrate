@@ -51,6 +51,16 @@ beliefs, tasks, risks, decisions, contradictions, programs, and provenance
 outside the LLM context window. The LLM receives only compiled, task-specific
 context packets.
 
+**Recall is your durable memory — use it, not scratch files or note memory.** A
+durable fact written anywhere but Recall is invisible to the conflict and
+effective-confidence machinery and goes silently stale. And when you learn
+something that **corrects or invalidates** an earlier fact, do not overwrite it
+or add an unlinked duplicate — **supersede it**: admit the new cell with
+`evidence.contradicts` pointing at the prior cell id. Recall then demotes the
+old cell and marks it challenged, so every future session sees the current
+answer *and* that the old one was overruled. Superseding is the line between
+memory that merely persists and memory that stays honest.
+
 ## Development rules
 
 - All graph writes from an LLM must go through the strict write schema and
@@ -90,7 +100,12 @@ The loop is **compile → work → write back**:
 3. Write durable observations, decisions, risks, tasks, and witnesses back
    through `recall_write`: calibrated confidence, evidence links by cell id
    (free-text `contradicts` references never resolve and starve calibration).
-4. Never claim memory was saved if the write was rejected.
+4. **On a correction, supersede.** If the new write changes or invalidates an
+   existing fact, first `recall_search` for the prior cell, then admit the new
+   one with `evidence.contradicts: ["<prior-cell-id>"]`. A correction without
+   that link leaves two competing cells and no resolution.
+5. Never claim memory was saved if the write was rejected — confirm the
+   `accepted: true` cell id before reporting it as stored.
 
 Full contract, proposal shape, and tag families:
 [`docs/LLM_INTEGRATION.md`](docs/LLM_INTEGRATION.md).

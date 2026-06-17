@@ -387,7 +387,7 @@ function tools(): unknown[] {
       identities: { type: "array", items: { type: "string" } },
       rings: { type: "array", items: { type: "string" } }
     }),
-    tool("recall_write", "Submit an LLM-managed memory write proposal through Recall admission.", {
+    tool("recall_write", "Persist a durable fact/decision/observation to Recall (your memory) through admission. This is where durable memory lives — do not keep durable facts in scratch files. CORRECTIONS: if this write changes or invalidates an existing memory, set proposal.evidence.contradicts to the prior cell id(s) so Recall supersedes the old value (demotes + flags it) instead of leaving two competing cells. Find the prior id with recall_search first.", {
       proposal: { type: "object" }
     }),
     tool("recall_workflow_allocate", "Score and select workflow candidates using the integrated attention allocator.", {
