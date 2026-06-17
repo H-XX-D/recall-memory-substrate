@@ -17,6 +17,7 @@ import { runOperatingCycle } from "./core/operator.js";
 import { validateWriteProposal } from "./core/schema.js";
 import { SecretGraphStore } from "./core/secrets.js";
 import { installLaunchAgent, launchAgentStatus, renderLaunchAgentPlist, uninstallLaunchAgent } from "./core/service.js";
+import { claudeIntegrationStatus, setClaudeAutoMemory, syncClaudeIntegration } from "./core/claude-integration.js";
 import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput } from "./core/store.js";
 import { storageStats } from "./core/storage-stats.js";
 import { renderTui } from "./core/tui.js";
@@ -104,6 +105,27 @@ function main(): void {
 
   if (command === "daemon" && subcommand === "service-status") {
     console.log(JSON.stringify(launchAgentStatus(args.label, args.launchAgentsDir), null, 2));
+    return;
+  }
+
+  if (command === "claude" && (!subcommand || subcommand === "sync")) {
+    const keep = process.env.RECALL_KEEP_AUTOMEMORY === "1";
+    console.log(JSON.stringify(syncClaudeIntegration({ disableAutoMemory: !keep }), null, 2));
+    return;
+  }
+
+  if (command === "claude" && subcommand === "status") {
+    console.log(JSON.stringify(claudeIntegrationStatus(), null, 2));
+    return;
+  }
+
+  if (command === "claude" && (subcommand === "disable-auto-memory" || subcommand === "disable")) {
+    console.log(JSON.stringify(setClaudeAutoMemory(false), null, 2));
+    return;
+  }
+
+  if (command === "claude" && (subcommand === "enable-auto-memory" || subcommand === "enable")) {
+    console.log(JSON.stringify(setClaudeAutoMemory(true), null, 2));
     return;
   }
 
@@ -894,6 +916,11 @@ Commands:
   recall secrets save --title "name" --confirm-secret-save --password-stdin --value-stdin [--tags a,b] [--scope local]
     stdin format for save: first line password, remaining bytes secret
   recall secrets get <id> --password-stdin [--secrets-db path]
+  recall claude sync                  install/refresh the Claude Code integration (hook, skill, MCP) and disable
+                                      built-in auto-memory so agents adopt Recall (RECALL_KEEP_AUTOMEMORY=1 to keep it)
+  recall claude status                report which integration pieces are installed
+  recall claude disable-auto-memory   set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 only
+  recall claude enable-auto-memory    re-enable Claude Code built-in auto-memory
 `);
 }
 
