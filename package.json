@@ -64,7 +64,7 @@
     "demo": "npm run build && bash scripts/demo-cross-session.sh"
   },
   "devDependencies": {
-    "@types/node": "^24.10.0",
+    "@types/node": "^25.9.3",
     "typescript": "^5.9.3"
   }
 }
