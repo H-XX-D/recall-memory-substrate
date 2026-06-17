@@ -64,7 +64,25 @@ def test_inject_topical() -> bool:
 
 def test_inject_temporal() -> bool:
     print(f"\n{Y}TEST 2{X}: inject-context with temporal query")
-    rc, out, _ = run_hook(INJECT, "what changed since yesterday")
+    # Hermetic: seed a non-empty graph so the hook reaches its routing branches
+    # rather than the cold-start "graph is empty" message (temporal routing only
+    # applies when there is a graph to diff). Without this the test silently
+    # depended on an ambient ~/.recall DB existing, which fails on a clean CI
+    # checkout — the others (TEST 14+) all seed their own DB for the same reason.
+    import tempfile
+    tmp_db = tempfile.mktemp(suffix=".sqlite3", prefix="inject-temporal-")
+    subprocess.run(["recall", "init", "--db", tmp_db], capture_output=True)
+    helper = HOOKS.parent / "scripts" / "recall_helper.py"
+    subprocess.run([
+        "python3", str(helper), "--kind", "observation",
+        "--title", "seed cell so the graph is non-empty",
+        "--body", "seed", "--confidence", "0.6", "--topics", "seed",
+        "--project", "test-temporal", "--admit", "--db", tmp_db,
+    ], capture_output=True, text=True, timeout=15)
+    rc, out, _ = run_hook(INJECT, "what changed since yesterday",
+                          env_overrides={"RECALL_DB": tmp_db})
+    try: os.unlink(tmp_db)
+    except FileNotFoundError: pass
     ok = True
     ok &= check("exits zero", rc == 0)
     ok &= check("detects temporal intent", "temporal" in out.lower() or "diff" in out.lower())
