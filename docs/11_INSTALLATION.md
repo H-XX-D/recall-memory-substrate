@@ -76,7 +76,41 @@ npm run test:python
 npm run verify:full
 ```
 
-## Set up the MCP server (for agents)
+## Put your agent on Recall (one command)
+
+The fastest path — and what `scripts/install.sh` runs automatically for any
+supported agent CLI it detects. Each command is idempotent (safe to re-run on
+every update) and backs up your config before editing.
+
+**Claude Code:**
+
+```bash
+recall claude sync     # installs the recall skill + MCP server + the
+                       # SessionStart/UserPromptSubmit consult-Recall hook, and sets
+                       # CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 so Recall is THE memory layer
+recall claude status   # report which pieces are installed
+recall claude enable-auto-memory   # revert: re-enable Claude's native note-memory
+```
+
+Keep native auto-memory during sync with `RECALL_KEEP_AUTOMEMORY=1`. Touches
+`~/.claude/skills/recall/`, `~/.claude.json` (MCP), and `~/.claude/settings.json`
+(hook + env) — nothing else.
+
+**OpenAI Codex:**
+
+```bash
+recall codex sync      # installs the recall skill, registers the MCP server under
+                       # [mcp_servers.recall] in ~/.codex/config.toml, and adds a
+                       # Recall directive to ~/.codex/AGENTS.md (Codex's always-read instructions)
+recall codex status    # report which pieces are installed
+```
+
+Codex exposes no native-memory kill switch, so displacement is prompt-level via
+the AGENTS.md directive. **Restart the agent after either sync** and it's armed —
+it consults memory before relying on recollection and writes durable findings
+back on its own; you never have to tell it to "save."
+
+## Other MCP clients (manual setup)
 
 ```bash
 recall mcp config --db .recall/recall.sqlite3   # prints an MCP config block
