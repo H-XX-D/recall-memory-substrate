@@ -176,10 +176,12 @@ load test supersedes it Wednesday, and on Friday a brand-new session — zero pr
 context — picks up a ticket and gets the *current* answer straight from the
 graph, with the old decision preserved-but-superseded rather than lost.
 
-![Claude Code + Recall: durable memory across sessions](assets/recall-claude-demo.gif)
+[![Claude Code + Recall: durable memory across sessions](assets/recall-claude-demo-poster.png)](assets/recall-claude-demo.mp4)
 
-▶ Full-quality screencast: [`assets/recall-claude-demo.mp4`](assets/recall-claude-demo.mp4).
-Run it yourself (needs `claude`, `recall`, `recall-mcp` on PATH):
+▶ Click the frame (or open [`assets/recall-claude-demo.mp4`](assets/recall-claude-demo.mp4)) for the
+~30s screencast — an **unedited recording of a real run**: the actual `claude -p`
+sessions, the recall MCP, and live `recall compile` output, agent responses
+untrimmed. Run it yourself (needs `claude`, `recall`, `recall-mcp` on PATH):
 
 ```bash
 ./scripts/demo-claude-recall.sh
