@@ -13,7 +13,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-138%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-140%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -68,6 +68,24 @@ dependency. CI runs the core suite on Linux, macOS, and Windows, plus a
 readiness lane for MCP smoke, Python hooks/toolkit checks, public benchmarks,
 and installer validation. Upgrades, uninstall, and troubleshooting:
 [Installation Guide](docs/11_INSTALLATION.md).
+
+### Put your agent on Recall — one command
+
+The installer above already wires up any agent CLI it finds. To do it yourself
+(or after installing a new agent), one idempotent command sets up the skill, the
+MCP server, the consult-Recall hook, and makes Recall the durable memory layer:
+
+```bash
+recall claude sync     # Claude Code: skill + MCP + SessionStart hook; turns OFF native auto-memory
+recall codex sync      # OpenAI Codex:  skill + MCP in config.toml + a Recall directive in AGENTS.md
+recall claude status   # confirm what's wired   (recall codex status for Codex)
+```
+
+Restart your agent and it's **armed** — it reads memory before relying on
+recollection and writes durable findings back on its own; you never tell it to
+"save." Both syncs back up your config before editing, are safe to re-run, and
+are reversible (`recall claude enable-auto-memory`). Using a different MCP
+client? See [hook up your agent](#hook-up-your-agent).
 
 ## The 60-second tour
 
@@ -170,17 +188,31 @@ restore path, including file-level SQLite copies and upgrade safety.
 
 ## Demo
 
-![Recall correction demo](assets/recall-demo.gif)
+**Claude Code using Recall as durable memory — a real sprint, three separate
+`claude` sessions with no shared conversation.** You just talk normally — you
+never tell it to "save" anything. The armed agent persists a decision on its
+own (Monday), finds and supersedes it when the plan changes (Wednesday), and on
+Friday a brand-new session — zero prior context — consults memory unprompted and
+answers with the *current* decision plus the why-we-changed history, the old one
+preserved-but-superseded rather than lost.
 
-The demo shows a correction crossing sessions: a first fact is admitted, a later
-cell contradicts it, a fresh process compiles the current answer, and a standing
-watch program trips when the watched belief is overruled. Reproduce it locally:
+[![Claude Code + Recall: durable memory across sessions](assets/recall-claude-demo-poster.png)](assets/recall-claude-demo.mp4)
+
+▶ Click the frame (or open [`assets/recall-claude-demo.mp4`](assets/recall-claude-demo.mp4)) for the
+~30s screencast — an **unedited recording of a real run**: the actual `claude -p`
+sessions, the recall MCP, and live `recall compile` output, agent responses
+untrimmed. Run it yourself (needs `claude`, `recall`, `recall-mcp` on PATH):
 
 ```bash
-npm run build
-./scripts/demo-cross-session.sh
-./scripts/demo-raw.sh      # compact receipt with actual CLI output
+./scripts/demo-claude-recall.sh
 ```
+
+Every session is a fresh process — nothing is in any context window, and nobody
+ever instructs a tool call. The agent decides to persist, to supersede, and to
+consult on its own. Supersession is a `contradicts` edge (never an overwrite), so
+the corrected decision is foregrounded as current while the old one is demoted to
+a low effective confidence and flagged `challenged` — and the *why-we-changed*
+trail survives for audit.
 
 ## Hook up your agent
 
@@ -598,9 +630,11 @@ recall incept "open objective"        # compile a slice into a grounded synthesi
 recall validate --json proposal.json
 recall admit    --json proposal.json
 
-# undo
+# backup / restore
 recall export > recall-export.json
 recall import --json recall-export.json --db .recall/restored.sqlite3
+
+# undo
 recall rollback list
 recall rollback show <journal-id>
 recall rollback apply <journal-id>
@@ -664,7 +698,7 @@ by audience. Highlights:
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 138 unit/integration tests
+npm test          # 140 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 npm run smoke:mcp # stdio MCP initialize + tools/list smoke
@@ -686,9 +720,9 @@ Read [SECURITY.md](SECURITY.md) before using Recall with sensitive data.
 Important defaults:
 
 - runtime databases and logs are git-ignored
-- primary-graph writes flag and reject common secret-looking content (a
-  high-recall heuristic backstop, not a guarantee — real secrets belong in the
-  encrypted side graph)
+- primary-graph writes reject secret-looking content, matched against a broad
+  set of credential shapes (cloud keys, vendor tokens, JWTs, private-key blocks,
+  and secret-named assignments) and tuned to never trip on the graph's own cell ids
 - encrypted secret saves require explicit confirmation
 - primary-graph writes are schema-validated and rollbackable
 
