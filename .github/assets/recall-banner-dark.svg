@@ -1,5 +1,5 @@
-<svg width="1280" height="360" viewBox="0 0 1280 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Recall — active memory substrate for LLM agents">
-  <title>Recall — active memory substrate for LLM agents</title>
+<svg width="1280" height="360" viewBox="0 0 1280 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Recall — push memory for AI agents">
+  <title>Recall — push memory for AI agents</title>
   <defs>
     <linearGradient id="bd-accent" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#2dd4bf"/>
@@ -36,8 +36,8 @@
   <text x="244" y="170" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="84" font-weight="700" letter-spacing="-2" fill="#f1f5f9">recall</text>
   <rect x="248" y="196" width="64" height="4" rx="2" fill="url(#bd-accent)"/>
   <text x="324" y="200" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="22" font-weight="500" fill="#5eead4">v0.2.0</text>
-  <text x="248" y="244" font-family="-apple-system, 'Segoe UI', Inter, system-ui, sans-serif" font-size="27" font-weight="400" fill="#94a3b8">Active memory substrate for LLM agents.</text>
-  <text x="248" y="282" font-family="-apple-system, 'Segoe UI', Inter, system-ui, sans-serif" font-size="20" font-weight="400" fill="#64748b">Local-first &#183; evidence-weighted &#183; auditable &#183; rollbackable</text>
+  <text x="248" y="244" font-family="-apple-system, 'Segoe UI', Inter, system-ui, sans-serif" font-size="27" font-weight="400" fill="#94a3b8">Push memory for AI agents.</text>
+  <text x="248" y="282" font-family="-apple-system, 'Segoe UI', Inter, system-ui, sans-serif" font-size="20" font-weight="400" fill="#64748b">Checks before it acts &#183; supersedes on its own &#183; local &amp; yours</text>
 
   <!-- constellation -->
   <g transform="translate(880, 60)" opacity="0.95">
