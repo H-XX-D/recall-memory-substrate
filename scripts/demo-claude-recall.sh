@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Claude Code + Recall — a real cross-session use case.
+# Claude Code + Recall — durable memory, the way you actually use it.
 #
-# A sprint's worth of work, three SEPARATE `claude -p` processes (no shared
-# conversation). An architecture decision is made, a load test changes it days
-# later, and a brand-new engineer's agent — zero prior context — picks up a
-# ticket and gets the CURRENT decision straight from the graph. That is the
-# whole point of durable agent memory: it stays correct across sessions and
-# corrections, with the old answer preserved-but-superseded, not lost.
+# Three SEPARATE `claude -p` processes (no shared conversation). You just talk
+# normally — you never tell it to "save" anything. An armed agent persists
+# decisions, supersedes them on corrections, and consults memory entirely on its
+# own, the way the installed integration arms it (read-first, write-back, and
+# supersede-don't-overwrite). A new session days later inherits the current
+# answer with the old one preserved-but-superseded.
 #
 # Fully isolated in a throwaway graph; a tripwire asserts your real graph is
 # never touched. Requirements: `recall`, `recall-mcp`, `claude` on PATH (logged in).
@@ -20,9 +20,8 @@ command -v recall-mcp >/dev/null || { echo "needs 'recall-mcp' on PATH"; exit 1;
 DB="$(mktemp -t recall-demo.XXXXXX.sqlite3)"; rm -f "$DB"
 CFG="$(mktemp -t recall-demo-mcp.XXXXXX.json)"
 GLOBAL="$HOME/.recall/db/global.sqlite3"
-PACE="${DEMO_PACE:-1.2}"   # seconds between beats; set DEMO_PACE=0 for no pauses
+PACE="${DEMO_PACE:-1.2}"
 
-# ---- presentation helpers ------------------------------------------------
 bold=$'\033[1m'; dim=$'\033[2m'; off=$'\033[0m'
 cyan=$'\033[1;36m'; yellow=$'\033[1;33m'; green=$'\033[1;32m'; grey=$'\033[90m'
 scene(){ printf '\n%s┌─ %s ─────────────────────────────────────────%s\n' "$cyan" "$1" "$off"; }
@@ -36,44 +35,47 @@ G0=$(nodes "$GLOBAL")
 recall init --db "$DB" >/dev/null 2>&1
 printf '{"mcpServers":{"recall":{"type":"stdio","command":"recall-mcp","env":{"RECALL_DB":"%s"}}}}\n' "$DB" > "$CFG"
 TOOLS=(--allowedTools mcp__recall__recall_write mcp__recall__recall_compile mcp__recall__recall_search mcp__recall__recall_cell)
-TERSE="Be terse: reply in at most two short plain-text lines. No markdown headers, no bullet lists, no insight blocks, no preamble — just the answer."
-agent(){ printf '%s│ %sclaude%s '; claude -p "$1" --append-system-prompt "$TERSE" --mcp-config "$CFG" --strict-mcp-config "${TOOLS[@]}" --output-format text 2>&1 | sed "s/^/${cyan}│${off}   ${grey}/; s/$/${off}/"; }
-proof(){ printf '%s│   %s%s\n' "$cyan" "$dim" "$off"; recall compile "$1" --db "$DB" 2>/dev/null | grep -iE "$2" | head -4 | sed "s/^/${cyan}│   ${green}/; s/$/${off}/"; }
+
+# This is the ARMING the installed integration provides (skill + operating prompt):
+# the agent uses Recall on its own — the user never has to ask it to.
+ARM="You have a Recall durable-memory MCP (recall_compile, recall_search, recall_write, recall_cell). \
+Operate by Recall's discipline WITHOUT being told to: (1) before you answer, consult Recall for relevant prior memory; \
+(2) when the conversation settles a durable decision, correction, risk, or fact, persist it yourself with recall_write — \
+seamlessly, never ask permission; (3) when new information corrects a prior decision, SUPERSEDE it: find the prior cell \
+with recall_search, then recall_write the new cell with evidence.contradicts set to that cell's id — never overwrite or \
+duplicate. Do the Recall tool calls silently and keep your visible reply to one or two terse plain-text lines."
+
+agent(){ printf '%s│ %sclaude%s '; claude -p "$1" --append-system-prompt "$ARM" --mcp-config "$CFG" --strict-mcp-config "${TOOLS[@]}" --output-format text 2>&1 | sed "s/^/${cyan}│${off}   ${grey}/; s/$/${off}/"; }
+proof(){ recall compile "$1" --db "$DB" 2>/dev/null | grep -iE "$2" | head -4 | sed "s/^/${cyan}│   ${green}/; s/$/${off}/"; }
 
 # ===========================================================================
 scene "MONDAY · sprint planning"
-narrate "The team settles the background-job queue. The agent writes the decision"
-narrate "to Recall — durable memory that outlives this chat window."
-human "We're finalizing architecture. Decision: the background job queue uses Redis Streams — simple, already in our stack. Save this decision to Recall (recall_write) for future sessions."
+narrate "A decision gets made in conversation. You never say \"save this\" —"
+narrate "the armed agent persists it to Recall on its own."
+human "We're finalizing the job-queue architecture — let's go with Redis Streams, it's simple and already in our stack."
 beat
-agent "We're finalizing architecture. Decision: the background job queue uses Redis Streams — simple, already in our stack. Save this decision to Recall (recall_write, kind decision, topics queue,architecture, confidence 0.9) for future sessions. Reply with the cell id."
-narrate "It is now a structured cell in the graph — not a line in a context window that vanishes when the session ends."
+agent "We're finalizing the job-queue architecture — let's go with Redis Streams, it's simple and already in our stack."
+narrate "Unprompted, it wrote a structured decision cell:"
 proof "background job queue decision" "redis|eff:"
-# Capture the decision's cell id the way a teammate would cite it next session (a
-# PR/ticket reference). Makes the supersede deterministic instead of relying on the
-# agent re-finding the cell by search — which can miss, and then it (correctly)
-# refuses to fabricate a contradicts link to a cell it cannot see.
-PRIOR=$(recall search "background job queue Redis Streams" --db "$DB" 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
 beat
 
 scene "WEDNESDAY · load-test post-mortem  (a different session, days later)"
-narrate "Throughput tanks under load. A SEPARATE session corrects the plan — and"
-narrate "Recall records it as a SUPERSESSION (a contradicts edge), not an overwrite."
-human "Load test failed: Redis Streams can't keep up at peak. Moving the job queue to Kafka — supersede the prior decision (cell ${PRIOR:-<id>})."
+narrate "A separate session hears the correction. On its own it finds the prior"
+narrate "decision and SUPERSEDES it — a contradicts edge, not an overwrite."
+human "Load test failed — Redis Streams can't keep up at peak. We're switching the job queue to Kafka."
 beat
-agent "Record an architecture correction in Recall: the background job queue is moving from Redis Streams to Kafka because Redis Streams could not keep up under load. Use recall_write (kind decision, topics queue,architecture, confidence 0.9) and set evidence.contradicts to the array [\"$PRIOR\"] so the prior decision (cell $PRIOR) is superseded, not duplicated. Reply with the new cell id and confirm the contradicts edge to $PRIOR."
-narrate "Both facts now coexist: Kafka is CURRENT, Redis is SUPERSEDED — the history"
-narrate "survives, the current answer is unambiguous, computed at read time."
+agent "Load test failed — Redis Streams can't keep up at peak. We're switching the job queue to Kafka."
+narrate "Kafka is now CURRENT, Redis SUPERSEDED — resolved at read time, history kept:"
 proof "current job queue decision" "kafka|redis|eff:0|challenged|contradicts:"
 beat
 
 scene "FRIDAY · a new engineer picks up a ticket  (fresh process, ZERO context)"
-narrate "Nobody re-explains Monday or Wednesday. The new agent just asks Recall."
-human "I'm adding a background job for invoice emails — what queue should I publish to, and is there any history I should know?"
+narrate "Nobody re-explains Monday or Wednesday. A new session just asks —"
+narrate "and consults Recall on its own before answering."
+human "I'm adding a background job for invoice emails — which queue do I publish to, and any history I should know?"
 beat
-agent "Using ONLY your Recall memory (recall_compile), answer concisely: for a new background job, what queue should I publish to right now, and what previous choice did it supersede and why?"
-narrate "It answered Kafka — the CURRENT decision — and knew Redis was the superseded"
-narrate "predecessor, without anyone repeating it. That is memory that stays correct."
+agent "I'm adding a background job for invoice emails — which queue do I publish to, and any history I should know?"
+narrate "Kafka — the current decision — with the Redis history. Nobody repeated it."
 beat
 
 scene "the receipt"

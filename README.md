@@ -171,10 +171,12 @@ restore path, including file-level SQLite copies and upgrade safety.
 ## Demo
 
 **Claude Code using Recall as durable memory — a real sprint, three separate
-`claude` sessions with no shared conversation.** A decision is made Monday, a
-load test supersedes it Wednesday, and on Friday a brand-new session — zero prior
-context — picks up a ticket and gets the *current* answer straight from the
-graph, with the old decision preserved-but-superseded rather than lost.
+`claude` sessions with no shared conversation.** You just talk normally — you
+never tell it to "save" anything. The armed agent persists a decision on its
+own (Monday), finds and supersedes it when the plan changes (Wednesday), and on
+Friday a brand-new session — zero prior context — consults memory unprompted and
+answers with the *current* decision plus the why-we-changed history, the old one
+preserved-but-superseded rather than lost.
 
 [![Claude Code + Recall: durable memory across sessions](assets/recall-claude-demo-poster.png)](assets/recall-claude-demo.mp4)
 
@@ -187,11 +189,12 @@ untrimmed. Run it yourself (needs `claude`, `recall`, `recall-mcp` on PATH):
 ./scripts/demo-claude-recall.sh
 ```
 
-Every session is a fresh process — nothing is in any context window. The third
-agent reads the *resolved* answer from the graph, where supersession is a
-`contradicts` edge and "current vs stale" is computed from effective confidence
-at read time (Kafka `eff 0.90`, current; Redis `eff 0.27`, challenged). It never
-overwrites — it appends a correction and links it, so the history survives.
+Every session is a fresh process — nothing is in any context window, and nobody
+ever instructs a tool call. The agent decides to persist, to supersede, and to
+consult on its own. Supersession is a `contradicts` edge (never an overwrite), so
+the corrected decision is foregrounded as current while the old one is demoted to
+a low effective confidence and flagged `challenged` — and the *why-we-changed*
+trail survives for audit.
 
 For the lower-level substrate behavior without an agent — a correction crossing
 processes plus a standing watch program that trips when a belief is overruled:
