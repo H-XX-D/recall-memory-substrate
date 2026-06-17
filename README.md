@@ -196,17 +196,6 @@ the corrected decision is foregrounded as current while the old one is demoted t
 a low effective confidence and flagged `challenged` — and the *why-we-changed*
 trail survives for audit.
 
-For the lower-level substrate behavior without an agent — a correction crossing
-processes plus a standing watch program that trips when a belief is overruled:
-
-```bash
-npm run build
-./scripts/demo-cross-session.sh
-./scripts/demo-raw.sh      # compact receipt with actual CLI output
-```
-
-![Recall correction demo](assets/recall-demo.gif)
-
 ## Hook up your agent
 
 Routine memory is agent-managed through MCP. Users should not have to
