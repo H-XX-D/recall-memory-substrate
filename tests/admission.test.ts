@@ -254,7 +254,9 @@ describe("admission", () => {
       ["GitHub fine-grained PAT", `github_pat_${"A".repeat(30)}`],
       ["Slack token", "xoxb-1234567890-abcdefghi"],
       ["Google API key", `AIza${"A".repeat(35)}`],
-      ["AWS session key id", "ASIAABCDEFGHIJKLMNOP"],
+      // built via concat so no contiguous AWS-key literal sits in source (secret-scanner hygiene);
+      // the firewall still sees the full 20-char ASIA… string at runtime and must reject it.
+      ["AWS session key id", `ASIA${"A".repeat(16)}`],
       ["JWT", `eyJ${"a".repeat(12)}.${"b".repeat(12)}.${"c".repeat(12)}`],
       ["URI credentials", "postgres://user:password@localhost/db"],
       ["secret assignment", "client_secret = not-a-real-secret-value"],
