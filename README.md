@@ -176,38 +176,20 @@ load test supersedes it Wednesday, and on Friday a brand-new session — zero pr
 context — picks up a ticket and gets the *current* answer straight from the
 graph, with the old decision preserved-but-superseded rather than lost.
 
+![Claude Code + Recall: durable memory across sessions](assets/recall-claude-demo.gif)
+
+▶ Full-quality screencast: [`assets/recall-claude-demo.mp4`](assets/recall-claude-demo.mp4).
+Run it yourself (needs `claude`, `recall`, `recall-mcp` on PATH):
+
 ```bash
-./scripts/demo-claude-recall.sh      # needs `claude`, `recall`, `recall-mcp` on PATH
+./scripts/demo-claude-recall.sh
 ```
 
-```text
-┌─ MONDAY · sprint planning ───────────────────────────────────────────
-│ ▸ The agent writes the decision to Recall — memory that outlives the chat.
-│ 🧑 you → …the background job queue uses Redis Streams. Save this to Recall.
-│ claude → Saved decision cell d59241e5. (confidence 0.9 → attenuated to 0.70:
-│          "unsupported high confidence" — Recall makes confidence earn evidence.)
-
-┌─ WEDNESDAY · load-test post-mortem  (a different session, days later) ────────
-│ ▸ Recall records the change as a SUPERSESSION — a contradicts edge, not an overwrite.
-│ 🧑 you → Redis can't keep up at peak — we're moving to Kafka. Supersede the old one.
-│ claude → New Kafka decision written with evidence.contradicts → d59241e5.
-│ recall │ Kafka   eff:0.90               ← CURRENT
-│        │ Redis   eff:0.27 (challenged)  ← SUPERSEDED   [contradicts: kafka → redis]
-
-┌─ FRIDAY · a new engineer picks up a ticket  (fresh process, ZERO context) ───
-│ ▸ Nobody re-explains Monday or Wednesday. The new agent just asks Recall.
-│ 🧑 you → Adding a background job — what queue do I publish to, any history?
-│ claude → Kafka — the current decision; it superseded Redis Streams, which
-│          couldn't keep up under load.
-
-│ global graph untouched (before == after) — the whole story lived in a throwaway db.
-└──────────────────────────────────────────────────────────────────────
-```
-
-No session re-read another: the third agent read the *resolved* answer from the
-graph, where supersession is a `contradicts` edge and "current vs stale" is
-computed from effective confidence at read time. (Output condensed; run it for
-the full, verbose agent responses.)
+Every session is a fresh process — nothing is in any context window. The third
+agent reads the *resolved* answer from the graph, where supersession is a
+`contradicts` edge and "current vs stale" is computed from effective confidence
+at read time (Kafka `eff 0.90`, current; Redis `eff 0.27`, challenged). It never
+overwrites — it appends a correction and links it, so the history survives.
 
 For the lower-level substrate behavior without an agent — a correction crossing
 processes plus a standing watch program that trips when a belief is overruled:

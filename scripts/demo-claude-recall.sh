@@ -48,14 +48,19 @@ beat
 agent "We're finalizing architecture. Decision: the background job queue uses Redis Streams — simple, already in our stack. Save this decision to Recall (recall_write, kind decision, topics queue,architecture, confidence 0.9) for future sessions. Reply with the cell id."
 narrate "It is now a structured cell in the graph — not a line in a context window that vanishes when the session ends."
 proof "background job queue decision" "redis|eff:"
+# Capture the decision's cell id the way a teammate would cite it next session (a
+# PR/ticket reference). Makes the supersede deterministic instead of relying on the
+# agent re-finding the cell by search — which can miss, and then it (correctly)
+# refuses to fabricate a contradicts link to a cell it cannot see.
+PRIOR=$(recall search "background job queue Redis Streams" --db "$DB" 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
 beat
 
 scene "WEDNESDAY · load-test post-mortem  (a different session, days later)"
 narrate "Throughput tanks under load. A SEPARATE session corrects the plan — and"
 narrate "Recall records it as a SUPERSESSION (a contradicts edge), not an overwrite."
-human "Load test failed: Redis Streams can't keep up at peak. We're moving the job queue to Kafka. Update our memory and supersede the old decision."
+human "Load test failed: Redis Streams can't keep up at peak. Moving the job queue to Kafka — supersede the prior decision (cell ${PRIOR:-<id>})."
 beat
-agent "Consult Recall for the current job-queue decision, then record this correction: Redis Streams could not keep up under load, so the background job queue is moving to Kafka. Use recall_write with evidence.contradicts pointing at the prior cell id so the old decision is superseded, not duplicated. Reply with the new cell id and what you superseded."
+agent "Record an architecture correction in Recall: the background job queue is moving from Redis Streams to Kafka because Redis Streams could not keep up under load. Use recall_write (kind decision, topics queue,architecture, confidence 0.9) and set evidence.contradicts to the array [\"$PRIOR\"] so the prior decision (cell $PRIOR) is superseded, not duplicated. Reply with the new cell id and confirm the contradicts edge to $PRIOR."
 narrate "Both facts now coexist: Kafka is CURRENT, Redis is SUPERSEDED — the history"
 narrate "survives, the current answer is unambiguous, computed at read time."
 proof "current job queue decision" "kafka|redis|eff:0|challenged|contradicts:"
