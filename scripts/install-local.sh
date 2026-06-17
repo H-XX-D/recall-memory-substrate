@@ -32,6 +32,18 @@ else
   echo "You can run it manually later: recall claude sync" >&2
 fi
 
+# Codex integration (skill, MCP in config.toml, AGENTS.md directive) when Codex is present.
+if command -v codex >/dev/null 2>&1; then
+  echo
+  echo "Configuring Codex integration…"
+  if recall codex sync; then
+    echo "Recall wired into Codex (skill, MCP, AGENTS.md directive)."
+  else
+    echo "Note: Codex integration sync was skipped or failed (non-fatal)." >&2
+    echo "You can run it manually later: recall codex sync" >&2
+  fi
+fi
+
 echo
 echo "Recall installed locally. Try: recall status"
 
