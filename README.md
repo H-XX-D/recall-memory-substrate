@@ -9,11 +9,11 @@
 <br/>
 <br/>
 
-**Disciplined, operable memory for LLM agents. Evidence-weighted, auditable, and compiled to a budget instead of poured back into the prompt.**
+**The memory layer your agent just uses — it remembers, corrects itself, and recalls across sessions on its own. Local, free, and yours.**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-140%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-148%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -36,14 +36,17 @@
 
 ---
 
-**Recall is disciplined, operable memory: a runtime, not a pile of notes.**
-Most agent "memory" is chat logs or a vector index that gets poured back
-into the prompt. With Recall, an LLM proposes a structured write, an
-admission firewall validates it, the graph store persists it as addressable
-cells and n-ary hyperedges in local SQLite, and the compiler returns only
-the relevant subgraph, ranked by evidence and fit to a word budget. Every
-fact carries provenance, confidence, and a rollback entry. You can inspect,
-question, and undo anything in it.
+**Most agent memory is _pull_: a store you query.** You ask, it returns the
+closest matches, and it is on you to notice when a fact has gone stale. Recall
+is _push_: the agent and the substrate run a loop together — it checks what it
+already knows before it acts, does the work, and writes back what it learned,
+_superseding_ the old fact when something changes and surfacing the
+contradiction without being asked. No reminding it to save, no separate cloud
+service mining your transcript after the fact. Under the hood an LLM proposes a
+structured write, an admission firewall validates it, and the compiler returns
+only the relevant subgraph — ranked by evidence, fit to a word budget — all in
+local SQLite: no server, no account, no cloud. The memory is yours, and every
+fact still carries provenance, confidence, and a one-command undo.
 
 One installable Node.js tool: CLI, read-only TUI, MCP server, quiet
 maintenance daemon, strict write schema, semantic search, encrypted secrets
@@ -215,9 +218,7 @@ memory that stays *honest* — the whole point of Recall over a flat note file.
 
 Every Recall capability has a short, honest screencast — real CLI, real output,
 an isolated graph — with the **full script and the unedited transcript** beside
-each clip. Browse them all in the **[companion gallery](https://h-xx-d.github.io/recall-demos/)**,
-or watch the walkthroughs on the **[YouTube channel](https://www.youtube.com/@YOUR_CHANNEL)**
-*(channel link — fill in)*.
+each clip. Browse them all in the **[companion gallery](https://h-xx-d.github.io/recall-demos/)**.
 
 | Screencast | What it shows |
 |---|---|
