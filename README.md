@@ -13,7 +13,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-99%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-138%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -22,12 +22,13 @@
 
 [Install](#install) ·
 [Quickstart](#the-60-second-tour) ·
+[Demo](#demo) ·
 [Agents & MCP](#hook-up-your-agent) ·
 [How it works](#how-it-works) ·
 [Why Recall](#why-recall) ·
 [Compare](#how-recall-compares) ·
 [Teams](#one-graph-many-writers) ·
-[Checker & Solver](#beyond-memory-checker-and-solver) ·
+[Checker, Solver & Lattice](#beyond-memory-checker-solver-and-lattice) ·
 [Docs](docs/README.md) ·
 [Roadmap](ROADMAP.md)
 
@@ -63,12 +64,15 @@ curl -fsSL https://raw.githubusercontent.com/H-XX-D/recall-memory-substrate/main
 
 Requires Node.js 24+. Recall uses Node's built-in SQLite, so there is no
 database server, no native build step, no account, and no network
-dependency. CI runs the full suite on Linux, macOS, and Windows. Upgrades, uninstall, and
-troubleshooting: [Installation Guide](docs/11_INSTALLATION.md).
+dependency. CI runs the core suite on Linux, macOS, and Windows, plus a
+readiness lane for MCP smoke, Python hooks/toolkit checks, public benchmarks,
+and installer validation. Upgrades, uninstall, and troubleshooting:
+[Installation Guide](docs/11_INSTALLATION.md).
 
 ## The 60-second tour
 
 ```bash
+recall version    # confirm the installed package version
 recall init       # create the local graph in ./.recall
 recall status     # store health, counts, config
 ```
@@ -144,6 +148,38 @@ Runtime state stays local and is git-ignored by default:
 ```text
 .recall/recall.sqlite3      # primary graph
 .recall/secrets.sqlite3     # encrypted secrets side graph
+```
+
+Back up or move a graph with the portable archive path:
+
+```bash
+recall export > recall-export.json
+recall import --json recall-export.json --db .recall/restored.sqlite3
+```
+
+Undo a bad write through the rollback journal:
+
+```bash
+recall rollback list
+recall rollback show <journal-id>
+recall rollback apply <journal-id>
+```
+
+See [Backup And Recovery](docs/20_BACKUP_AND_RECOVERY.md) for the full
+restore path, including file-level SQLite copies and upgrade safety.
+
+## Demo
+
+![Recall correction demo](assets/recall-demo.gif)
+
+The demo shows a correction crossing sessions: a first fact is admitted, a later
+cell contradicts it, a fresh process compiles the current answer, and a standing
+watch program trips when the watched belief is overruled. Reproduce it locally:
+
+```bash
+npm run build
+./scripts/demo-cross-session.sh
+./scripts/demo-raw.sh      # compact receipt with actual CLI output
 ```
 
 ## Hook up your agent
@@ -475,9 +511,9 @@ to write is not safe, by SQLite's own guidance. One graph served over HTTP
 with authenticated actor identity, so remote machines write without sharing
 the host, is next on the [roadmap](ROADMAP.md).
 
-## Beyond memory: Checker and Solver
+## Beyond memory: Checker, Solver, and Lattice
 
-Recall is the memory layer of a three-part system. The other two parts
+Recall is the memory layer of a four-part system. The other three parts
 plug into the same graph through the same admission gate.
 
 **Checker** is the verification layer, built on one rule: absence of
@@ -503,19 +539,51 @@ tier is CUDA, and every solver is validated against a reference oracle
 before any speed number is trusted. Each solver carries an optimality
 contract declaring what class of claim its answers make: exact,
 tolerance-bounded, or heuristic. Results land in Recall as addressable,
-priced claims. The division of labor: the model formulates, Solver
-computes, Recall remembers, Checker attests.
+priced claims. The division of labor: the model formulates, Lattice maps
+the code, Solver computes, Recall remembers, Checker attests.
 
-Together they cover memory, verification, and computation behind one
-write path, with no model in the loop.
+**Lattice** is the code-analysis layer, and the one part that is an
+enterprise capability rather than open source: access-gated, vetted, and
+not bundled in the OSS distribution. It ingests a codebase over the
+Language Server Protocol into the same typed hypernetwork Recall uses —
+symbols, modules, and the import, call, and reference edges between them —
+then runs structural analyses over that graph. `impact` returns a change's
+reverse-reachability blast radius *before* you edit; `hunt` ranks
+structural bugs, including cross-signal findings no single diagnostic
+shows, like an exported path that reaches unimplemented code; `diagnose`
+surfaces cycles, dead code, stubs, and coupling hotspots in one pass;
+`plan` lays out the ordered, verify-gated steps to land a change; and
+`verify` is a differential gate that reports only the structural
+regressions a change *caused*, measured against a git ref in a throwaway
+worktree. A gated security-audit mode maps attack surface and
+source-to-sink reachability for authorized review of your own code. Every
+finding carries the same explicit `verified` / `not_verified` contract
+Checker enforces: reachability tells you where to look, never that a bug
+is proven.
 
-**Checker org capabilities and Solver access:**
+What sets it apart is where the findings go. Lattice grounds everything it
+computes: the hard combinatorial step — the minimum feedback arc set that
+breaks a dependency cycle — routes to Solver's gated QUBO tier and is
+verified locally before it is trusted, and results land in Recall as
+addressable, evidence-weighted cells through the same admission gate as
+every other write. A structural regression stops being a console warning
+that scrolls away and becomes a cell with provenance that a deploy gate
+can score and a teammate can compile tomorrow. It ships an MCP server
+built for the agent edit loop — ask `impact` before an edit, gate with
+`hunt` after — served in milliseconds off a graph ingested once and
+cached.
+
+Together they cover memory, verification, computation, and code structure
+behind one write path, with no model in the loop.
+
+**Checker org capabilities, Solver access, and Lattice (enterprise):**
 [todd@hendrixxdesign.com](mailto:todd@hendrixxdesign.com)
 
 ## CLI cheat sheet
 
 ```bash
 # inspect
+recall version
 recall status
 recall tui [--watch]
 
@@ -531,6 +599,8 @@ recall validate --json proposal.json
 recall admit    --json proposal.json
 
 # undo
+recall export > recall-export.json
+recall import --json recall-export.json --db .recall/restored.sqlite3
 recall rollback list
 recall rollback show <journal-id>
 recall rollback apply <journal-id>
@@ -587,21 +657,26 @@ by audience. Highlights:
 - [Secrets Side Graph](docs/12_SECRETS_SIDE_GRAPH.md)
 - [Daemon, MCP & Semantic Search](docs/13_DAEMON_MCP_SEMANTIC_SUBGRAPHS.md)
 - [Public Benchmark](docs/19_PUBLIC_BENCHMARK.md)
+- [Backup And Recovery](docs/20_BACKUP_AND_RECOVERY.md)
 
 ## Development
 
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 130 unit/integration tests
+npm test          # 138 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
+npm run smoke:mcp # stdio MCP initialize + tools/list smoke
+npm run test:python
+npm run verify:full
 ```
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md). Keep changes schema-first, small,
 tested, and aligned with the single-runtime architecture. A good first PR
-runs `npm test && npm run e2e` clean. The [Roadmap](ROADMAP.md) lays out
+runs `npm test && npm run e2e` clean; release-readiness changes should run
+`npm run verify:full`. The [Roadmap](ROADMAP.md) lays out
 direction by ring: Foundation, Runtime, and Interfaces. Working in this
 repo with an AI agent? Point it at [AGENTS.md](AGENTS.md).
 

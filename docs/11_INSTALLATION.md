@@ -8,10 +8,12 @@ Recall installs as a single Node.js package that provides two binaries:
 - **Node.js 24 or newer** (Recall uses Node's built-in SQLite: no database
   server, no native compilation)
 - **npm** (ships with Node)
-- Linux, macOS, or Windows. The CI suite (build, tests, e2e, smoke) runs
-  green on all three. The core runtime is plain local Node; only the daemon
-  *service* helper is platform-specific (it emits macOS LaunchAgent plists).
-  On Linux/Windows, run the daemon directly instead (see below).
+- Linux, macOS, or Windows. The CI matrix runs build, tests, e2e, and smoke
+  on all three; the readiness lane additionally runs MCP smoke, Python
+  hooks/toolkit checks, public benchmarks, and installer validation on Linux.
+  The core runtime is plain local Node; only the daemon *service* helper is
+  platform-specific (it emits macOS LaunchAgent plists). On Linux/Windows, run
+  the daemon directly instead (see below).
 
 Check your Node version first:
 
@@ -45,7 +47,7 @@ checkout and rebuilds. It is also the upgrade path for this option.
 git clone https://github.com/H-XX-D/recall-memory-substrate.git
 cd recall-memory-substrate
 npm install
-npm test             # verify the checkout: 83 tests
+npm test             # verify the checkout: 138 unit/integration tests
 npm run install:local   # build + npm link → global `recall` / `recall-mcp`
 ```
 
@@ -54,6 +56,7 @@ Or equivalently: `./scripts/install-local.sh`.
 ## Verify the install
 
 ```bash
+recall version    # confirms the installed package version
 recall init       # creates ./.recall/recall.sqlite3 in the current directory
 recall status     # prints store health, counts, and config
 ```
@@ -65,9 +68,12 @@ are git-ignored by default.
 From a source checkout you can also run the full verification suite:
 
 ```bash
-npm test          # 83 unit/integration tests
+npm test          # 138 unit/integration tests
 npm run e2e       # 94 end-to-end checks
 npm run smoke     # init + status on a throwaway db
+npm run smoke:mcp # stdio MCP initialize + tools/list smoke
+npm run test:python
+npm run verify:full
 ```
 
 ## Set up the MCP server (for agents)
@@ -121,6 +127,19 @@ recall daemon run --interval-ms 60000
 
 Databases migrate forward automatically on first open; existing data is
 preserved. (FTS indexes backfill on first open after an upgrade.)
+For heavily used stores, export first:
+
+```bash
+recall export > recall-before-upgrade.json
+```
+
+Restore into a fresh database with:
+
+```bash
+recall import --json recall-before-upgrade.json --db .recall/restored.sqlite3
+```
+
+See [Backup And Recovery](20_BACKUP_AND_RECOVERY.md).
 
 ## Uninstalling
 

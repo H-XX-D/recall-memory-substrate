@@ -1,7 +1,7 @@
 name: Release
 
 # Triggered by pushing a semver tag, e.g.:
-#   git tag -a v0.1.0 -m "Recall 0.1.0" && git push origin v0.1.0
+#   git tag -a v0.2.0 -m "Recall 0.2.0" && git push origin v0.2.0
 #
 # The release is gated on a full green build/test/e2e run, then a GitHub
 # Release is published with notes extracted from CHANGELOG.md. Publishing to
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)release, e.g. v0.1.0"
+        description: "Existing tag to (re)release, e.g. v0.2.0"
         required: true
 
 permissions:

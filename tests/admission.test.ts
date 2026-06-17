@@ -79,6 +79,32 @@ describe("admission", () => {
     }
   });
 
+  it("warns on oversized bodies without rejecting them", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const result = admitWriteProposal(
+        makeProposal({
+          content: {
+            title: "Large transcript artifact",
+            body: "x".repeat(33 * 1024),
+            summary: "Large transcript should be linked or split."
+          }
+        }),
+        store
+      );
+
+      assert.equal(result.accepted, true);
+      assert.ok(
+        result.warnings.some((warning) => /bodies over 32KB/.test(warning)),
+        `expected oversized-body warning, got: ${JSON.stringify(result.warnings)}`
+      );
+    } finally {
+      store.close();
+      temp.cleanup();
+    }
+  });
+
   it("admits a valid proposal into the graph and rollback journal", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);
@@ -219,6 +245,41 @@ describe("admission", () => {
     } finally {
       store.close();
       temp.cleanup();
+    }
+  });
+
+  it("rejects common credential shapes from the primary graph", () => {
+    const cases = [
+      ["Stripe key", "rk_live_1234567890abcdef"],
+      ["GitHub fine-grained PAT", `github_pat_${"A".repeat(30)}`],
+      ["Slack token", "xoxb-1234567890-abcdefghi"],
+      ["Google API key", `AIza${"A".repeat(35)}`],
+      ["AWS session key id", "ASIAABCDEFGHIJKLMNOP"],
+      ["JWT", `eyJ${"a".repeat(12)}.${"b".repeat(12)}.${"c".repeat(12)}`],
+      ["URI credentials", "postgres://user:password@localhost/db"],
+      ["secret assignment", "client_secret = not-a-real-secret-value"],
+      ["env assignment", "export DB_PASSWORD=not-a-real-secret-value"]
+    ];
+
+    for (const [label, value] of cases) {
+      const temp = tempDbPath();
+      const store = new SQLiteRecallStore(temp.path);
+      try {
+        const result = admitWriteProposal(
+          makeProposal({
+            content: {
+              title: `Secret firewall ${label}`,
+              body: `The primary graph must reject ${value}.`
+            }
+          }),
+          store
+        );
+        assert.equal(result.accepted, false, `${label} should be rejected`);
+        assert.equal(result.issues.some((issue) => issue.code === "secret_pattern"), true);
+      } finally {
+        store.close();
+        temp.cleanup();
+      }
     }
   });
 

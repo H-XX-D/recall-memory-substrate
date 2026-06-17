@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Release-readiness surface**: `recall version` now reports the package
+  version shared by the CLI and MCP `initialize`; `recall export` /
+  `recall import --json ... [--force]` provide a portable `recall.export.v1`
+  graph archive path for backup, restore, and upgrade safety. Added
+  `docs/20_BACKUP_AND_RECOVERY.md`, MCP smoke, installer smoke, Python test
+  runner, and `npm run verify:full` to align local verification with CI
+  readiness.
 - **Codex integration** (`recall codex sync` / `recall codex status`,
   `src/core/codex-integration.ts`, `integrations/codex/`): idempotently wires
   Recall into the OpenAI Codex CLI to the same standard as the Claude Code
@@ -71,6 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP `initialize` no longer reports a stale hard-coded server version; it reads
+  the package version. Public docs, badges, SVG banners, issue templates, and
+  installation/test-count references were updated to match the current 0.2.x
+  surface and 138-test suite.
 - **Claude Code hook** (`integrations/claude/hooks/recall-session-start.py`): the
   SessionStart activity summary no longer mislabels a graph-wide diff as "scoped
   to this directory" — the scope is now derived from `recall project where` and
