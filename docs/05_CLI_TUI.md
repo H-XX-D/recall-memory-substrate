@@ -4,8 +4,11 @@
 
 ```text
 recall init
+recall version
 recall status
 recall storage
+recall export
+recall import --json recall-export.json [--force]
 recall acp status
 recall acp send --json request.json
 recall acp list [--limit 20] [--acp-status completed]

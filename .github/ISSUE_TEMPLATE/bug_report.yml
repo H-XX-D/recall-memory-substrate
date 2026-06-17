@@ -39,7 +39,7 @@ body:
     id: version
     attributes:
       label: Recall version / commit
-      placeholder: "0.1.0 or commit sha"
+      placeholder: "0.2.0 or commit sha"
     validations:
       required: true
   - type: dropdown

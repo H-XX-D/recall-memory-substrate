@@ -25,6 +25,8 @@ Thanks for contributing to Recall! Keep changes small, schema-first, and tested.
 npm test
 npm run e2e
 npm run smoke
+# For release-readiness, CLI/MCP/API, installer, benchmark, or Python changes:
+npm run verify:full
 ```
 
 ## Remaining risk

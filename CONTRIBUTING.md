@@ -32,6 +32,9 @@ npm run e2e
 ```
 
 A green `npm test && npm run e2e` is the bar for any PR.
+Changes that affect release readiness, CLI/MCP surfaces, installers,
+benchmarks, Python hooks/toolkit behavior, or recovery paths should also run
+`npm run verify:full`.
 
 ## Ground rules
 
@@ -58,6 +61,8 @@ Before opening a PR:
 npm test
 npm run e2e
 npm run smoke
+# for release-readiness changes:
+npm run verify:full
 ```
 
 In the PR description, include a short summary of **what changed**, **the tests
@@ -76,6 +81,7 @@ Commits should be signed off (`git commit -s`) to certify the
 | `src/mcp/` | MCP server and entry point |
 | `docs/` | Architecture, schema, and integration reference ([index](docs/README.md)) |
 | `tests/` · `scripts/e2e.mjs` | Unit/integration tests and end-to-end checks |
+| `scripts/*smoke.mjs` | MCP, installer, and cross-surface readiness checks |
 
 Questions or a design you want to sanity-check before building? Open an issue.
 We'd rather talk early than review a large surprise later.
