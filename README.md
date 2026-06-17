@@ -215,9 +215,8 @@ memory that stays *honest* — the whole point of Recall over a flat note file.
 
 Every Recall capability has a short, honest screencast — real CLI, real output,
 an isolated graph — with the **full script and the unedited transcript** beside
-each clip. Browse them all in the **[companion gallery](https://github.com/H-XX-D/recall-memory-substrate)**
-*(publish `recall-youtube/index.html` and link it here)*, or watch the
-walkthroughs on the **[YouTube channel](https://www.youtube.com/@YOUR_CHANNEL)**
+each clip. Browse them all in the **[companion gallery](https://h-xx-d.github.io/recall-demos/)**,
+or watch the walkthroughs on the **[YouTube channel](https://www.youtube.com/@YOUR_CHANNEL)**
 *(channel link — fill in)*.
 
 | Screencast | What it shows |
