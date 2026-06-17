@@ -9,6 +9,7 @@ describe("cli", () => {
   it("initializes, admits, reports status, and compiles context", () => {
     const temp = tempDbPath();
     const json = writeJsonFixture(makeProposal());
+    const archiveHolder: { cleanup?: () => void } = {};
     try {
       const init = execFileSync(process.execPath, [...CLI, "init", "--db", temp.path], {
         encoding: "utf8"
@@ -36,6 +37,60 @@ describe("cli", () => {
     } finally {
       json.cleanup();
       temp.cleanup();
+    }
+  });
+
+  it("exports and imports a portable graph archive", () => {
+    const source = tempDbPath();
+    const target = tempDbPath();
+    const json = writeJsonFixture(
+      makeProposal({
+        content: {
+          title: "Portable archive witness",
+          body: "Export/import preserves the user-facing graph archive.",
+          summary: "Archive round trip."
+        }
+      })
+    );
+    const archiveHolder: { cleanup?: () => void } = {};
+    try {
+      execFileSync(process.execPath, [...CLI, "admit", "--json", json.path, "--db", source.path], {
+        encoding: "utf8"
+      });
+
+      const exported = execFileSync(process.execPath, [...CLI, "export", "--db", source.path], {
+        encoding: "utf8"
+      });
+      assert.match(exported, /"schemaVersion": "recall.export.v1"/);
+      const archive = writeJsonFixture(JSON.parse(exported));
+      archiveHolder.cleanup = archive.cleanup;
+
+      const imported = execFileSync(process.execPath, [...CLI, "import", "--json", archive.path, "--db", target.path], {
+        encoding: "utf8"
+      });
+      assert.match(imported, /"graph_nodes": 1/);
+
+      const search = execFileSync(process.execPath, [...CLI, "search", "Portable archive", "--db", target.path], {
+        encoding: "utf8"
+      });
+      assert.match(search, /Portable archive witness/);
+
+      let refused = false;
+      try {
+        execFileSync(process.execPath, [...CLI, "import", "--json", archive.path, "--db", target.path], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"]
+        });
+      } catch (error) {
+        refused = true;
+        assert.match(String((error as { stderr?: Buffer }).stderr), /Refusing to import into a non-empty Recall database/);
+      }
+      assert.equal(refused, true);
+    } finally {
+      archiveHolder.cleanup?.();
+      json.cleanup();
+      source.cleanup();
+      target.cleanup();
     }
   });
 

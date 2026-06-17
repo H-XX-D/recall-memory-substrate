@@ -1,0 +1,46 @@
+[2m# ── RAW RUN · real recall CLI · real SQLite · nothing hidden ──[0m
+
+[2m# process 1 — learn a fact[0m
+[1;32m$ [0m[1mrecall admit --json v1.json --db $DB    # 'prod DB is on db-east-1'[0m
+{
+  "accepted": true,
+  "id": "68b5a24d-5a95-4800-ba0c-c00ecfdecfb7",
+  "title": "Prod DB on db-east-1",
+  "contradicts": []
+}
+
+[2m# arm a standing watch program over that belief, and take its baseline NOW[0m
+[1;32m$ [0m[1mrecall program run ede41cd0 --db $DB    # baseline, BEFORE any correction[0m
+{
+  "previous": null,
+  "current": 0.7,
+  "tripped": false
+}
+
+[2m# process 1 — correct it; the new fact's evidence.contradicts points at the first[0m
+[1;32m$ [0m[1mrecall admit --json v2.json --db $DB    # 'migrated to db-west-2', contradicts 68b5a24d[0m
+{
+  "accepted": true,
+  "id": "72b9abfb-6ad7-4ebd-91e8-db2a3d0f546b",
+  "title": "Prod DB migrated to db-west-2",
+  "contradicts": [
+    "68b5a24d-5a95-4800-ba0c-c00ecfdecfb7"
+  ]
+}
+
+[1;32m$ [0m[1mrecall program run ede41cd0 --db $DB    # SAME watch, after the correction landed[0m
+{
+  "previous": 0.7,
+  "current": 0.27,
+  "tripped": true
+}
+
+[2m# ── NEW PROCESS. zero shared memory. only the .sqlite3 file persists. ──[0m
+
+[1;32m$ [0m[1mrecall compile "where does the production database live" --db $DB[0m
+relevant_memory:
+- decision:72b9abfb-6ad7-4ebd-91e8-db2a3d0f546b; title=Prod DB migrated to db-west-2; state=active/conf:0.9/eff:0.9/unc:0.07/concern:0.03/stability:stable/source:high
+- decision:68b5a24d-5a95-4800-ba0c-c00ecfdecfb7; title=Prod DB on db-east-1; state=active/conf:0.7/eff:0.27(challenged)/unc:0.07/concern:0.03/stability:stable/source:high
+
+[2m# ↑ a FRESH process read the persisted graph: db-east-1 -> eff:0.27(challenged), db-west-2 -> eff:0.9.[0m
+[2m#   it knows the current answer AND that the old one was superseded. nobody re-told it.[0m
