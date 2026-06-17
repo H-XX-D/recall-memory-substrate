@@ -69,6 +69,24 @@ readiness lane for MCP smoke, Python hooks/toolkit checks, public benchmarks,
 and installer validation. Upgrades, uninstall, and troubleshooting:
 [Installation Guide](docs/11_INSTALLATION.md).
 
+### Put your agent on Recall — one command
+
+The installer above already wires up any agent CLI it finds. To do it yourself
+(or after installing a new agent), one idempotent command sets up the skill, the
+MCP server, the consult-Recall hook, and makes Recall the durable memory layer:
+
+```bash
+recall claude sync     # Claude Code: skill + MCP + SessionStart hook; turns OFF native auto-memory
+recall codex sync      # OpenAI Codex:  skill + MCP in config.toml + a Recall directive in AGENTS.md
+recall claude status   # confirm what's wired   (recall codex status for Codex)
+```
+
+Restart your agent and it's **armed** — it reads memory before relying on
+recollection and writes durable findings back on its own; you never tell it to
+"save." Both syncs back up your config before editing, are safe to re-run, and
+are reversible (`recall claude enable-auto-memory`). Using a different MCP
+client? See [hook up your agent](#hook-up-your-agent).
+
 ## The 60-second tour
 
 ```bash
