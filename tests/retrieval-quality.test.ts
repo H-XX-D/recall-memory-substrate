@@ -257,6 +257,34 @@ describe("retrieval quality gate", () => {
     assert.deepEqual(demoted.map((entry) => entry.id), ["real", "stub"]);
   });
 
+  it("surfaces effectiveConfidence on search hits and flags superseded cells as challenged", () => {
+    const now = new Date("2026-06-09T00:00:00.000Z");
+    const node = (id: string, conf: number): RecallNode =>
+      ({
+        id,
+        kind: "decision",
+        title: id,
+        body: "",
+        summary: null,
+        status: "active",
+        updatedAt: "2026-06-08T00:00:00.000Z",
+        data: { confidence: { value: conf } },
+        tags: {}
+      }) as unknown as RecallNode;
+    // Same stated/lexical/degree; only effective confidence differs (one superseded, one current).
+    const candidates = [
+      { node: node("superseded", 0.8), bm25: -5, degree: 1, effectiveConfidence: 0.27 },
+      { node: node("current", 0.9), bm25: -5, degree: 1, effectiveConfidence: 0.9 }
+    ];
+    const hits = fuseCandidates(candidates, 2, now);
+    const superseded = hits.find((hit) => hit.id === "superseded")!;
+    const current = hits.find((hit) => hit.id === "current")!;
+    assert.equal(superseded.effectiveConfidence, 0.27);
+    assert.equal(superseded.challenged, true, "a collapsed-eff cell is flagged challenged in search output");
+    assert.equal(current.effectiveConfidence, 0.9);
+    assert.equal(current.challenged, false, "a current cell is not flagged challenged");
+  });
+
   it("compile keeps semantic cells above brevity-inflated artifact stubs", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);

@@ -611,7 +611,9 @@ Read [SECURITY.md](SECURITY.md) before using Recall with sensitive data.
 Important defaults:
 
 - runtime databases and logs are git-ignored
-- primary-graph writes reject secret-looking content
+- primary-graph writes flag and reject common secret-looking content (a
+  high-recall heuristic backstop, not a guarantee — real secrets belong in the
+  encrypted side graph)
 - encrypted secret saves require explicit confirmation
 - primary-graph writes are schema-validated and rollbackable
 

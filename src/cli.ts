@@ -766,7 +766,21 @@ function readJsonArg(args: ParsedArgs): unknown {
   if (!args.jsonPath) {
     fail("Expected --json <path>");
   }
-  return JSON.parse(readFileSync(args.jsonPath, "utf8"));
+  let raw: string;
+  try {
+    raw = readFileSync(args.jsonPath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    fail(code === "ENOENT" ? `No such --json file: ${args.jsonPath}` : `Cannot read --json file ${args.jsonPath}: ${(error as Error).message}`);
+  }
+  if (raw.trim() === "") {
+    fail(`--json file is empty: ${args.jsonPath}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    fail(`--json file is not valid JSON (${args.jsonPath}): ${(error as Error).message}`);
+  }
 }
 
 function parseWorkCandidates(input: unknown): WorkCandidateInput[] {

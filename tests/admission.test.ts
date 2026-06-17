@@ -272,4 +272,54 @@ describe("admission", () => {
       temp.cleanup();
     }
   });
+
+  it("rejects common secret shapes beyond key formats (passwords, URI creds, env dumps, chat tokens)", () => {
+    const secrets = [
+      "password: CorrectHorseBatteryStaple",
+      "db url postgres://admin:s3cr3tpw@db.acme.io:5432/prod",
+      "export DB_PASSWORD=hunter2pass",
+      "slack token xoxb-2401-2401-aBcDeFgHiJkLmNoP",
+    ];
+    for (const body of secrets) {
+      const temp = tempDbPath();
+      const store = new SQLiteRecallStore(temp.path);
+      try {
+        const result = admitWriteProposal(makeProposal({ content: { body } }), store);
+        assert.equal(result.accepted, false, `should reject: ${body}`);
+        assert.equal(result.issues.some((issue) => issue.code === "secret_pattern"), true, `secret_pattern for: ${body}`);
+        assert.equal(store.stats().nodes, 0);
+      } finally {
+        store.close();
+        temp.cleanup();
+      }
+    }
+  });
+
+  it("does not falsely reject benign prose that merely mentions security words", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const result = admitWriteProposal(
+        makeProposal({ content: { body: "The password reset flow emails a link; rotate the API key quarterly per policy." } }),
+        store
+      );
+      assert.equal(result.accepted, true);
+    } finally {
+      store.close();
+      temp.cleanup();
+    }
+  });
+
+  it("warns (without rejecting) on an oversized body that would bloat compile packets", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const result = admitWriteProposal(makeProposal({ content: { body: "x".repeat(40 * 1024) } }), store);
+      assert.equal(result.accepted, true);
+      assert.equal(result.warnings.some((warning) => /body is \d+KB/.test(warning)), true);
+    } finally {
+      store.close();
+      temp.cleanup();
+    }
+  });
 });
