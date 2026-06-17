@@ -32,6 +32,7 @@
     "dist/src",
     "docs",
     "integrations/claude",
+    "integrations/codex",
     "scripts/install.sh",
     "scripts/install-local.sh",
     "AGENTS.md",

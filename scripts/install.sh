@@ -63,6 +63,20 @@ else
   echo "You can run it manually later: recall claude sync" >&2
 fi
 
+# Install / refresh the Codex integration (skill, MCP server in config.toml, and a
+# Recall directive in ~/.codex/AGENTS.md) only when the Codex CLI is present.
+# Idempotent and fail-soft: a problem here must never block the core install.
+if command -v codex >/dev/null 2>&1; then
+  echo
+  echo "Configuring Codex integration…"
+  if recall codex sync; then
+    echo "Recall wired into Codex (skill, MCP, AGENTS.md directive)."
+  else
+    echo "Note: Codex integration sync was skipped or failed (non-fatal)." >&2
+    echo "You can run it manually later: recall codex sync" >&2
+  fi
+fi
+
 echo
 echo "Recall installed."
 echo "Try: recall status"

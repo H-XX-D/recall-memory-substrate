@@ -18,6 +18,7 @@ import { validateWriteProposal } from "./core/schema.js";
 import { SecretGraphStore } from "./core/secrets.js";
 import { installLaunchAgent, launchAgentStatus, renderLaunchAgentPlist, uninstallLaunchAgent } from "./core/service.js";
 import { claudeIntegrationStatus, setClaudeAutoMemory, syncClaudeIntegration } from "./core/claude-integration.js";
+import { codexIntegrationStatus, syncCodexIntegration } from "./core/codex-integration.js";
 import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput } from "./core/store.js";
 import { storageStats } from "./core/storage-stats.js";
 import { renderTui } from "./core/tui.js";
@@ -126,6 +127,16 @@ function main(): void {
 
   if (command === "claude" && (subcommand === "enable-auto-memory" || subcommand === "enable")) {
     console.log(JSON.stringify(setClaudeAutoMemory(true), null, 2));
+    return;
+  }
+
+  if (command === "codex" && (!subcommand || subcommand === "sync")) {
+    console.log(JSON.stringify(syncCodexIntegration(), null, 2));
+    return;
+  }
+
+  if (command === "codex" && subcommand === "status") {
+    console.log(JSON.stringify(codexIntegrationStatus(), null, 2));
     return;
   }
 
@@ -921,6 +932,10 @@ Commands:
   recall claude status                report which integration pieces are installed
   recall claude disable-auto-memory   set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 only
   recall claude enable-auto-memory    re-enable Claude Code built-in auto-memory
+  recall codex sync                   install/refresh the Codex integration (skill, MCP server in config.toml,
+                                      and a Recall directive in ~/.codex/AGENTS.md). Codex has no native-memory
+                                      kill switch, so displacement is prompt-level via the AGENTS.md directive
+  recall codex status                 report which Codex integration pieces are installed
 `);
 }
 

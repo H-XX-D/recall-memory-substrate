@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Codex integration** (`recall codex sync` / `recall codex status`,
+  `src/core/codex-integration.ts`, `integrations/codex/`): idempotently wires
+  Recall into the OpenAI Codex CLI to the same standard as the Claude Code
+  integration — installs the recall skill into `~/.codex/skills/recall/`,
+  registers the `[mcp_servers.recall]` server in `~/.codex/config.toml` (a pure,
+  unit-tested TOML upsert that preserves other servers/config), and injects a
+  marker-delimited Recall directive into `~/.codex/AGENTS.md` (Codex's
+  always-read global instruction surface — the analog of Claude's SessionStart
+  hook). Codex exposes no single native-memory kill switch, so displacement is
+  prompt-level via the AGENTS.md directive. `scripts/install.sh` and
+  `scripts/install-local.sh` run `recall codex sync` (fail-soft) when the Codex
+  CLI is present. Covered by `tests/codex-integration.test.ts` (pure
+  AGENTS.md/TOML merges + a filesystem round-trip).
 - **`npm run bench:automemory`** (`scripts/automemory-bench.mjs`): a store-level,
   deterministic head-to-head capability battery against Claude Code's native
   auto-memory (the flat `MEMORY.md` index + per-fact `.md` store). Models
