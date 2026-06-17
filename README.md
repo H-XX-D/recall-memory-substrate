@@ -188,31 +188,54 @@ restore path, including file-level SQLite copies and upgrade safety.
 
 ## Demo
 
-**Claude Code using Recall as durable memory — a real sprint, three separate
-`claude` sessions with no shared conversation.** You just talk normally — you
-never tell it to "save" anything. The armed agent persists a decision on its
-own (Monday), finds and supersedes it when the plan changes (Wednesday), and on
-Friday a brand-new session — zero prior context — consults memory unprompted and
-answers with the *current* decision plus the why-we-changed history, the old one
-preserved-but-superseded rather than lost.
+**Change your mind without losing the past.** Recall's moat is supersession: a
+correction is never an overwrite. You admit a new cell that `--contradicts` the
+old one, and every future read *demotes* the superseded value instead of deleting
+it — the conflict resolves automatically, at read time.
 
-[![Claude Code + Recall: durable memory across sessions](assets/recall-claude-demo-poster.png)](assets/recall-claude-demo.mp4)
+[![Recall supersession — the old value is preserved-but-demoted, resolved at read time](assets/recall-supersede-demo-poster.png)](assets/recall-supersede-demo.mp4)
 
-▶ Click the frame (or open [`assets/recall-claude-demo.mp4`](assets/recall-claude-demo.mp4)) for the
-~30s screencast — an **unedited recording of a real run**: the actual `claude -p`
-sessions, the recall MCP, and live `recall compile` output, agent responses
-untrimmed. Run it yourself (needs `claude`, `recall`, `recall-mcp` on PATH):
+▶ Click the frame (or open [`assets/recall-supersede-demo.mp4`](assets/recall-supersede-demo.mp4))
+for a ~17s screencast — a **real, unedited `recall` run**:
 
-```bash
-./scripts/demo-claude-recall.sh
-```
+- **`v1`** — *"Cache TTL is 60s"* lands at full strength (`eff:0.70`).
+- **`v2 --contradicts v1`** — *"…is 300s."* Read it back and `compile` doesn't
+  return both as equals: `v1` is demoted to `eff:0.29(challenged)`, `v2` stays
+  high. The old value is **still in the graph** — preserved, queryable, just
+  down-weighted.
+- **`v3 --contradicts v2`** — a 3-link chain. `v1` and `v2` collapse to `eff:0`;
+  exactly one live answer remains, the *why-we-changed* trail intact.
+- The run asserts a tripwire — the real graph was untouched (`334 → 334`, a
+  throwaway db).
 
-Every session is a fresh process — nothing is in any context window, and nobody
-ever instructs a tool call. The agent decides to persist, to supersede, and to
-consult on its own. Supersession is a `contradicts` edge (never an overwrite), so
-the corrected decision is foregrounded as current while the old one is demoted to
-a low effective confidence and flagged `challenged` — and the *why-we-changed*
-trail survives for audit.
+Demotion-not-deletion is the line between memory that merely *persists* and
+memory that stays *honest* — the whole point of Recall over a flat note file.
+
+### See it all working
+
+Every Recall capability has a short, honest screencast — real CLI, real output,
+an isolated graph — with the **full script and the unedited transcript** beside
+each clip. Browse them all in the **[companion gallery](https://github.com/H-XX-D/recall-memory-substrate)**
+*(publish `recall-youtube/index.html` and link it here)*, or watch the
+walkthroughs on the **[YouTube channel](https://www.youtube.com/@YOUR_CHANNEL)**
+*(channel link — fill in)*.
+
+| Screencast | What it shows |
+|---|---|
+| **Install in one command** | `recall claude sync` / `recall codex sync` wires the skill, MCP, and consult-Recall hook, and turns off native note-memory |
+| **[Autonomous memory across sessions](assets/recall-claude-demo.mp4)** | three `claude` sessions, natural prompts, nobody says "save" — persist → supersede → cold-session recall |
+| **Supersession mechanics** *(the clip above)* | the `contradicts` edge, read-time demotion, multi-link chains |
+| **Rollback a write** | journaled, reversible undo — archives the node, strips its relations |
+| **Inception** | grounded idea synthesis: a new hypothesis pre-linked (`depends_on`) to its sources |
+| **Effective confidence** | stated vs graph-computed trust, recomputed on every read |
+| **Compile** | ids-first context packets — expand a cell or single field only when needed |
+| **Retrieval** | FTS5 + BM25 with porter stemming and identifier-aware tokenization |
+| **Subgraph** | slice the graph by structured facets (tags), not just search |
+| **Memory health** | `recall beliefs` / `recall maintenance --derive` audits between turns |
+| **Calibration** | per-actor Brier scores — memory that learns who to trust |
+| **Watch programs** | a non-LLM monitor that trips when the graph turns against a belief |
+| **Secrets** | firewall refuses credential shapes; real secrets go in the encrypted side graph |
+| **Diff-aware resume** | what's new, updated, and retracted since you left |
 
 ## Hook up your agent
 
