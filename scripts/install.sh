@@ -43,6 +43,26 @@ npm install
 npm run build
 npm link
 
+# Install / refresh the Claude Code integration (hook, skill, MCP registration,
+# and — unless RECALL_KEEP_AUTOMEMORY=1 — disabling Claude Code's built-in
+# auto-memory so agents adopt Recall). Idempotent: re-runs on every update to
+# pull forward the latest bundled "best functional version". Fail-soft: a
+# problem here must never block the core install.
+echo
+echo "Configuring Claude Code integration…"
+if recall claude sync; then
+  if [ "${RECALL_KEEP_AUTOMEMORY:-0}" = "1" ]; then
+    echo "Kept Claude Code built-in auto-memory (RECALL_KEEP_AUTOMEMORY=1)."
+    echo "Enable Recall adoption later with: recall claude disable-auto-memory"
+  else
+    echo "Disabled Claude Code built-in auto-memory so agents adopt Recall."
+    echo "Revert anytime with: recall claude enable-auto-memory"
+  fi
+else
+  echo "Note: Claude Code integration sync was skipped or failed (non-fatal)." >&2
+  echo "You can run it manually later: recall claude sync" >&2
+fi
+
 echo
 echo "Recall installed."
 echo "Try: recall status"

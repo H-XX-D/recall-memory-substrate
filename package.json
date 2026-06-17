@@ -1,7 +1,7 @@
 {
   "name": "recall-memory-substrate",
   "version": "0.2.0",
-  "description": "Disciplined, operable memory for LLM agents — a local-first active memory substrate.",
+  "description": "Disciplined, operable memory for LLM agents \u2014 a local-first active memory substrate.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
@@ -31,6 +31,7 @@
   "files": [
     "dist/src",
     "docs",
+    "integrations/claude",
     "scripts/install.sh",
     "scripts/install-local.sh",
     "AGENTS.md",
@@ -59,7 +60,8 @@
     "bench:sentinel": "npm run build && node --disable-warning=ExperimentalWarning scripts/sentinel-bench.mjs",
     "install:local": "npm install && npm run build && npm link",
     "prepublishOnly": "npm test && npm run e2e",
-    "smoke": "npm run build && node --disable-warning=ExperimentalWarning dist/src/cli.js init --db .recall/smoke.sqlite3 && node --disable-warning=ExperimentalWarning dist/src/cli.js status --db .recall/smoke.sqlite3"
+    "smoke": "npm run build && node --disable-warning=ExperimentalWarning dist/src/cli.js init --db .recall/smoke.sqlite3 && node --disable-warning=ExperimentalWarning dist/src/cli.js status --db .recall/smoke.sqlite3",
+    "demo": "npm run build && bash scripts/demo-cross-session.sh"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
