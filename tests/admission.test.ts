@@ -79,6 +79,32 @@ describe("admission", () => {
     }
   });
 
+  it("warns on oversized bodies without rejecting them", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const result = admitWriteProposal(
+        makeProposal({
+          content: {
+            title: "Large transcript artifact",
+            body: "x".repeat(33 * 1024),
+            summary: "Large transcript should be linked or split."
+          }
+        }),
+        store
+      );
+
+      assert.equal(result.accepted, true);
+      assert.ok(
+        result.warnings.some((warning) => /bodies over 32KB/.test(warning)),
+        `expected oversized-body warning, got: ${JSON.stringify(result.warnings)}`
+      );
+    } finally {
+      store.close();
+      temp.cleanup();
+    }
+  });
+
   it("admits a valid proposal into the graph and rollback journal", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);
@@ -222,6 +248,41 @@ describe("admission", () => {
     }
   });
 
+  it("rejects common credential shapes from the primary graph", () => {
+    const cases = [
+      ["Stripe key", "rk_live_1234567890abcdef"],
+      ["GitHub fine-grained PAT", `github_pat_${"A".repeat(30)}`],
+      ["Slack token", "xoxb-1234567890-abcdefghi"],
+      ["Google API key", `AIza${"A".repeat(35)}`],
+      ["AWS session key id", "ASIAABCDEFGHIJKLMNOP"],
+      ["JWT", `eyJ${"a".repeat(12)}.${"b".repeat(12)}.${"c".repeat(12)}`],
+      ["URI credentials", "postgres://user:password@localhost/db"],
+      ["secret assignment", "client_secret = not-a-real-secret-value"],
+      ["env assignment", "export DB_PASSWORD=not-a-real-secret-value"]
+    ];
+
+    for (const [label, value] of cases) {
+      const temp = tempDbPath();
+      const store = new SQLiteRecallStore(temp.path);
+      try {
+        const result = admitWriteProposal(
+          makeProposal({
+            content: {
+              title: `Secret firewall ${label}`,
+              body: `The primary graph must reject ${value}.`
+            }
+          }),
+          store
+        );
+        assert.equal(result.accepted, false, `${label} should be rejected`);
+        assert.equal(result.issues.some((issue) => issue.code === "secret_pattern"), true);
+      } finally {
+        store.close();
+        temp.cleanup();
+      }
+    }
+  });
+
   it("attenuates unsupported high confidence", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);
@@ -267,6 +328,56 @@ describe("admission", () => {
 
       assert.equal(result.accepted, false);
       assert.equal(result.issues.some((issue) => issue.code === "program_requires_review"), true);
+    } finally {
+      store.close();
+      temp.cleanup();
+    }
+  });
+
+  it("rejects common secret shapes beyond key formats (passwords, URI creds, env dumps, chat tokens)", () => {
+    const secrets = [
+      "password: CorrectHorseBatteryStaple",
+      "db url postgres://admin:s3cr3tpw@db.acme.io:5432/prod",
+      "export DB_PASSWORD=hunter2pass",
+      "slack token xoxb-2401-2401-aBcDeFgHiJkLmNoP",
+    ];
+    for (const body of secrets) {
+      const temp = tempDbPath();
+      const store = new SQLiteRecallStore(temp.path);
+      try {
+        const result = admitWriteProposal(makeProposal({ content: { body } }), store);
+        assert.equal(result.accepted, false, `should reject: ${body}`);
+        assert.equal(result.issues.some((issue) => issue.code === "secret_pattern"), true, `secret_pattern for: ${body}`);
+        assert.equal(store.stats().nodes, 0);
+      } finally {
+        store.close();
+        temp.cleanup();
+      }
+    }
+  });
+
+  it("does not falsely reject benign prose that merely mentions security words", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const result = admitWriteProposal(
+        makeProposal({ content: { body: "The password reset flow emails a link; rotate the API key quarterly per policy." } }),
+        store
+      );
+      assert.equal(result.accepted, true);
+    } finally {
+      store.close();
+      temp.cleanup();
+    }
+  });
+
+  it("warns (without rejecting) on an oversized body that would bloat compile packets", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const result = admitWriteProposal(makeProposal({ content: { body: "x".repeat(40 * 1024) } }), store);
+      assert.equal(result.accepted, true);
+      assert.equal(result.warnings.some((warning) => /body is \d+KB/.test(warning)), true);
     } finally {
       store.close();
       temp.cleanup();

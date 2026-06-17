@@ -15,6 +15,7 @@ import { buildPageIndex, getRecallPage, type RecallPageName } from "../core/page
 import { runOperatingCycle } from "../core/operator.js";
 import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput, type SubgraphFilter } from "../core/store.js";
 import { storageStats } from "../core/storage-stats.js";
+import { RECALL_VERSION } from "../core/version.js";
 import { allocateWork, allocationToProposal, blindLockToProposal, type BlindLockInput, type WorkCandidateInput } from "../core/workflow.js";
 import { createIdleExit } from "./idle.js";
 import type { AcpRequest, HyperedgeProgramSpec, OperatorRun } from "../core/types.js";
@@ -59,7 +60,7 @@ export function handleMcpRequest(request: JsonRpcRequest, store: SQLiteRecallSto
         protocolVersion: "2024-11-05",
         serverInfo: {
           name: "recall",
-          version: "0.1.0"
+          version: RECALL_VERSION
         },
         capabilities: {
           tools: {}

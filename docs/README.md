@@ -13,6 +13,7 @@ and quick examples, start with the top-level [`../README.md`](../README.md).
 |---|---|
 | [`11_INSTALLATION.md`](11_INSTALLATION.md) | Installing Recall on a fresh machine; Node version requirements; standard install locations |
 | [`05_CLI_TUI.md`](05_CLI_TUI.md) | Command-line surface and the read-only terminal UI |
+| [`20_BACKUP_AND_RECOVERY.md`](20_BACKUP_AND_RECOVERY.md) | Portable graph export/import, file-level backups, rollback, and upgrade safety |
 | [`LLM_INTEGRATION.md`](LLM_INTEGRATION.md) | Full operating contract for LLM agents: read this before composing your first write proposal |
 | [`LLM_SYSTEM_PROMPT.md`](LLM_SYSTEM_PROMPT.md) | Drop-in system prompt that teaches an LLM how to use Recall |
 | [`../python/QUICKSTART.md`](../python/QUICKSTART.md) | Verified end-to-end walkthrough using the Python client toolkit |
@@ -61,6 +62,7 @@ Read in order:
 2. [`11_INSTALLATION.md`](11_INSTALLATION.md): install
 3. [`../python/QUICKSTART.md`](../python/QUICKSTART.md): first useful query
 4. [`05_CLI_TUI.md`](05_CLI_TUI.md): full CLI surface
+5. [`20_BACKUP_AND_RECOVERY.md`](20_BACKUP_AND_RECOVERY.md): backup and restore
 
 ### "I'm an AI agent (or building one) that needs to use Recall"
 
@@ -104,12 +106,14 @@ contributing requires.
 
 The CLI commands documented across these files map to actual implementations
 in [`../src/cli.ts`](../src/cli.ts). The current implemented surface (as of
-Recall 0.1.0) is:
+Recall 0.2.x) is:
 
 | Command | Subcommands | Documented in |
 |---|---|---|
 | `recall init` | None | 11, LLM_INTEGRATION |
+| `recall version` | None | 05, 11 |
 | `recall status` / `storage` | None | 11 |
+| `recall export` / `import` | None | 05, 20 |
 | `recall tui` | None | 05 |
 | `recall validate` | None | 02, 05 |
 | `recall admit` / `write-propose` | None | 02, 05 |

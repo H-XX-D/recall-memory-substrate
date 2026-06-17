@@ -59,6 +59,7 @@ export function admitWriteProposal(
 
   attenuateUnsupportedConfidence(proposal, warnings, attenuations);
   warnOversizedTitle(proposal, warnings);
+  warnOversizedBody(proposal, warnings);
   warnNearDuplicate(proposal, store, warnings, derivationKey);
   normalizeEvidenceTargets(proposal, store);
 
@@ -155,12 +156,24 @@ function warnNearDuplicate(
 // ranking, so they cost every future read. Warn, never reject: extractors and
 // older agents must keep working.
 const TITLE_WORD_LIMIT = 20;
+// A single oversized body inflates every compile packet that references the cell,
+// defeating the bounded-context guarantee. Warn (never reject) above this.
+const BODY_WARN_BYTES = 32 * 1024;
 
 function warnOversizedTitle(proposal: WriteProposal, warnings: string[]): void {
   const words = proposal.content.title.trim().split(/\s+/).length;
   if (words > TITLE_WORD_LIMIT) {
     warnings.push(
       `title has ${words} words; titles over ${TITLE_WORD_LIMIT} bloat compile packets and weaken ranking — move detail into body or summary`
+    );
+  }
+}
+
+function warnOversizedBody(proposal: WriteProposal, warnings: string[]): void {
+  const bytes = Buffer.byteLength(proposal.content.body ?? "", "utf8");
+  if (bytes > BODY_WARN_BYTES) {
+    warnings.push(
+      `body is ${Math.round(bytes / 1024)}KB; bodies over ${BODY_WARN_BYTES / 1024}KB bloat every compile packet that references this cell — split it or move detail to a linked source`
     );
   }
 }

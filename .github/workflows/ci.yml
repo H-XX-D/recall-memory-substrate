@@ -47,3 +47,39 @@ jobs:
 
       - name: Smoke check
         run: npm run smoke
+
+  readiness:
+    name: Readiness checks (Python, MCP, benchmarks, installer)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: MCP smoke
+        run: npm run smoke:mcp
+
+      - name: Python toolkit and hook tests
+        run: npm run test:python
+
+      - name: Public benchmark
+        run: npm run bench:public
+
+      - name: Sentinel benchmark
+        run: npm run bench:sentinel
+
+      - name: Installer smoke
+        run: npm run smoke:install

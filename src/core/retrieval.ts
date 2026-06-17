@@ -66,6 +66,17 @@ export interface FuseOptions {
   kindLexicalFactor?: Readonly<Partial<Record<RecallNode["kind"], number>>>;
 }
 
+/**
+ * A search result: the node plus its read-time effective confidence and whether
+ * it is currently challenged/superseded. Surfacing this on the search surface (not
+ * just compile) keeps a consumer that reads search output from treating a demoted,
+ * superseded cell as current.
+ */
+export type SearchHit = RecallNode & {
+  effectiveConfidence?: number;
+  challenged?: boolean;
+};
+
 // Task-compilation profile. Auto-extracted artifact stubs are ~10-token cells
 // whose symbol token echoes through title AND three tag fields, so bm25's
 // length normalization hands them the lexical ceiling: measured live, stubs
@@ -84,24 +95,39 @@ export function fuseCandidates(
   limit: number,
   now: Date,
   options?: FuseOptions
-): RecallNode[] {
+): SearchHit[] {
   const bestLexical = candidates.reduce((best, candidate) => Math.max(best, -candidate.bm25), 0);
   const scored = candidates.map((candidate) => {
     const kindFactor = options?.kindLexicalFactor?.[candidate.node.kind] ?? 1;
     const lexical = bestLexical > 0 ? (kindFactor * Math.max(0, -candidate.bm25)) / bestLexical : 0;
     const graph = GRAPH_WEIGHT * Math.min(1, Math.log1p(candidate.degree) / GRAPH_SCALE);
-    const confidence =
-      CONFIDENCE_WEIGHT * (candidate.effectiveConfidence ?? confidenceValue(candidate.node));
+    const stated = confidenceValue(candidate.node);
+    const eff = candidate.effectiveConfidence ?? stated;
+    const confidence = CONFIDENCE_WEIGHT * eff;
     const recency = RECENCY_WEIGHT * recencyDecay(candidate.node.updatedAt, now);
-    return { node: candidate.node, score: lexical + graph + confidence + recency };
+    return { candidate, eff, stated, score: lexical + graph + confidence + recency };
   });
   scored.sort(
     (a, b) =>
       b.score - a.score ||
-      b.node.updatedAt.localeCompare(a.node.updatedAt) ||
-      a.node.id.localeCompare(b.node.id)
+      b.candidate.node.updatedAt.localeCompare(a.candidate.node.updatedAt) ||
+      a.candidate.node.id.localeCompare(b.candidate.node.id)
   );
-  return scored.slice(0, limit).map((entry) => entry.node);
+  return scored.slice(0, limit).map((entry) => {
+    if (entry.candidate.effectiveConfidence === undefined) {
+      return entry.candidate.node as SearchHit;
+    }
+    // Copy (never mutate the shared node) and annotate. `challenged` marks a cell
+    // whose read-time effective confidence has collapsed to well under HALF its stated
+    // value — the signature of being superseded/contradicted. A milder dip (e.g. an
+    // actor-calibration discount on a still-current cell) is left unflagged but the raw
+    // effectiveConfidence is always exposed so the consumer can judge for itself.
+    return {
+      ...entry.candidate.node,
+      effectiveConfidence: entry.eff,
+      challenged: entry.eff < entry.stated * 0.5
+    } satisfies SearchHit;
+  });
 }
 
 function confidenceValue(node: RecallNode): number {

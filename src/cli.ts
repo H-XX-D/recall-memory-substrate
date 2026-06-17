@@ -12,15 +12,18 @@ import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle 
 import { runAcpLoop } from "./core/acp.js";
 import { runDaemonOnce } from "./core/daemon.js";
 import { defaultEvalSuite, type RecallEvalSuite } from "./core/evals.js";
+import { exportRecallArchive, importRecallArchive } from "./core/export.js";
 import { buildPageIndex, getRecallPage, type RecallPageName } from "./core/pages.js";
 import { runOperatingCycle } from "./core/operator.js";
 import { validateWriteProposal } from "./core/schema.js";
 import { SecretGraphStore } from "./core/secrets.js";
 import { installLaunchAgent, launchAgentStatus, renderLaunchAgentPlist, uninstallLaunchAgent } from "./core/service.js";
 import { claudeIntegrationStatus, setClaudeAutoMemory, syncClaudeIntegration } from "./core/claude-integration.js";
+import { codexIntegrationStatus, syncCodexIntegration } from "./core/codex-integration.js";
 import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput } from "./core/store.js";
 import { storageStats } from "./core/storage-stats.js";
 import { renderTui } from "./core/tui.js";
+import { RECALL_PACKAGE_NAME, RECALL_VERSION } from "./core/version.js";
 import { allocateWork, allocationToProposal, blindLockToProposal, type BlindLockInput, type WorkCandidateInput } from "./core/workflow.js";
 import type { AcpRequest, HyperedgeProgramSpec, OperatorRun } from "./core/types.js";
 
@@ -67,6 +70,7 @@ interface ParsedArgs {
   acpStatus?: string;
   acpManager?: string;
   acpToAgent?: string;
+  force: boolean;
 }
 
 function main(): void {
@@ -75,6 +79,11 @@ function main(): void {
 
   if (!command || command === "help" || command === "--help") {
     printHelp();
+    return;
+  }
+
+  if (command === "version" || command === "--version" || command === "-v") {
+    console.log(JSON.stringify({ name: RECALL_PACKAGE_NAME, version: RECALL_VERSION }, null, 2));
     return;
   }
 
@@ -129,6 +138,27 @@ function main(): void {
     return;
   }
 
+  if (command === "codex" && (!subcommand || subcommand === "sync")) {
+    console.log(JSON.stringify(syncCodexIntegration(), null, 2));
+    return;
+  }
+
+  if (command === "codex" && subcommand === "status") {
+    console.log(JSON.stringify(codexIntegrationStatus(), null, 2));
+    return;
+  }
+
+  if (command === "export") {
+    console.log(JSON.stringify(exportRecallArchive(args.db), null, 2));
+    return;
+  }
+
+  if (command === "import") {
+    const archive = readJsonArg(args);
+    console.log(JSON.stringify({ result: importRecallArchive(args.db, archive, { replace: args.force }) }, null, 2));
+    return;
+  }
+
   const store = new SQLiteRecallStore(args.db);
   try {
     if (command === "init") {
@@ -137,7 +167,7 @@ function main(): void {
     }
 
     if (command === "status") {
-      console.log(JSON.stringify({ db: args.db, stats: store.stats() }, null, 2));
+      console.log(JSON.stringify({ name: RECALL_PACKAGE_NAME, version: RECALL_VERSION, db: args.db, stats: store.stats() }, null, 2));
       return;
     }
 
@@ -548,6 +578,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let acpStatus: string | undefined;
   let acpManager: string | undefined;
   let acpToAgent: string | undefined;
+  let force = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -632,6 +663,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       acpManager = requireValue(argv, ++index, "--acp-manager");
     } else if (arg === "--acp-to-agent") {
       acpToAgent = requireValue(argv, ++index, "--acp-to-agent");
+    } else if (arg === "--force") {
+      force = true;
     } else {
       command.push(arg);
     }
@@ -689,7 +722,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     includeReferenceParameters,
     acpStatus,
     acpManager,
-    acpToAgent
+    acpToAgent,
+    force
   };
 }
 
@@ -755,7 +789,21 @@ function readJsonArg(args: ParsedArgs): unknown {
   if (!args.jsonPath) {
     fail("Expected --json <path>");
   }
-  return JSON.parse(readFileSync(args.jsonPath, "utf8"));
+  let raw: string;
+  try {
+    raw = readFileSync(args.jsonPath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    fail(code === "ENOENT" ? `No such --json file: ${args.jsonPath}` : `Cannot read --json file ${args.jsonPath}: ${(error as Error).message}`);
+  }
+  if (raw.trim() === "") {
+    fail(`--json file is empty: ${args.jsonPath}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    fail(`--json file is not valid JSON (${args.jsonPath}): ${(error as Error).message}`);
+  }
 }
 
 function parseWorkCandidates(input: unknown): WorkCandidateInput[] {
@@ -850,8 +898,11 @@ function printHelp(): void {
 
 Commands:
   recall init [--db path]
+  recall version
   recall status [--db path]
   recall storage [--db path]
+  recall export [--db path]                                      print a portable JSON archive to stdout
+  recall import --json recall-export.json [--db path] [--force]  restore an archive into an empty db; --force replaces rows
   recall acp [status] [--db path]
   recall acp send --json request.json [--db path]
   recall acp list [--limit 20] [--acp-status queued] [--db path]
@@ -921,6 +972,10 @@ Commands:
   recall claude status                report which integration pieces are installed
   recall claude disable-auto-memory   set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 only
   recall claude enable-auto-memory    re-enable Claude Code built-in auto-memory
+  recall codex sync                   install/refresh the Codex integration (skill, MCP server in config.toml,
+                                      and a Recall directive in ~/.codex/AGENTS.md). Codex has no native-memory
+                                      kill switch, so displacement is prompt-level via the AGENTS.md directive
+  recall codex status                 report which Codex integration pieces are installed
 `);
 }
 

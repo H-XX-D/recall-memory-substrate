@@ -7,7 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+
+- **Secret firewall broadened** (`src/core/firewall.ts`): an adversarial stress
+  test found the secret allowlist was only 5 key-format regexes, so plaintext
+  passwords, AWS secret keys, Slack/Stripe/Google tokens, JWTs, `postgres://`
+  URI credentials, and `KEY=secret` env dumps were stored verbatim in the
+  primary graph and were searchable. The pattern set now covers these common
+  secret shapes (verified by new tests), while still passing benign prose that
+  merely mentions security words. The skill docs and README now describe the
+  firewall honestly as a **high-recall heuristic backstop, not a guarantee** —
+  real secrets still belong in the encrypted side graph.
+
+### Fixed
+
+- **`recall search` now surfaces supersession state** (`src/core/retrieval.ts`,
+  `store.ts`): search hits carry `effectiveConfidence` and a `challenged` flag,
+  so a consumer reading search output (not just `compile`) can tell a
+  superseded/contradicted cell from a current one. Previously the search surface
+  exposed no resolution state and a demoted cell looked identical to its
+  replacement.
+- **Oversized bodies now warn** (`src/core/admission.ts`): a body over 32KB
+  emits an admission warning (it inflates every compile packet that references
+  the cell, defeating the bounded-context guarantee). Warn, never reject.
+- **Clean errors on malformed `--json` input** (`src/cli.ts`): a missing, empty,
+  or invalid `--json` file now produces a one-line error instead of a raw Node
+  stacktrace.
+
+### Added
+
+- **Release-readiness surface**: `recall version` now reports the package
+  version shared by the CLI and MCP `initialize`; `recall export` /
+  `recall import --json ... [--force]` provide a portable `recall.export.v1`
+  graph archive path for backup, restore, and upgrade safety. Added
+  `docs/20_BACKUP_AND_RECOVERY.md`, MCP smoke, installer smoke, Python test
+  runner, and `npm run verify:full` to align local verification with CI
+  readiness.
+- **Codex integration** (`recall codex sync` / `recall codex status`,
+  `src/core/codex-integration.ts`, `integrations/codex/`): idempotently wires
+  Recall into the OpenAI Codex CLI to the same standard as the Claude Code
+  integration — installs the recall skill into `~/.codex/skills/recall/`,
+  registers the `[mcp_servers.recall]` server in `~/.codex/config.toml` (a pure,
+  unit-tested TOML upsert that preserves other servers/config), and injects a
+  marker-delimited Recall directive into `~/.codex/AGENTS.md` (Codex's
+  always-read global instruction surface — the analog of Claude's SessionStart
+  hook). Codex exposes no single native-memory kill switch, so displacement is
+  prompt-level via the AGENTS.md directive. `scripts/install.sh` and
+  `scripts/install-local.sh` run `recall codex sync` (fail-soft) when the Codex
+  CLI is present. Covered by `tests/codex-integration.test.ts` (pure
+  AGENTS.md/TOML merges + a filesystem round-trip).
+- **`npm run bench:automemory`** (`scripts/automemory-bench.mjs`): a store-level,
+  deterministic head-to-head capability battery against Claude Code's native
+  auto-memory (the flat `MEMORY.md` index + per-fact `.md` store). Models
+  auto-memory faithfully (real nested-frontmatter format, overwrite-in-place on
+  correction) and drives Recall via the repo's own built CLI on an isolated
+  `--db`. Eight scenarios (B1–B8): ties on the basics (persist/recall, correction
+  reaches current value), Recall wins on supersession audit trail,
+  cross-session resolution inheritance, structured confidence/provenance, and
+  bounded context cost at scale; auto-memory is cheaper at small store sizes
+  (B7 crossover ≈ N=50). Adversarially fairness-audited; scores Recall 6.5/7 vs
+  auto-memory 3.5/7 on this graph. Honest finding: Recall surfaces a near-dup
+  similarity warning, not automatic value-contradiction detection between
+  unlinked facts (B5 = partial).
+- **`npm run ab:automemory`** (`scripts/automemory-ab.mjs`): an end-to-end agent
+  A/B harness that runs real headless `claude -p` agents through a 3-session
+  correction protocol and scores whether a cold session surfaces the corrected
+  value. The recall arm isolates the graph via an injected MCP (`RECALL_DB`) with
+  tools constrained to the recall MCP; the auto-memory arm requires an isolated,
+  API-key-authenticated Claude config.
+
+### Fixed
+
+- MCP `initialize` no longer reports a stale hard-coded server version; it reads
+  the package version. Public docs, badges, SVG banners, issue templates, and
+  installation/test-count references were updated to match the current 0.2.x
+  surface and 138-test suite.
+- **Claude Code hook** (`integrations/claude/hooks/recall-session-start.py`): the
+  SessionStart activity summary no longer mislabels a graph-wide diff as "scoped
+  to this directory" — the scope is now derived from `recall project where` and
+  labelled accurately (`graph-wide (global memory)` vs `scoped to project '<x>'`).
+  The hook now also gates the diff on a clean subprocess exit, so a failed diff
+  that prints partial/garbage text to stdout can never be injected into model
+  context, and emits a one-time stderr diagnostic when the diff script is missing.
+- **`scripts/install-local.sh`** and the `install:local` npm script now run
+  `recall claude sync` (fail-soft), so local installs also wire the hook/skill/MCP
+  and disable native auto-memory, matching `scripts/install.sh`.
 
 ## [0.2.0] - 2026-06-12
 

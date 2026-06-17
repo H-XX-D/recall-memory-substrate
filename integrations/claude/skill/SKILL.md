@@ -450,9 +450,12 @@ Typical CI pipeline integration:
 
 ## Secrets — hard rule
 
-Never put secrets (tokens, passwords, keys) into the primary graph; admission
-rejects secret-looking content. Secrets go ONLY into the encrypted side graph,
-ONLY via the explicit CLI command (the `--confirm-secret-save` flag is required):
+Never put secrets (tokens, passwords, keys) into the primary graph. Admission
+flags common secret shapes (API keys, passwords, URI-embedded credentials, env
+dumps) and rejects them — but this is a **high-recall heuristic backstop, not a
+guarantee**; do not rely on it to catch a secret. Secrets go ONLY into the
+encrypted side graph, ONLY via the explicit CLI command (the
+`--confirm-secret-save` flag is required):
 
 ```bash
 recall secrets save --confirm-secret-save --db ~/.recall/recall.sqlite3

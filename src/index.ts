@@ -17,6 +17,7 @@ export {
 } from "./core/derivation.js";
 export { runDaemonOnce } from "./core/daemon.js";
 export { defaultEvalSuite, runRecallEval } from "./core/evals.js";
+export { exportRecallArchive, importRecallArchive, RECALL_EXPORT_SCHEMA_VERSION } from "./core/export.js";
 export { reviewFirewall } from "./core/firewall.js";
 export { runOperatingCycle } from "./core/operator.js";
 export { executeHyperedgeProgram, validateProgramSpec } from "./core/programs.js";
@@ -38,6 +39,7 @@ export { SQLiteRecallStore } from "./core/store.js";
 export { buildPageIndex, getRecallPage, pageFilter } from "./core/pages.js";
 export { storageStats } from "./core/storage-stats.js";
 export { renderTui } from "./core/tui.js";
+export { PACKAGE_INFO, RECALL_PACKAGE_NAME, RECALL_VERSION } from "./core/version.js";
 export type { CellContext, CellDataFootprint, CellFieldReference } from "./core/cell-context.js";
 export type { CognitiveTickReport, CognitiveTickResult } from "./core/cognitive.js";
 export type { AcpCycleOptions, AcpCycleResult, AcpExchangeResult, AcpLoopOptions, AcpLoopResult, AcpRequestInput, AcpRequestResult } from "./core/acp.js";

@@ -13,5 +13,37 @@ npm install
 npm run build
 npm link
 
+# Install / refresh the Claude Code integration (hook, skill, MCP registration,
+# and — unless RECALL_KEEP_AUTOMEMORY=1 — disabling Claude Code's built-in
+# auto-memory so agents adopt Recall). Mirrors scripts/install.sh. Idempotent and
+# fail-soft: a problem here must never break a local install.
+echo
+echo "Configuring Claude Code integration…"
+if recall claude sync; then
+  if [ "${RECALL_KEEP_AUTOMEMORY:-0}" = "1" ]; then
+    echo "Kept Claude Code built-in auto-memory (RECALL_KEEP_AUTOMEMORY=1)."
+    echo "Enable Recall adoption later with: recall claude disable-auto-memory"
+  else
+    echo "Disabled Claude Code built-in auto-memory so agents adopt Recall."
+    echo "Revert anytime with: recall claude enable-auto-memory"
+  fi
+else
+  echo "Note: Claude Code integration sync was skipped or failed (non-fatal)." >&2
+  echo "You can run it manually later: recall claude sync" >&2
+fi
+
+# Codex integration (skill, MCP in config.toml, AGENTS.md directive) when Codex is present.
+if command -v codex >/dev/null 2>&1; then
+  echo
+  echo "Configuring Codex integration…"
+  if recall codex sync; then
+    echo "Recall wired into Codex (skill, MCP, AGENTS.md directive)."
+  else
+    echo "Note: Codex integration sync was skipped or failed (non-fatal)." >&2
+    echo "You can run it manually later: recall codex sync" >&2
+  fi
+fi
+
+echo
 echo "Recall installed locally. Try: recall status"
 
