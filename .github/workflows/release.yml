@@ -23,7 +23,7 @@ permissions:
   id-token: write   # npm provenance (used only when publishing)
 
 env:
-  # softprops/action-gh-release@v2 still targets Node 20, which GitHub
+  # softprops/action-gh-release@v3 still targets Node 20, which GitHub
   # deprecates June 16, 2026. Force Node 24 until the action updates.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -95,7 +95,7 @@ jobs:
           echo "Release notes:"; cat RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Recall ${{ steps.tag.outputs.version }}
