@@ -598,9 +598,11 @@ recall incept "open objective"        # compile a slice into a grounded synthesi
 recall validate --json proposal.json
 recall admit    --json proposal.json
 
-# undo
+# backup / restore
 recall export > recall-export.json
 recall import --json recall-export.json --db .recall/restored.sqlite3
+
+# undo
 recall rollback list
 recall rollback show <journal-id>
 recall rollback apply <journal-id>
