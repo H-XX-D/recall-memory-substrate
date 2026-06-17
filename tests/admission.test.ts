@@ -283,6 +283,64 @@ describe("admission", () => {
     }
   });
 
+  it("rejects additional vendor credential shapes", () => {
+    const cases = [
+      ["GitLab PAT", "glpat-ABCDEFGHIJ1234567890xy"],
+      ["npm token", `npm_${"a".repeat(36)}`],
+      ["Hugging Face token", `hf_${"b".repeat(34)}`],
+      ["SendGrid key", `SG.${"a".repeat(22)}.${"b".repeat(43)}`],
+      ["Shopify token", `shpat_${"a".repeat(32)}`],
+      ["DigitalOcean token", `dop_v1_${"a".repeat(64)}`],
+      ["Doppler token", `dp.pt.${"A".repeat(40)}`],
+      ["Square token", `sq0atp-${"a".repeat(22)}`],
+      ["Telegram bot token", `123456789:${"A".repeat(35)}`],
+      ["Twilio API key", `SK${"a".repeat(32)}`],
+      ["Mailgun key", `key-${"a".repeat(32)}`]
+    ];
+
+    for (const [label, value] of cases) {
+      const temp = tempDbPath();
+      const store = new SQLiteRecallStore(temp.path);
+      try {
+        const result = admitWriteProposal(
+          makeProposal({
+            content: { title: `Vendor secret ${label}`, body: `the primary graph must reject ${value}` }
+          }),
+          store
+        );
+        assert.equal(result.accepted, false, `${label} should be rejected`);
+        assert.equal(result.issues.some((issue) => issue.code === "secret_pattern"), true, `secret_pattern for ${label}`);
+        assert.equal(store.stats().nodes, 0, `${label} must not persist`);
+      } finally {
+        store.close();
+        temp.cleanup();
+      }
+    }
+  });
+
+  it("does not flag the graph's own UUID and hex identifiers as secrets", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const result = admitWriteProposal(
+        makeProposal({
+          content: {
+            title: "Supersession note",
+            body:
+              "Cell recall://cell/f30ce5a1-3d6d-40c7-8134-c12df03c116f supersedes " +
+              "8702b4bc-1111-2222-3333-444455556666; verified at commit fe8a3aa, " +
+              "blob 0123456789abcdef0123456789abcdef on a clean tree."
+          }
+        }),
+        store
+      );
+      assert.equal(result.accepted, true, "graph identifiers must not trip the secret firewall");
+    } finally {
+      store.close();
+      temp.cleanup();
+    }
+  });
+
   it("attenuates unsupported high confidence", () => {
     const temp = tempDbPath();
     const store = new SQLiteRecallStore(temp.path);
