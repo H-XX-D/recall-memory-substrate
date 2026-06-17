@@ -51,10 +51,10 @@ const PROTOCOL = [
   "Consult your durable memory. What host does the production database run on RIGHT NOW? Reply with only the hostname.",
 ];
 
-function claudeSession(prompt, { home, extraArgs = [], env = {} }) {
+function claudeSession(prompt, { home, cwd, extraArgs = [], env = {} }) {
   try {
     return execFileSync("claude", ["-p", prompt, "--output-format", "text", ...extraArgs], {
-      encoding: "utf8", timeout: TIMEOUT, stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf8", timeout: TIMEOUT, stdio: ["pipe", "pipe", "pipe"], cwd,
       env: { ...process.env, ...(home ? { HOME: home } : {}), ...env },
     });
   } catch (e) { return `__ERROR__ ${(e.stderr || e.stdout || e.message || "").toString().slice(0, 300)}`; }
@@ -87,19 +87,40 @@ function authOk(home) {
   const out = claudeSession("Reply with exactly: OK", { home });
   return /\bOK\b/.test(out) && !/Not logged in|__ERROR__/.test(out);
 }
+// A headless agent told to "persist to durable memory" may use EITHER the native
+// auto-memory store (~/.claude/projects/<slug>/memory/*.md) OR CLAUDE.md / notes in
+// the cwd. Capture both so we report which mechanism actually fired (native
+// auto-memory was observed NOT to fire in `claude -p` — the agent falls back to
+// CLAUDE.md, which is itself a flat overwrite-on-correction note file).
+function listPersistedNotes(home, work) {
+  const out = [];
+  try { out.push(...execSync(`find ${JSON.stringify(join(home, ".claude", "projects"))} -path '*/memory/*.md' 2>/dev/null`, { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((f) => ["auto-memory", f])); } catch {}
+  try { out.push(...execSync(`find ${JSON.stringify(work)} -maxdepth 2 -iname 'CLAUDE.md' -o -iname 'NOTES.md' 2>/dev/null`, { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((f) => ["claude-md", f])); } catch {}
+  return out;
+}
 function runAutoMemoryArm(i) {
   const home = mkdtempSync(join(tmpdir(), `ab-am-${i}-`));
+  const work = mkdtempSync(join(tmpdir(), `ab-am-work-${i}-`)); // isolated cwd so edits/memory stay contained
   mkdirSync(join(home, ".claude"), { recursive: true });
-  // ensure auto-memory ON (do NOT set CLAUDE_CODE_DISABLE_AUTO_MEMORY); no recall arming present.
+  // auto-memory ON (do NOT set CLAUDE_CODE_DISABLE_AUTO_MEMORY); no recall arming present.
   if (!authOk(home)) {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true }); rmSync(work, { recursive: true, force: true });
     return { arm: "automemory", trial: i, skipped: true, reason: "isolated config not authenticated (set ANTHROPIC_API_KEY to run this arm)" };
   }
+  const extra = ["--permission-mode", "acceptEdits"]; // allow the agent to write its note file; bash stays gated
   let s3 = "";
-  for (let s = 0; s < PROTOCOL.length; s++) s3 = claudeSession(PROTOCOL[s], { home });
-  rmSync(home, { recursive: true, force: true });
+  for (let s = 0; s < PROTOCOL.length; s++) s3 = claudeSession(PROTOCOL[s], { home, cwd: work, extraArgs: extra });
+  const notes = listPersistedNotes(home, work);
+  let blob = "";
+  for (const [, f] of notes) { try { blob += execSync(`cat ${JSON.stringify(f)}`, { encoding: "utf8" }); } catch {} }
+  const mechanism = notes.some((n) => n[0] === "auto-memory") ? "auto-memory"
+    : notes.some((n) => n[0] === "claude-md") ? "CLAUDE.md" : "none";
+  rmSync(home, { recursive: true, force: true }); rmSync(work, { recursive: true, force: true });
   const agentSaysWest = /db-west-2/i.test(s3) && !/__ERROR__/.test(s3);
-  return { arm: "automemory", trial: i, agentSaysWest, s3: s3.trim().slice(0, 200), pass: agentSaysWest };
+  // overwrite vs retain: did the persisted note keep the OLD value alongside the new?
+  const noteHasWest = /db-west-2/i.test(blob), noteHasEast = /db-east-1/i.test(blob);
+  return { arm: "automemory", trial: i, agentSaysWest, persistMechanism: mechanism, noteFiles: notes.length,
+           noteRetainsOld: noteHasEast, noteHasCurrent: noteHasWest, s3: s3.trim().slice(0, 200), pass: agentSaysWest };
 }
 
 const out = [];
