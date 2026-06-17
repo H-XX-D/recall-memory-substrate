@@ -16,7 +16,7 @@ import { runRecallEval, type RecallEvalResult, type RecallEvalSuite } from "./ev
 import { executeHyperedgeProgram, validateProgramSpec } from "./programs.js";
 import { resolveCellReference, type ResolvedCellReference } from "./references.js";
 import { calibrationFactors, effectiveConfidence } from "./evidence.js";
-import { buildFtsMatchQuery, fuseCandidates, searchTerms, type FuseOptions, type LexicalCandidate } from "./retrieval.js";
+import { buildFtsMatchQuery, fuseCandidates, searchTerms, type FuseOptions, type LexicalCandidate, type SearchHit } from "./retrieval.js";
 import { cosine, embedTextRecord, hashEmbedding, textForEmbedding, type SemanticHit } from "./semantic.js";
 import type {
   AdmissionResult,
@@ -134,7 +134,7 @@ export interface RecallStore {
   ): void;
   getNodeByDerivationKey(derivationKey: string): RecallNode | null;
   stats(): StoreStats;
-  search(query: string, limit?: number, options?: FuseOptions): RecallNode[];
+  search(query: string, limit?: number, options?: FuseOptions): SearchHit[];
   lexicalBackend?(): "fts5-bm25" | "like";
   similarActiveCells?(title: string, body: string, limit?: number): SimilarCell[];
   semanticSearch(query: string, limit?: number): SemanticHit<RecallNode>[];
@@ -318,7 +318,7 @@ export class SQLiteRecallStore implements RecallStore {
     };
   }
 
-  search(query: string, limit = 10, options?: FuseOptions): RecallNode[] {
+  search(query: string, limit = 10, options?: FuseOptions): SearchHit[] {
     const terms = searchTerms(query);
     if (this.ftsEnabled && terms.length > 0) {
       const match = buildFtsMatchQuery(terms);

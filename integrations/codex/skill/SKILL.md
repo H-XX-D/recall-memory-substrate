@@ -91,8 +91,10 @@ Installed under `~/.codex/skills/recall/scripts/` (runtime-agnostic; CLI-backed)
 
 ## Secrets — hard rule
 
-Never put secrets (tokens, passwords, keys) into the primary graph; admission
-rejects secret-looking content. Secrets go ONLY into the encrypted side graph,
+Never put secrets (tokens, passwords, keys) into the primary graph. Admission
+flags common secret shapes (API keys, passwords, URI-embedded credentials, env
+dumps) and rejects them, but this is a **high-recall heuristic backstop, not a
+guarantee** — do not rely on it. Secrets go ONLY into the encrypted side graph,
 via `recall secrets save --confirm-secret-save`.
 
 ## Common mistakes

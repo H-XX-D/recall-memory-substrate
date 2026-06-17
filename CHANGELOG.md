@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Secret firewall broadened** (`src/core/firewall.ts`): an adversarial stress
+  test found the secret allowlist was only 5 key-format regexes, so plaintext
+  passwords, AWS secret keys, Slack/Stripe/Google tokens, JWTs, `postgres://`
+  URI credentials, and `KEY=secret` env dumps were stored verbatim in the
+  primary graph and were searchable. The pattern set now covers these common
+  secret shapes (verified by new tests), while still passing benign prose that
+  merely mentions security words. The skill docs and README now describe the
+  firewall honestly as a **high-recall heuristic backstop, not a guarantee** —
+  real secrets still belong in the encrypted side graph.
+
+### Fixed
+
+- **`recall search` now surfaces supersession state** (`src/core/retrieval.ts`,
+  `store.ts`): search hits carry `effectiveConfidence` and a `challenged` flag,
+  so a consumer reading search output (not just `compile`) can tell a
+  superseded/contradicted cell from a current one. Previously the search surface
+  exposed no resolution state and a demoted cell looked identical to its
+  replacement.
+- **Oversized bodies now warn** (`src/core/admission.ts`): a body over 32KB
+  emits an admission warning (it inflates every compile packet that references
+  the cell, defeating the bounded-context guarantee). Warn, never reject.
+- **Clean errors on malformed `--json` input** (`src/cli.ts`): a missing, empty,
+  or invalid `--json` file now produces a one-line error instead of a raw Node
+  stacktrace.
+
 ### Added
 
 - **Codex integration** (`recall codex sync` / `recall codex status`,
