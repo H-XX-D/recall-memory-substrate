@@ -14,7 +14,8 @@ import {
 } from "./derivation.js";
 import { runRecallEval, type RecallEvalResult, type RecallEvalSuite } from "./evals.js";
 import { executeHyperedgeProgram, validateProgramSpec } from "./programs.js";
-import { resolveCellReference, type ResolvedCellReference } from "./references.js";
+import { cellReferenceTarget, resolveCellReference, type ResolvedCellReference } from "./references.js";
+import { TRUST_RELATION_KINDS } from "./types.js";
 import { calibrationFactors, effectiveConfidence } from "./evidence.js";
 import { buildFtsMatchQuery, fuseCandidates, searchTerms, type FuseOptions, type LexicalCandidate, type SearchHit } from "./retrieval.js";
 import { cosine, embedTextRecord, hashEmbedding, textForEmbedding, type SemanticHit } from "./semantic.js";
@@ -145,6 +146,8 @@ export interface RecallStore {
   getNodeByAddress(address: string): RecallNode | null;
   getNodeByPrefix(prefix: string): RecallNode | null;
   listRelations(nodeId?: string, direction?: "in" | "out" | "both", limit?: number): RecallRelation[];
+  unresolvableTrustEdges?(): RecallRelation[];
+  pruneUnresolvableTrustEdges?(): { deleted: number; relations: RecallRelation[] };
   listNodes(limit?: number): RecallNode[];
   listRollback(limit?: number): RollbackEntry[];
   applyRollback(id: string, apply?: boolean): { id: string; applied: boolean; actions: string[] };
@@ -604,6 +607,59 @@ export class SQLiteRecallStore implements RecallStore {
       )
       .all(...params) as unknown as RelationRow[];
     return rows.map(rowToRelation);
+  }
+
+  // Trust-bearing edges (supports/contradicts/concerns) whose source or target
+  // resolves to no node — inert pollution that never feeds effective confidence
+  // (the read skips them) but pollutes the eval surface and the aggregate.
+  // Admission now refuses to materialize such an edge, so any present are legacy
+  // edges from older binaries. Three deliberate choices:
+  //   - getNode is status-agnostic on purpose: an ARCHIVED target row still
+  //     exists (rollback archives, never deletes the row), so its edge is
+  //     restorable and is NOT a dangler — only a genuinely-absent target is.
+  //     This matches the relation-targets-resolve eval exactly, so the audit and
+  //     the prune can never disagree on what "dangling" means.
+  //   - depends_on is excluded — it is lineage and may legitimately dangle
+  //     (rolled-back derivations, external anchors); it is never scored.
+  //   - intentionally unbounded (the eval samples 2000) so repair cleans ALL
+  //     legacy danglers regardless of graph size.
+  private trustDanglers(): RecallRelation[] {
+    const placeholders = TRUST_RELATION_KINDS.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(`SELECT * FROM graph_relations WHERE kind IN (${placeholders})`)
+      .all(...TRUST_RELATION_KINDS) as unknown as RelationRow[];
+    const danglers: RecallRelation[] = [];
+    for (const row of rows) {
+      const relation = rowToRelation(row);
+      const target = cellReferenceTarget(relation.targetId);
+      if (!this.getNode(relation.sourceId) || !this.getNode(target)) {
+        danglers.push(relation);
+      }
+    }
+    return danglers;
+  }
+
+  unresolvableTrustEdges(): RecallRelation[] {
+    return this.trustDanglers();
+  }
+
+  pruneUnresolvableTrustEdges(): { deleted: number; relations: RecallRelation[] } {
+    // BEGIN IMMEDIATE takes the write lock up front and the scan runs INSIDE the
+    // transaction, so the set we delete is exactly the set we found — no
+    // concurrent writer can resolve or remove an edge between scan and delete.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const danglers = this.trustDanglers();
+      const del = this.db.prepare("DELETE FROM graph_relations WHERE id = ?");
+      for (const relation of danglers) {
+        del.run(relation.id);
+      }
+      this.db.exec("COMMIT");
+      return { deleted: danglers.length, relations: danglers };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   listNodes(limit = 20): RecallNode[] {
