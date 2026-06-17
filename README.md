@@ -197,6 +197,35 @@ repeat. `/recall <topic>` compiles for that topic; bare `/recall` orients on
 recent state. If your memory already lives in a shared or global store, export
 `RECALL_DB` so `/recall` targets it instead of minting an empty local db.
 
+### One-command agent integration (Claude Code & Codex)
+
+The MCP-config-and-system-prompt setup above is also available as a single
+idempotent command per agent runtime. `scripts/install.sh` runs these
+automatically (fail-soft) when the corresponding CLI is present, and you can
+re-run them anytime to refresh to the latest bundled version:
+
+```bash
+recall claude sync     # Claude Code
+recall codex sync      # OpenAI Codex
+recall claude status   # report which pieces are installed (codex status likewise)
+```
+
+**Claude Code** (`recall claude sync`) installs a SessionStart/UserPromptSubmit
+hook that nudges the agent to consult Recall, copies the recall skill into
+`~/.claude/skills/`, registers the recall MCP server in `~/.claude.json`, and
+sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so Recall is the durable memory layer
+instead of Claude Code's built-in note memory (keep native auto-memory with
+`RECALL_KEEP_AUTOMEMORY=1`; revert with `recall claude enable-auto-memory`).
+
+**Codex** (`recall codex sync`) copies the recall skill into
+`~/.codex/skills/`, registers the recall MCP server under `[mcp_servers.recall]`
+in `~/.codex/config.toml`, and injects a marker-delimited Recall directive into
+`~/.codex/AGENTS.md` — Codex's always-read global instructions, the analog of
+Claude Code's SessionStart hook. Codex exposes no native-memory kill switch, so
+Recall is positioned as the durable memory layer at the prompt level via that
+directive. All edits are backed up before write, preserve your existing config,
+and are idempotent.
+
 ## How it works
 
 <div align="center">
@@ -564,7 +593,7 @@ by audience. Highlights:
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 99 unit/integration tests
+npm test          # 130 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 ```
