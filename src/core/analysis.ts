@@ -41,6 +41,19 @@ export interface ContradictionFinding {
   relation: "contradicts" | "concerns";
 }
 
+export interface DanglingEvidenceFinding {
+  relationId: string;
+  kind: string;
+  sourceId: string;
+  targetId: string;
+}
+
+export interface DanglingEvidenceReport {
+  total: number;
+  byKind: Record<string, number>;
+  worst: DanglingEvidenceFinding[];
+}
+
 export interface ProvenanceHealth {
   totalWitnesses: number;
   byOrigin: Record<string, number>;
@@ -75,6 +88,7 @@ export interface MemoryHealthReport {
   beliefs: BeliefPressure[];
   stale: StaleMemoryFinding[];
   contradictions: ContradictionFinding[];
+  danglingEvidence: DanglingEvidenceReport;
   calibration: ActorCalibration[];
   criticalWarnings: CriticalWarning[];
   curiosityTargets: CuriosityTarget[];
@@ -94,6 +108,7 @@ export function analyzeMemory(store: RecallStore, now = new Date()): MemoryHealt
     .sort((a, b) => b.severity - a.severity);
   const contradictions = contradictionFindings(nodes, byId)
     .sort((a, b) => b.severity - a.severity);
+  const danglingEvidence = buildDanglingEvidence(store.unresolvableTrustEdges?.() ?? []);
 
   return {
     createdAt: now.toISOString(),
@@ -102,11 +117,32 @@ export function analyzeMemory(store: RecallStore, now = new Date()): MemoryHealt
     beliefs,
     stale,
     contradictions,
+    danglingEvidence,
     calibration: calibrationFromNodes(nodes),
     criticalWarnings: criticalWarnings(provenance, beliefs, stale, contradictions),
     curiosityTargets: curiosityTargets(provenance, beliefs, stale, contradictions),
-    nextActions: nextActions(provenance, beliefs, stale, contradictions)
+    nextActions: nextActions(provenance, beliefs, stale, contradictions, danglingEvidence)
   };
+}
+
+// Trust edges whose target resolves to no node — inert pollution that never
+// feeds effective confidence but skews the eval and aggregate surface. The
+// count + worst offenders surface in the health report so drift is visible
+// (`recall repair --apply` prunes them).
+function buildDanglingEvidence(
+  relations: { id: string; kind: string; sourceId: string; targetId: string }[]
+): DanglingEvidenceReport {
+  const byKind: Record<string, number> = {};
+  for (const relation of relations) {
+    byKind[relation.kind] = (byKind[relation.kind] ?? 0) + 1;
+  }
+  const worst = relations.slice(0, 10).map((relation) => ({
+    relationId: relation.id,
+    kind: relation.kind,
+    sourceId: relation.sourceId,
+    targetId: relation.targetId
+  }));
+  return { total: relations.length, byKind: sortRecord(byKind), worst };
 }
 
 export function memoryHealthToProposal(
@@ -486,7 +522,8 @@ function nextActions(
   provenance: ProvenanceHealth,
   beliefs: BeliefPressure[],
   stale: StaleMemoryFinding[],
-  contradictions: ContradictionFinding[]
+  contradictions: ContradictionFinding[],
+  danglingEvidence: DanglingEvidenceReport
 ): string[] {
   const actions: string[] = [];
   if (provenance.unknownOriginRatio > 0.2) {
@@ -501,6 +538,9 @@ function nextActions(
   const pressured = beliefs.find((belief) => belief.recommendation !== "trust");
   if (pressured) {
     actions.push(`Reassess belief "${pressured.title}" because recommendation is ${pressured.recommendation}.`);
+  }
+  if (danglingEvidence.total > 0) {
+    actions.push(`Prune ${danglingEvidence.total} dangling/unresolvable trust edge(s) with \`recall repair --apply\` (deletes them; run \`recall repair\` first to preview).`);
   }
   if (actions.length === 0) {
     actions.push("No urgent belief, stale-memory, or contradiction pressure detected.");

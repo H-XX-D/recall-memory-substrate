@@ -71,6 +71,7 @@ interface ParsedArgs {
   acpManager?: string;
   acpToAgent?: string;
   force: boolean;
+  apply: boolean;
 }
 
 function main(): void {
@@ -239,6 +240,17 @@ function main(): void {
         : undefined;
       console.log(JSON.stringify({ report, result }, null, 2));
       process.exitCode = result && !result.accepted ? 1 : 0;
+      return;
+    }
+
+    if (command === "repair") {
+      if (args.apply) {
+        const pruned = store.pruneUnresolvableTrustEdges();
+        console.log(JSON.stringify({ dryRun: false, count: pruned.deleted, relations: pruned.relations }, null, 2));
+      } else {
+        const relations = store.unresolvableTrustEdges();
+        console.log(JSON.stringify({ dryRun: true, count: relations.length, relations }, null, 2));
+      }
       return;
     }
 
@@ -579,6 +591,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let acpManager: string | undefined;
   let acpToAgent: string | undefined;
   let force = false;
+  let apply = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -665,6 +678,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       acpToAgent = requireValue(argv, ++index, "--acp-to-agent");
     } else if (arg === "--force") {
       force = true;
+    } else if (arg === "--apply") {
+      apply = true;
     } else {
       command.push(arg);
     }
@@ -723,7 +738,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     acpStatus,
     acpManager,
     acpToAgent,
-    force
+    force,
+    apply
   };
 }
 
@@ -914,6 +930,7 @@ Commands:
   recall trust [--db path]
   recall calibration [--db path]                                   per-actor stated-confidence vs contradiction outcomes
   recall maintenance [--derive] [--db path]
+  recall repair [--apply] [--db path]                              prune dangling/unresolvable trust edges (dry-run default; --apply deletes)
   recall tick [--derive] [--db path]
   recall page [index|reflections|agent-profile|user-profile|team-metrics|witnesses|workbench|handoffs|objectives|acp-queue|acp-manager] [--project Recall] [--topic memory] [--identity agent:codex] [--limit 25]
   recall cell show <cell-id-or-address> [--db path]
