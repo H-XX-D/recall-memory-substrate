@@ -13,6 +13,7 @@ import { runAcpLoop } from "./core/acp.js";
 import { runDaemonOnce } from "./core/daemon.js";
 import { defaultEvalSuite, type RecallEvalSuite } from "./core/evals.js";
 import { exportRecallArchive, importRecallArchive } from "./core/export.js";
+import { importAutoMemory } from "./core/auto-memory-adapter.js";
 import { buildPageIndex, getRecallPage, type RecallPageName } from "./core/pages.js";
 import { runOperatingCycle } from "./core/operator.js";
 import { validateWriteProposal } from "./core/schema.js";
@@ -72,6 +73,7 @@ interface ParsedArgs {
   acpToAgent?: string;
   force: boolean;
   apply: boolean;
+  root?: string;
 }
 
 function main(): void {
@@ -154,7 +156,7 @@ function main(): void {
     return;
   }
 
-  if (command === "import") {
+  if (command === "import" && subcommand !== "auto-memory") {
     const archive = readJsonArg(args);
     console.log(JSON.stringify({ result: importRecallArchive(args.db, archive, { replace: args.force }) }, null, 2));
     return;
@@ -251,6 +253,12 @@ function main(): void {
         const relations = store.unresolvableTrustEdges();
         console.log(JSON.stringify({ dryRun: true, count: relations.length, relations }, null, 2));
       }
+      return;
+    }
+
+    if (command === "import" && subcommand === "auto-memory") {
+      const summary = importAutoMemory(store, { root: args.root, project: args.project[0], apply: args.apply });
+      console.log(JSON.stringify(summary, null, 2));
       return;
     }
 
@@ -592,6 +600,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let acpToAgent: string | undefined;
   let force = false;
   let apply = false;
+  let root: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -680,6 +689,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       force = true;
     } else if (arg === "--apply") {
       apply = true;
+    } else if (arg === "--root") {
+      root = requireValue(argv, ++index, "--root");
     } else {
       command.push(arg);
     }
@@ -739,7 +750,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     acpManager,
     acpToAgent,
     force,
-    apply
+    apply,
+    root
   };
 }
 
@@ -919,6 +931,7 @@ Commands:
   recall storage [--db path]
   recall export [--db path]                                      print a portable JSON archive to stdout
   recall import --json recall-export.json [--db path] [--force]  restore an archive into an empty db; --force replaces rows
+  recall import auto-memory [--root path] [--project name] [--apply] [--db path]  import Claude Code auto-memory files (dry-run default; --apply writes)
   recall acp [status] [--db path]
   recall acp send --json request.json [--db path]
   recall acp list [--limit 20] [--acp-status queued] [--db path]
