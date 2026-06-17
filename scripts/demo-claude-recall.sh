@@ -36,7 +36,8 @@ G0=$(nodes "$GLOBAL")
 recall init --db "$DB" >/dev/null 2>&1
 printf '{"mcpServers":{"recall":{"type":"stdio","command":"recall-mcp","env":{"RECALL_DB":"%s"}}}}\n' "$DB" > "$CFG"
 TOOLS=(--allowedTools mcp__recall__recall_write mcp__recall__recall_compile mcp__recall__recall_search mcp__recall__recall_cell)
-agent(){ printf '%s│ %sclaude%s '; claude -p "$1" --mcp-config "$CFG" --strict-mcp-config "${TOOLS[@]}" --output-format text 2>&1 | sed "s/^/${cyan}│${off}   ${grey}/; s/$/${off}/"; }
+TERSE="Be terse: reply in at most two short plain-text lines. No markdown headers, no bullet lists, no insight blocks, no preamble — just the answer."
+agent(){ printf '%s│ %sclaude%s '; claude -p "$1" --append-system-prompt "$TERSE" --mcp-config "$CFG" --strict-mcp-config "${TOOLS[@]}" --output-format text 2>&1 | sed "s/^/${cyan}│${off}   ${grey}/; s/$/${off}/"; }
 proof(){ printf '%s│   %s%s\n' "$cyan" "$dim" "$off"; recall compile "$1" --db "$DB" 2>/dev/null | grep -iE "$2" | head -4 | sed "s/^/${cyan}│   ${green}/; s/$/${off}/"; }
 
 # ===========================================================================
@@ -80,3 +81,4 @@ printf '%s│%s %sglobal graph untouched:%s before=%s after=%s   %sthe whole sto
   "$cyan" "$off" "$bold" "$off" "$G0" "$(nodes "$GLOBAL")" "$grey" "$off"
 rm -f "$DB" "$DB-wal" "$DB-shm" "$CFG"
 printf '%s└──────────────────────────────────────────────────────────────%s\n' "$cyan" "$off"
+printf '\n✦ DEMO_COMPLETE\n'
