@@ -45,8 +45,10 @@ contradiction without being asked. No reminding it to save, no separate cloud
 service mining your transcript after the fact. Under the hood an LLM proposes a
 structured write, an admission firewall validates it, and the compiler returns
 only the relevant subgraph, ranked by evidence, fit to a word budget, all in
-local SQLite: no server, no account, no cloud. The memory is yours, and every
-fact still carries provenance, confidence, and a one-command undo.
+local SQLite: no server, no account, no cloud. And the reader is the writer 
+The same model is writing the memory from fresh context. It does rely on an 
+seperate model to assume what gets saved or retrieved The memory is yours, and
+everyfact still carries provenance, confidence, and a one-command undo.
 
 One installable Node.js tool: CLI, read-only TUI, MCP server, quiet
 maintenance daemon, strict write schema, semantic search, encrypted secrets
