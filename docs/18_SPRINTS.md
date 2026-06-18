@@ -184,7 +184,7 @@ Once the sprint is set up, the AI's loop looks like this:
 1. Query Recall: open sprint tasks in project P, ordered by dependencies satisfied
    (filter: kind=task, lifecycle=open, all depends_on targets have lifecycle=done)
 2. If no eligible task: check for blocked tasks needing resolution; if none,
-   sprint is complete or stalled — write reflection cell summarizing state.
+   sprint is complete or stalled, write reflection cell summarizing state.
 3. For the next eligible task:
    a. Mark lifecycle=in-progress (write update cell or supersedure)
    b. Read task body, expected output, acceptance criteria

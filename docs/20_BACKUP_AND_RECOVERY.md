@@ -54,7 +54,7 @@ recall import auto-memory [--root path] [--project name] [--apply] [--db path]
 This imports Claude Code auto-memory files (`~/.claude/projects/<slug>/memory/*.md`)
 as calibrated Recall cells. It is dry-run by default; pass `--apply` to write. It
 is idempotent per file content, and a changed file supersedes its prior version
-via a `contradicts` edge — the migration wedge for owning your memory.
+via a `contradicts` edge.
 
 This is distinct from the JSON-archive restore (`recall import --json`): the
 archive path rehydrates a full graph export, while `import auto-memory` admits

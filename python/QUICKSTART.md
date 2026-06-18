@@ -35,7 +35,7 @@ files (`~/.claude/projects/<slug>/memory/*.md`) into Recall as calibrated cells,
 so you start from a populated graph instead of an empty one:
 
 ```bash
-# Dry-run preview (default — no writes):
+# Dry-run preview (default, no writes):
 recall import auto-memory --project myproject
 
 # Apply (write the calibrated cells):
@@ -44,7 +44,7 @@ recall import auto-memory --project myproject --apply
 
 It is dry-run by default; pass `--apply` to write. The import is idempotent per
 file content, and a changed file supersedes its prior version via a
-`contradicts` edge — the migration wedge for owning your memory. You can also
+`contradicts` edge. You can also
 point at a different store with `--root path` or a different database with
 `--db path`.
 
@@ -86,7 +86,7 @@ Successful admission returns a JSON response with the new cell's ID:
 ## 4. Peek the cell you just wrote
 
 ```bash
-# Cheapest possible probe — just the title (~150 bytes):
+# Cheapest possible probe, just the title (~150 bytes):
 python3 $SCRIPTS/recall_peek.py abc12345 --field title
 
 # Summary with body excerpt + relation counts (~1-2 KB):

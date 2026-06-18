@@ -9,7 +9,7 @@
 <br/>
 <br/>
 
-**The memory layer your agent just uses — it remembers, corrects itself, and recalls across sessions on its own. Local, free, and yours.**
+**The memory layer your agent just uses. It remembers, corrects itself, and recalls across sessions on its own. Local, free, and yours.**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
@@ -38,13 +38,13 @@
 
 **Most agent memory is _pull_: a store you query.** You ask, it returns the
 closest matches, and it is on you to notice when a fact has gone stale. Recall
-is _push_: the agent and the substrate run a loop together — it checks what it
+is _push_: the agent and the substrate run a loop together. It checks what it
 already knows before it acts, does the work, and writes back what it learned,
 _superseding_ the old fact when something changes and surfacing the
 contradiction without being asked. No reminding it to save, no separate cloud
 service mining your transcript after the fact. Under the hood an LLM proposes a
 structured write, an admission firewall validates it, and the compiler returns
-only the relevant subgraph — ranked by evidence, fit to a word budget — all in
+only the relevant subgraph, ranked by evidence, fit to a word budget, all in
 local SQLite: no server, no account, no cloud. The memory is yours, and every
 fact still carries provenance, confidence, and a one-command undo.
 
@@ -72,7 +72,7 @@ readiness lane for MCP smoke, Python hooks/toolkit checks, public benchmarks,
 and installer validation. Upgrades, uninstall, and troubleshooting:
 [Installation Guide](docs/11_INSTALLATION.md).
 
-### Put your agent on Recall — one command
+### Put your agent on Recall in one command
 
 The installer above already wires up any agent CLI it finds. To do it yourself
 (or after installing a new agent), one idempotent command sets up the skill, the
@@ -84,7 +84,7 @@ recall codex sync      # OpenAI Codex:  skill + MCP in config.toml + a Recall di
 recall claude status   # confirm what's wired   (recall codex status for Codex)
 ```
 
-Restart your agent and it's **armed** — it reads memory before relying on
+Restart your agent and it's armed: it reads memory before relying on
 recollection and writes durable findings back on its own; you never tell it to
 "save." Both syncs back up your config before editing, are safe to re-run, and
 are reversible (`recall claude enable-auto-memory`). Using a different MCP
@@ -194,45 +194,45 @@ restore path, including file-level SQLite copies and upgrade safety.
 **Change your mind without losing the past.** Recall's moat is supersession: a
 correction is never an overwrite. You admit a new cell that `--contradicts` the
 old one, and every future read *demotes* the superseded value instead of deleting
-it — the conflict resolves automatically, at read time.
+it; the conflict resolves automatically, at read time.
 
-[![Recall supersession — the old value is preserved-but-demoted, resolved at read time](assets/recall-supersede-demo-poster.png)](assets/recall-supersede-demo.mp4)
+[![Recall supersession: the old value is preserved-but-demoted, resolved at read time](assets/recall-supersede-demo-poster.png)](assets/recall-supersede-demo.mp4)
 
 ▶ Click the frame (or open [`assets/recall-supersede-demo.mp4`](assets/recall-supersede-demo.mp4))
-for a ~17s screencast — a **real, unedited `recall` run**:
+for a ~17s screencast, a real, unedited `recall` run:
 
-- **`v1`** — *"Cache TTL is 60s"* lands at full strength (`eff:0.70`).
-- **`v2 --contradicts v1`** — *"…is 300s."* Read it back and `compile` doesn't
+- **`v1`**: *"Cache TTL is 60s"* lands at full strength (`eff:0.70`).
+- **`v2 --contradicts v1`**: *"…is 300s."* Read it back and `compile` doesn't
   return both as equals: `v1` is demoted to `eff:0.29(challenged)`, `v2` stays
-  high. The old value is **still in the graph** — preserved, queryable, just
+  high. The old value is still in the graph: preserved, queryable, just
   down-weighted.
-- **`v3 --contradicts v2`** — a 3-link chain. `v1` and `v2` collapse to `eff:0`;
+- **`v3 --contradicts v2`**: a 3-link chain. `v1` and `v2` collapse to `eff:0`;
   exactly one live answer remains, the *why-we-changed* trail intact.
-- The run asserts a tripwire — the real graph was untouched (`334 → 334`, a
+- The run asserts a tripwire: the real graph was untouched (`334 → 334`, a
   throwaway db).
 
 Demotion-not-deletion is the line between memory that merely *persists* and
-memory that stays *honest* — the whole point of Recall over a flat note file.
+memory that stays *honest*, the whole point of Recall over a flat note file.
 
 ### See it all working
 
-Every Recall capability has a short, honest screencast — real CLI, real output,
-an isolated graph — with the **full script and the unedited transcript** beside
-each clip. Browse them all in the **[companion gallery](https://h-xx-d.github.io/recall-demos/)**.
+Every Recall capability has a short, honest screencast: real CLI, real output,
+an isolated graph, with the full script and the unedited transcript beside
+each clip. Browse them all in the [companion gallery](https://h-xx-d.github.io/recall-demos/).
 
 | Screencast | What it shows |
 |---|---|
 | **Install in one command** | `recall claude sync` / `recall codex sync` wires the skill, MCP, and consult-Recall hook, and turns off native note-memory |
-| **[Autonomous memory across sessions](assets/recall-claude-demo.mp4)** | three `claude` sessions, natural prompts, nobody says "save" — persist → supersede → cold-session recall |
+| **[Autonomous memory across sessions](assets/recall-claude-demo.mp4)** | three `claude` sessions, natural prompts, nobody says "save"; persist → supersede → cold-session recall |
 | **Supersession mechanics** *(the clip above)* | the `contradicts` edge, read-time demotion, multi-link chains |
-| **Rollback a write** | journaled, reversible undo — archives the node, strips its relations |
+| **Rollback a write** | journaled, reversible undo; archives the node, strips its relations |
 | **Inception** | grounded idea synthesis: a new hypothesis pre-linked (`depends_on`) to its sources |
 | **Effective confidence** | stated vs graph-computed trust, recomputed on every read |
-| **Compile** | ids-first context packets — expand a cell or single field only when needed |
+| **Compile** | ids-first context packets; expand a cell or single field only when needed |
 | **Retrieval** | FTS5 + BM25 with porter stemming and identifier-aware tokenization |
 | **Subgraph** | slice the graph by structured facets (tags), not just search |
 | **Memory health** | `recall beliefs` / `recall maintenance --derive` audits between turns |
-| **Calibration** | per-actor Brier scores — memory that learns who to trust |
+| **Calibration** | per-actor Brier scores; memory that learns who to trust |
 | **Watch programs** | a non-LLM monitor that trips when the graph turns against a belief |
 | **Secrets** | firewall refuses credential shapes; real secrets go in the encrypted side graph |
 | **Diff-aware resume** | what's new, updated, and retracted since you left |
@@ -311,13 +311,13 @@ Already accumulated native auto-memory? `recall import auto-memory [--root path]
 [--project name] [--apply] [--db path]` imports your
 `~/.claude/projects/<slug>/memory/*.md` files into Recall as calibrated cells
 (dry-run by default; pass `--apply` to write). It is idempotent per file content,
-and a changed file supersedes its prior version via a `contradicts` edge — the
+and a changed file supersedes its prior version via a `contradicts` edge, the
 migration wedge for owning your memory.
 
 **Codex** (`recall codex sync`) copies the recall skill into
 `~/.codex/skills/`, registers the recall MCP server under `[mcp_servers.recall]`
 in `~/.codex/config.toml`, and injects a marker-delimited Recall directive into
-`~/.codex/AGENTS.md` — Codex's always-read global instructions, the analog of
+`~/.codex/AGENTS.md`, Codex's always-read global instructions, the analog of
 Claude Code's SessionStart hook. Codex exposes no native-memory kill switch, so
 Recall is positioned as the durable memory layer at the prompt level via that
 directive. All edits are backed up before write, preserve your existing config,
@@ -606,8 +606,8 @@ the code, Solver computes, Recall remembers, Checker attests.
 **Lattice** is the code-analysis layer, and the one part that is an
 enterprise capability rather than open source: access-gated, vetted, and
 not bundled in the OSS distribution. It ingests a codebase over the
-Language Server Protocol into the same typed hypernetwork Recall uses —
-symbols, modules, and the import, call, and reference edges between them —
+Language Server Protocol into the same typed hypernetwork Recall uses
+(symbols, modules, and the import, call, and reference edges between them),
 then runs structural analyses over that graph. `impact` returns a change's
 reverse-reachability blast radius *before* you edit; `hunt` ranks
 structural bugs, including cross-signal findings no single diagnostic
@@ -623,15 +623,15 @@ Checker enforces: reachability tells you where to look, never that a bug
 is proven.
 
 What sets it apart is where the findings go. Lattice grounds everything it
-computes: the hard combinatorial step — the minimum feedback arc set that
-breaks a dependency cycle — routes to Solver's gated QUBO tier and is
+computes: the hard combinatorial step (the minimum feedback arc set that
+breaks a dependency cycle) routes to Solver's gated QUBO tier and is
 verified locally before it is trusted, and results land in Recall as
 addressable, evidence-weighted cells through the same admission gate as
 every other write. A structural regression stops being a console warning
 that scrolls away and becomes a cell with provenance that a deploy gate
 can score and a teammate can compile tomorrow. It ships an MCP server
-built for the agent edit loop — ask `impact` before an edit, gate with
-`hunt` after — served in milliseconds off a graph ingested once and
+built for the agent edit loop (ask `impact` before an edit, gate with
+`hunt` after), served in milliseconds off a graph ingested once and
 cached.
 
 Together they cover memory, verification, computation, and code structure

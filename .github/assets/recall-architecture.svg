@@ -1,5 +1,5 @@
 <svg width="1280" height="520" viewBox="0 0 1280 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Recall architecture: the write, admit, store, compile loop">
-  <title>Recall architecture — the write / admit / store / compile loop</title>
+  <title>Recall architecture: the write / admit / store / compile loop</title>
   <defs>
     <linearGradient id="ar-accent" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#2dd4bf"/>
@@ -72,7 +72,7 @@
 
   <!-- compiled packet return arrow -->
   <path d="M1060 288 V360 H138 V276" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#ar-arrow-accent)"/>
-  <text x="600" y="352" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="13" fill="#5eead4">compiled context packet returns to the model — never the whole store</text>
+  <text x="600" y="352" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="13" fill="#5eead4">compiled context packet returns to the model, never the whole store</text>
 
   <!-- Daemon -->
   <g transform="translate(312, 408)">

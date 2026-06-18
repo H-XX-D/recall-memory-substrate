@@ -19,7 +19,7 @@ active memory rather than passive notes.
 2. Write only through `recall_write`. Do not write SQLite rows directly.
 3. Use `recall.write.v1` exactly. Include actor, intent, content, scope, tags,
    evidence, confidence, provenance, and policy.
-4. Keep routine memory seamless. The agent should propose observations, tasks,
+4. Keep routine memory automatic. The agent should propose observations, tasks,
    risks, decisions, witnesses, and context updates without asking the user to
    manually save them.
 5. Keep secrets out of routine memory. Secret storage requires the explicit CLI
@@ -174,15 +174,15 @@ The generated block uses the `recall-mcp` stdio server:
 }
 ```
 
-## Field Reference (authoritative — from `src/core/schema.ts`)
+## Field Reference (authoritative, from `src/core/schema.ts`)
 
 All nine top-level blocks are required: `actor`, `intent`, `content`, `scope`,
 `tags`, `evidence`, `confidence`, `provenance`, `policy`. Plus `schema_version`,
 which must equal `recall.write.v1`.
 
-- **actor** — `kind` ∈ `llm | human | daemon | connector | program`;
+- **actor**: `kind` ∈ `llm | human | daemon | connector | program`;
   `id` required non-empty string; `display` optional string.
-- **intent** — `kind` ∈ `observation | witness | belief_update | task |
+- **intent**: `kind` ∈ `observation | witness | belief_update | task |
   objective | goal | decision | risk | constraint | contradiction | conflict |
   hypothesis | lemma | question | assumption | preference | checkpoint |
   artifact | source | domain | transfer | action | trust | meta | reflection |
@@ -190,50 +190,50 @@ which must equal `recall.write.v1`.
   context_packet | work_candidate | proxy_score | verification_result |
   blind_lock | allocation_plan | miss`;
   `operation` ∈ `create | update | supersede | link | archive`.
-- **content** — `title` required string; `body` required string;
+- **content**: `title` required string; `body` required string;
   `summary` optional string.
-- **scope** — `project` required string; `tenant` required string;
+- **scope**: `project` required string; `tenant` required string;
   `path` optional string; `session` optional string.
-- **tags** — **required families (each a non-empty string array):** `topics`,
-  `entities`, `rings`, `lifecycle`, `quality`. **Optional string arrays:**
+- **tags**: required families (each a non-empty string array): `topics`,
+  `entities`, `rings`, `lifecycle`, `quality`. Optional string arrays:
   `category`, `type`, `subject`, `project`, `idea`, `timestamp`, `identities`,
   `sensitivity`, `permission`. The optional `category/type/subject/project/idea/
-  timestamp` facets are free-form but power `recall_subgraph` — include them when
+  timestamp` facets are free-form but power `recall_subgraph`; include them when
   known. There is no enforced enum on tag values; use stable, lowercase, kebab
   strings. `rings` has no schema enum but its conventional values are
   `foundation`, `runtime`, and `connector` (the architecture rings); `runtime`
   is the safe default for ordinary agent memory.
-- **evidence** — all five are required string arrays (empty `[]` is allowed):
+- **evidence**: all five are required string arrays (empty `[]` is allowed):
   `source_refs`, `depends_on`, `supports`, `contradicts`, `concerns`.
-- **confidence** — `value`, `uncertainty`, `concern` are required numbers in
+- **confidence**: `value`, `uncertainty`, `concern` are required numbers in
   `[0, 1]`; `source_quality` ∈ `unknown | low | medium | high`;
   `stability` ∈ `ephemeral | volatile | stable`.
-- **provenance** — `created_at` required ISO-8601 date string; `origin` ∈
+- **provenance**: `created_at` required ISO-8601 date string; `origin` ∈
   `human | llm | daemon | connector | program | external`; `produced_by`
   required string; `verification` ∈ `unverified | checked | tested | external`;
   `signature_status` ∈ `unsigned | signed | verified`.
-- **policy** — `sensitivity` ∈ `public | private | secret`;
+- **policy**: `sensitivity` ∈ `public | private | secret`;
   `allow_background_use` and `requires_review` are required booleans;
   `expires_at` and `reverify_after` are ISO-8601 date strings OR `null`.
 
-Validate before admitting — a malformed proposal lists every failing field path.
+Validate before admitting; a malformed proposal lists every failing field path.
 
 ### Filling in judgment fields
 
 Some required fields are schema-valid with any in-range value; use these
 conventions for consistency across sessions:
 
-- **`actor.id` and `provenance.produced_by`** — use a stable agent identifier,
+- **`actor.id` and `provenance.produced_by`**: use a stable agent identifier,
   e.g. `claude-code`. Do not invent a new id per write; consistent provenance is
   what makes memory auditable.
-- **`confidence`** — for a fact stated directly by the user: `value` ≈ 0.9,
+- **`confidence`**: for a fact stated directly by the user: `value` ≈ 0.9,
   `uncertainty` ≈ 0.1, `concern` ≈ 0.0, `source_quality` `high`,
-  `verification` `checked`. For an inference you drew: `value` ≈ 0.5–0.7,
+  `verification` `checked`. For an inference you drew: `value` ≈ 0.5 to 0.7,
   higher `uncertainty`, `source_quality` `medium`, `verification` `unverified`.
-- **`scope.project`** — use the working project's name. For a genuinely
+- **`scope.project`**: use the working project's name. For a genuinely
   cross-project personal fact, use a stable label such as `personal` rather than
   inventing a new project name each time.
-- **`stability`** — `stable` for durable facts/preferences, `volatile` for
+- **`stability`**: `stable` for durable facts/preferences, `volatile` for
   things expected to change, `ephemeral` for short-lived task state.
 
 ## CLI Write Path
@@ -248,11 +248,11 @@ recall admit    --json proposal.json --db ~/.recall/recall.sqlite3
 ```
 
 `recall validate` reports `"ok": true` with `"issues": []` for a valid proposal
-(it also echoes the full normalized proposal under a `"value"` key — check `ok`,
+(it also echoes the full normalized proposal under a `"value"` key; check `ok`,
 not the exact object shape). `recall admit` returns `"accepted": true` with the new cell `id`,
 `cellAddress`, and a rollback journal id. `recall admit` is the CLI equivalent of
 `recall_write`; `recall --help` labels it "agent/debug path" but it is the
-correct and only CLI write path — admission still runs the full firewall,
+correct and only CLI write path. Admission still runs the full firewall,
 attenuation, provenance, and rollback machinery.
 
 ## Reference Policy
