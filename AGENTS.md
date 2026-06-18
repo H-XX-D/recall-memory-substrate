@@ -51,11 +51,11 @@ beliefs, tasks, risks, decisions, contradictions, programs, and provenance
 outside the LLM context window. The LLM receives only compiled, task-specific
 context packets.
 
-**Recall is your durable memory — use it, not scratch files or note memory.** A
+**Recall is your durable memory: use it, not scratch files or note memory.** A
 durable fact written anywhere but Recall is invisible to the conflict and
 effective-confidence machinery and goes silently stale. And when you learn
 something that **corrects or invalidates** an earlier fact, do not overwrite it
-or add an unlinked duplicate — **supersede it**: admit the new cell with
+or add an unlinked duplicate; **supersede it** by admitting the new cell with
 `evidence.contradicts` pointing at the prior cell id. Recall then demotes the
 old cell and marks it challenged, so every future session sees the current
 answer *and* that the old one was overruled. Superseding is the line between
@@ -104,7 +104,7 @@ The loop is **compile → work → write back**:
    existing fact, first `recall_search` for the prior cell, then admit the new
    one with `evidence.contradicts: ["<prior-cell-id>"]`. A correction without
    that link leaves two competing cells and no resolution.
-5. Never claim memory was saved if the write was rejected — confirm the
+5. Never claim memory was saved if the write was rejected; confirm the
    `accepted: true` cell id before reporting it as stored.
 
 Full contract, proposal shape, and tag families:

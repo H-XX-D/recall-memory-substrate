@@ -1,7 +1,7 @@
 # Recall Benchmark: operator-style vs naive retrieval
 
 **Methodology**: same DB, same queries, two retrieval strategies.
-`recall search` (naive, returns full cell bodies — vector-RAG cost profile)
+`recall search` (naive, returns full cell bodies, vector-RAG cost profile)
 vs operator-style (compile / diff / health-peek / peek-match as appropriate).
 Relevance = does response contain expected substring (cheap proxy).
 Bytes ≈ tokens × 4 (rough heuristic).
@@ -25,7 +25,7 @@ Bytes ≈ tokens × 4 (rough heuristic).
 | Total bytes | 984,857 | 27,825 | 16,825 | 58.5× |
 | Total est tokens | 246,211 | 6,953 | 4,204 | 58.6× |
 | Mean bytes per query | 140,693 | 3,975 | 2,403 | 58.5× |
-| Relevance hits | 7/7 | 5/7 | 6/7 | — |
+| Relevance hits | 7/7 | 5/7 | 6/7 | n/a |
 
 ## Latency
 
@@ -40,8 +40,8 @@ multiple probes per turn (which it usually does).
 
 **Relevance gap (4/7 vs 7/7)**: the operator side missed the substring
 check on 3 compile-based queries. Per-query investigation shows the
-substring exists in the graph — `recall_peek --match` finds it directly
-— but `recall compile`'s lexical ranking surfaced a different cell as
+substring exists in the graph (`recall_peek --match` finds it directly),
+but `recall compile`'s lexical ranking surfaced a different cell as
 its top expansion handle. The misses are `recall compile` ranking
 issues, not operator-mode being unable to answer:
 

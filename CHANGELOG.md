@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   primary graph and were searchable. The pattern set now covers these common
   secret shapes (verified by new tests), while still passing benign prose that
   merely mentions security words. The skill docs and README now describe the
-  firewall honestly as a **high-recall heuristic backstop, not a guarantee** —
-  real secrets still belong in the encrypted side graph.
+  firewall honestly as a high-recall heuristic backstop, not a guarantee.
+  Real secrets still belong in the encrypted side graph.
 
 ### Fixed
 
@@ -46,11 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Codex integration** (`recall codex sync` / `recall codex status`,
   `src/core/codex-integration.ts`, `integrations/codex/`): idempotently wires
   Recall into the OpenAI Codex CLI to the same standard as the Claude Code
-  integration — installs the recall skill into `~/.codex/skills/recall/`,
+  integration: installs the recall skill into `~/.codex/skills/recall/`,
   registers the `[mcp_servers.recall]` server in `~/.codex/config.toml` (a pure,
   unit-tested TOML upsert that preserves other servers/config), and injects a
   marker-delimited Recall directive into `~/.codex/AGENTS.md` (Codex's
-  always-read global instruction surface — the analog of Claude's SessionStart
+  always-read global instruction surface, the analog of Claude's SessionStart
   hook). Codex exposes no single native-memory kill switch, so displacement is
   prompt-level via the AGENTS.md directive. `scripts/install.sh` and
   `scripts/install-local.sh` run `recall codex sync` (fail-soft) when the Codex
@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auto-memory (the flat `MEMORY.md` index + per-fact `.md` store). Models
   auto-memory faithfully (real nested-frontmatter format, overwrite-in-place on
   correction) and drives Recall via the repo's own built CLI on an isolated
-  `--db`. Eight scenarios (B1–B8): ties on the basics (persist/recall, correction
+  `--db`. Eight scenarios (B1 to B8): ties on the basics (persist/recall, correction
   reaches current value), Recall wins on supersession audit trail,
   cross-session resolution inheritance, structured confidence/provenance, and
   bounded context cost at scale; auto-memory is cheaper at small store sizes
@@ -79,8 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [--db path]`): imports Claude Code auto-memory files
   (`~/.claude/projects/<slug>/memory/*.md`) into Recall as calibrated cells.
   Dry-run by default; `--apply` writes. Idempotent per file content; a changed
-  file supersedes its prior version via a `contradicts` edge — the migration
-  wedge for owning your memory and canceling the subscription.
+  file supersedes its prior version via a `contradicts` edge. This is the
+  migration path for owning your memory and canceling the subscription.
 - **`recall repair`** (`[--apply] [--db path]`): prunes dangling/unresolvable
   trust edges; dry-run by default, `--apply` deletes.
 
@@ -92,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surface and 162-test suite.
 - **Claude Code hook** (`integrations/claude/hooks/recall-session-start.py`): the
   SessionStart activity summary no longer mislabels a graph-wide diff as "scoped
-  to this directory" — the scope is now derived from `recall project where` and
+  to this directory"; the scope is now derived from `recall project where` and
   labelled accurately (`graph-wide (global memory)` vs `scoped to project '<x>'`).
   The hook now also gates the diff on a clean subprocess exit, so a failed diff
   that prints partial/garbage text to stdout can never be injected into model
@@ -255,7 +255,7 @@ memory.
   (point-in-time score) and `python/hooks/longitudinal_tracker.py`
   (snapshot + trajectory analysis: rationale quality, rework rate,
   enforcement events, continuity value).
-- Comprehensive test suites: `python/hooks/test_hooks.py` (hook +
+- Test suites: `python/hooks/test_hooks.py` (hook +
   tracker + adapter tests), `python/tests/system_tests.py` (10
   stress + 10 capability tests), `python/tests/competitive_tests.py`
   (head-to-head matrix vs 6 competitor memory architectures).

@@ -1,4 +1,4 @@
-# Recall for Code — Reference
+# Recall for Code Reference
 
 > Companion to `llm-integration.md`. Documents the code-aware extension
 > that makes Recall usable as the epistemic-memory substrate for AI
@@ -17,7 +17,7 @@ make the graph useful across sessions.
 | TypeScript | `recall_code_extract_js.py` | regex-based + TS-aware | `.ts`, `.tsx` |
 
 The Python extractor uses real AST parsing and catches everything. The
-JS/TS extractor uses regex-based scanning — high fidelity for the common
+JS/TS extractor uses regex-based scanning, high fidelity for the common
 ~80% of code, but misses computed property names, decorators, complex
 destructuring, and dynamic declarations. Tree-sitter-backed v2 will close
 that gap. For the current v1.2 release, regex is the deps-free trade-off.
@@ -28,17 +28,17 @@ that gap. For the current v1.2 release, regex is the deps-free trade-off.
    module (file) and one per top-level symbol (function, class, async
    function, const arrow function, TypeScript interface, TypeScript type
    alias, optionally methods).
-2. **Writes cells through the standard schema** — same `recall.write.v1`
+2. **Writes cells through the standard schema**: the same `recall.write.v1`
    write path used everywhere else. Code cells are not a separate cell
    type; they are conventional uses of `kind=artifact` with code-specific
    tag families.
-3. **Captures structural metadata** — signature, line range, docstring,
+3. **Captures structural metadata**: signature, line range, docstring,
    decorators, imports, references, file path. Body excerpt up to 2 KB.
-4. **Stays discoverable via entity tags** — `py-sym:<name>`,
+4. **Stays discoverable via entity tags**: `py-sym:<name>`,
    `py-import:<module>`, `py-ref:<name>`, `code`, `python`, the file stem.
    `recall_subgraph` and `recall_search` find code cells by these tags
    without needing typed relations yet.
-5. **Integrates via git hooks** — a `post-commit.sample` hook re-extracts
+5. **Integrates via git hooks**: a `post-commit.sample` hook re-extracts
    changed files on every commit, keeping the graph current.
 
 ## What the extension does NOT yet do (v1.2 limits)
@@ -97,10 +97,10 @@ that gap. For the current v1.2 release, regex is the deps-free trade-off.
   tests get `kind=risk`, skipped get `kind=observation`. Each test result
   is linked to its function-under-test cell via typed hyperedges:
   `test-supports` for passes, `test-contradicts` for failures. Skipped
-  tests get cells only (no edge — they're informational, not contradictory).
+  tests get cells only (no edge; they're informational, not contradictory).
 - **Function-under-test resolution** strips `test_` prefix and tries both
   the bare name and the underscore-prefixed variant (`test_foo` matches
-  both `foo` and `_foo` — handles the common Python pattern of testing
+  both `foo` and `_foo`; handles the common Python pattern of testing
   private helpers by their bare name).
 - **Pipeline-ready**: `--run-id` for CI run identifiers (commit SHA,
   build number), `--stats-only` for pre-commit previews, `--no-edges` for
@@ -156,7 +156,7 @@ title: "<kind>: <file>::<name>"           # kind ∈ function|class|async-functi
 body: |
   # <kind>: <name>
   **File:** `<path>`
-  **Lines:** <start>–<end>
+  **Lines:** <start> to <end>
   **Signature:** `def name(...) -> ...`
   **Parent class:** `<class>`              # if method
   **Decorators:** `@dec1, @dec2`
@@ -264,12 +264,12 @@ Tells you cell count before committing to the writes.
 
 ### Useful flags
 
-- `--include-private` — also extract symbols starting with `_`
-- `--methods-as-cells` — emit a cell per class method, not just class cells
-- `--exclude-tests` — skip files matching test path patterns
-- `--limit N` — cap on number of proposals emitted (debugging aid)
-- `--repo-label LABEL` — entity tag for cross-cell repo grouping (defaults to `--project`)
-- `--rebuild` — idempotent re-extraction. Requires `--admit`. After admitting
+- `--include-private`: also extract symbols starting with `_`
+- `--methods-as-cells`: emit a cell per class method, not just class cells
+- `--exclude-tests`: skip files matching test path patterns
+- `--limit N`: cap on number of proposals emitted (debugging aid)
+- `--repo-label LABEL`: entity tag for cross-cell repo grouping (defaults to `--project`)
+- `--rebuild`: idempotent re-extraction. Requires `--admit`. After admitting
   new cells, queries existing cells with the same `scope.path` and creates
   `code-superseded-by` hyperedges (old → new, matched by title). Old cells
   stay in graph; new cells are active.
@@ -362,7 +362,7 @@ Future bug-fix work starts with the institutional memory, not blank.
 
 This is the long-horizon agent pattern that current code tools can't do.
 
-### Pattern 6: "I was away — what changed while I was gone?"
+### Pattern 6: "I was away, what changed while I was gone?"
 
 ```text
 1. recall_diff.py --project my-repo --since 1d --summary    (or 2h, 7d, etc.)
@@ -376,7 +376,7 @@ This is the long-horizon agent pattern that current code tools can't do.
 Cheaper than re-reading the full graph; sharper than chronological
 log-tailing; structured enough that the agent can decide what to fetch
 in full vs. trust the summary for. The supersede-events section is
-especially useful — it surfaces "code that was replaced" so the agent
+especially useful: it surfaces "code that was replaced" so the agent
 doesn't re-derive things based on now-stale cells.
 
 ## Git hook installation
@@ -445,7 +445,7 @@ is recommended.
 None of the above have typed contradictions, calibrated confidence,
 supersedure-preserved history, or curated compile. Recall for Code adds
 the epistemic-discipline layer to whatever existing code-context tools
-you already use — it complements rather than replaces.
+you already use; it complements rather than replaces.
 
 ## Dogfood test (this session)
 

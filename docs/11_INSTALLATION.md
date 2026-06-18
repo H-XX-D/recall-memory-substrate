@@ -78,7 +78,7 @@ npm run verify:full
 
 ## Put your agent on Recall (one command)
 
-The fastest path — and what `scripts/install.sh` runs automatically for any
+The fastest path, and what `scripts/install.sh` runs automatically for any
 supported agent CLI it detects. Each command is idempotent (safe to re-run on
 every update) and backs up your config before editing.
 
@@ -94,7 +94,7 @@ recall claude enable-auto-memory   # revert: re-enable Claude's native note-memo
 
 Keep native auto-memory during sync with `RECALL_KEEP_AUTOMEMORY=1`. Touches
 `~/.claude/skills/recall/`, `~/.claude.json` (MCP), and `~/.claude/settings.json`
-(hook + env) — nothing else.
+(hook + env), and nothing else.
 
 Bring your existing Claude Code auto-memory along:
 
@@ -103,7 +103,7 @@ recall import auto-memory [--root path] [--project name] [--apply] [--db path]
 ```
 
 This imports `~/.claude/projects/<slug>/memory/*.md` files into Recall as
-calibrated cells. It is dry-run by default — pass `--apply` to write. The
+calibrated cells. It is dry-run by default; pass `--apply` to write. The
 import is idempotent per file content, and a changed file supersedes its prior
 version via a `contradicts` edge: own your memory, cancel the subscription.
 
@@ -117,7 +117,7 @@ recall codex status    # report which pieces are installed
 ```
 
 Codex exposes no native-memory kill switch, so displacement is prompt-level via
-the AGENTS.md directive. **Restart the agent after either sync** and it's armed —
+the AGENTS.md directive. Restart the agent after either sync and it's armed:
 it consults memory before relying on recollection and writes durable findings
 back on its own; you never have to tell it to "save."
 
