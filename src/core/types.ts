@@ -326,7 +326,7 @@ export interface Hyperedge {
 
 export interface HyperedgeProgramSpec {
   schemaVersion: "recall.program.v1";
-  operation: "score" | "emit_witness" | "tag_projection" | "watch" | "drift" | "quorum";
+  operation: "score" | "emit_witness" | "tag_projection" | "watch" | "drift" | "quorum" | "trend";
   description?: string;
   params?: Record<string, unknown>;
 }

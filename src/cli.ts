@@ -7,6 +7,7 @@ import { analyzeCalibration } from "./core/calibration.js";
 import { inspectCell } from "./core/cell-context.js";
 import { compileContext, formatContextPacket } from "./core/context-compiler.js";
 import { buildInceptionScaffold } from "./core/inception.js";
+import { buildTrendScaffold } from "./core/trend-scaffold.js";
 import { runCognitiveTick } from "./core/cognitive.js";
 import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle } from "./core/acp.js";
 import { runAcpLoop } from "./core/acp.js";
@@ -413,6 +414,13 @@ function main(): void {
         createdAt: new Date().toISOString(),
         budgetWords: args.words
       });
+      console.log(JSON.stringify(scaffold, null, 2));
+      return;
+    }
+
+    if (command === "trend") {
+      const objective = args.query ?? args.command.slice(1).join(" ");
+      const scaffold = buildTrendScaffold(store, { objective });
       console.log(JSON.stringify(scaffold, null, 2));
       return;
     }
@@ -1010,7 +1018,8 @@ Commands:
   recall hyperedge show <hyperedge-id> [--db path]
   recall hyperedge list [--limit 20] [--db path]
   recall program add <hyperedge-id> --json program.json [--db path]
-      program.json = { "schemaVersion": "recall.program.v1", "operation": "score|watch|drift|quorum", "params": { "delta": 0.1, "concernTarget": "<cell-id>", "k": 2, "minEff": 0.7 } }
+      program.json = { "schemaVersion": "recall.program.v1", "operation": "score|watch|drift|quorum|trend", "params": { "delta": 0.1, "concernTarget": "<cell-id>", "k": 2, "minEff": 0.7, "window": 8, "streak": 3, "measure": "effective_confidence|member_count" } }
+  recall trend "<objective>" [--query q]   scaffold a trend program (direction, slope, acceleration over a series) for the agent to fill and attach
   recall program list [--limit 20] [--db path]
   recall program show <program-id> [--db path]
   recall program run <program-id> [--derive] [--db path]

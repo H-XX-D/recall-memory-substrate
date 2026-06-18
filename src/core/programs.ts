@@ -48,7 +48,7 @@ export function validateProgramSpec(value: unknown): HyperedgeProgramSpec {
     throw new Error("Program spec schemaVersion must be recall.program.v1");
   }
   const operations: HyperedgeProgramSpec["operation"][] = [
-    "score", "emit_witness", "tag_projection", "watch", "drift", "quorum"
+    "score", "emit_witness", "tag_projection", "watch", "drift", "quorum", "trend"
   ];
   if (
     typeof value.operation !== "string" ||
@@ -81,6 +81,9 @@ function executeSpec(
   }
   if (spec.operation === "quorum") {
     return executeQuorum(spec, hyperedge, members, effective);
+  }
+  if (spec.operation === "trend") {
+    return executeTrend(spec, hyperedge, members, effective, previousRun ?? null);
   }
   if (spec.operation === "score") {
     const confidenceValues = members
@@ -373,6 +376,127 @@ function executeQuorum(
       memberReferences: memberReferences(hyperedge, members)
     }
   };
+}
+
+// Trend: discrete calculus over the run-history series. Each run appends the
+// bundle's current value (mean effective confidence, or member count) to a
+// sliding window carried in the output, then reads off finite differences:
+// direction (sign of the overall slope), slope (the first difference, a
+// discrete rate), and acceleration (late slope minus early slope, a discrete
+// second difference). These are finite differences, not continuous calculus —
+// no limit is taken, because the data is a discrete series. It trips on a
+// directional streak at or past `streak`, or a slope at or past `delta`, and
+// files a witness through admission like watch and drift. The first run
+// establishes the series and never trips: there is no prior step to compare.
+function executeTrend(
+  spec: HyperedgeProgramSpec,
+  hyperedge: Hyperedge,
+  members: RecallNode[],
+  effective: ReadonlyMap<string, number> | undefined,
+  previousRun: ProgramRun | null
+): Record<string, unknown> {
+  const window = typeof spec.params?.window === "number" && spec.params.window >= 2
+    ? Math.floor(spec.params.window)
+    : 8;
+  const delta = typeof spec.params?.delta === "number" && spec.params.delta > 0
+    ? spec.params.delta
+    : 0.1;
+  const streakThreshold = typeof spec.params?.streak === "number" && spec.params.streak >= 1
+    ? Math.floor(spec.params.streak)
+    : 3;
+  const measure = spec.params?.measure === "member_count" ? "member_count" : "effective_confidence";
+
+  let current: number;
+  if (measure === "member_count") {
+    current = members.length;
+  } else {
+    const liveValues = members
+      .map((node) => effective?.get(node.id) ?? confidenceValue(node))
+      .filter((value): value is number => value !== null);
+    current = liveValues.length === 0
+      ? 0
+      : round(liveValues.reduce((sum, value) => sum + value, 0) / liveValues.length);
+  }
+
+  const prior = previousRun && Array.isArray(previousRun.output.series)
+    ? (previousRun.output.series as unknown[]).filter((value): value is number => typeof value === "number")
+    : [];
+  let series = [...prior, current];
+  if (series.length > window) {
+    series = series.slice(-window);
+  }
+  const n = series.length;
+
+  // first differences (the discrete derivative): the step between each pair
+  const steps: number[] = [];
+  for (let i = 0; i + 1 < n; i += 1) {
+    steps.push(round(series[i + 1]! - series[i]!));
+  }
+
+  // overall slope = mean step = (last - first) / (points - 1)
+  const slope = n >= 2 ? round((series[n - 1]! - series[0]!) / (n - 1)) : 0;
+  const direction = slope > 0 ? "ascending" : slope < 0 ? "descending" : "stable";
+
+  // streak: trailing steps that share the latest step's sign (signed count)
+  let streak = 0;
+  if (steps.length > 0) {
+    const lastSign = Math.sign(steps[steps.length - 1]!);
+    if (lastSign !== 0) {
+      let count = 0;
+      for (let i = steps.length - 1; i >= 0; i -= 1) {
+        if (Math.sign(steps[i]!) === lastSign) {
+          count += 1;
+        } else {
+          break;
+        }
+      }
+      streak = lastSign * count;
+    }
+  }
+  const streakMagnitude = Math.abs(streak);
+
+  // acceleration = late-half slope minus early-half slope (second difference)
+  let acceleration = 0;
+  if (n >= 3) {
+    const mid = Math.floor(n / 2);
+    const earlySlope = (series[mid]! - series[0]!) / mid;
+    const lateSlope = (series[n - 1]! - series[mid]!) / (n - 1 - mid);
+    acceleration = round(lateSlope - earlySlope);
+  }
+
+  const tripped = n >= 2 && (streakMagnitude >= streakThreshold || Math.abs(slope) >= delta);
+
+  const output: Record<string, unknown> = {
+    operation: spec.operation,
+    hyperedgeId: hyperedge.id,
+    memberCount: members.length,
+    memberReferences: memberReferences(hyperedge, members),
+    measure,
+    current,
+    series,
+    direction,
+    slope,
+    acceleration,
+    streak,
+    streakMagnitude,
+    window,
+    delta,
+    streakThreshold,
+    tripped
+  };
+  if (tripped) {
+    const word = direction === "ascending" ? "rising" : direction === "descending" ? "falling" : "moving";
+    output.witness = {
+      title: `Trend tripped: ${hyperedge.title} ${word} (slope ${slope}, accel ${acceleration}, streak ${streakMagnitude})`,
+      summary:
+        `Tracked value moved ${series[0]} -> ${series[n - 1]} over ${n} runs, ${direction} ` +
+        `with slope ${slope} and acceleration ${acceleration}; streak ${streakMagnitude} vs ` +
+        `threshold ${streakThreshold}, delta ${delta}. ${members.length} member cells observed.`,
+      memberAddresses: members.map((node) => node.cellAddress),
+      memberReferences: memberReferences(hyperedge, members)
+    };
+  }
+  return output;
 }
 
 function memberReferences(hyperedge: Hyperedge, members: RecallNode[]): Record<string, unknown>[] {
