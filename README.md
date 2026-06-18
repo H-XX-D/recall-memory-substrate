@@ -42,10 +42,10 @@ is _push_: the agent and the substrate run a loop together. It checks what it
 already knows before it acts, does the work, and writes back what it learned,
 _superseding_ the old fact when something changes and surfacing the
 contradiction without being asked. No reminding it to save, no separate cloud
-service mining your transcript after the fact. Under the hood an LLM proposes a
-structured write, an admission firewall validates it, and the compiler returns
-only the relevant subgraph, ranked by evidence, fit to a word budget, all in
-local SQLite: no server, no account, no cloud. The reader is the writer 
+service mining your transcript after the fact. Under the hood a single agent 
+LLM proposes a structured write, an admission firewall validates it, and the
+compiler returnsonly the relevant subgraph, ranked by evidence, fit to a word 
+budget, all inlocal SQLite: no server, no account, no cloud. The reader is the writer 
 The same model is writing the memory from fresh context. It doesn't rely on a
 seperate model to assume what gets saved or retrieved. The memory is yours, and
 every fact still carries provenance, confidence, and a one-command undo.
