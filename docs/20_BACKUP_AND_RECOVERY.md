@@ -42,6 +42,24 @@ recall import --json recall-export.json --db .recall/recall.sqlite3 --force
 
 Use `--force` only after making a file-level copy of the current database.
 
+## Import Claude Code Auto-Memory
+
+The archive restore above (`recall import --json`) is one import path. The other
+brings existing Claude Code auto-memory into Recall:
+
+```bash
+recall import auto-memory [--root path] [--project name] [--apply] [--db path]
+```
+
+This imports Claude Code auto-memory files (`~/.claude/projects/<slug>/memory/*.md`)
+as calibrated Recall cells. It is dry-run by default; pass `--apply` to write. It
+is idempotent per file content, and a changed file supersedes its prior version
+via a `contradicts` edge — the migration wedge for owning your memory.
+
+This is distinct from the JSON-archive restore (`recall import --json`): the
+archive path rehydrates a full graph export, while `import auto-memory` admits
+flat memory markdown files as new cells.
+
 ## File-Level Copy
 
 For a same-machine backup, stop long-running MCP/daemon clients if practical,

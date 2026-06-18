@@ -47,7 +47,7 @@ checkout and rebuilds. It is also the upgrade path for this option.
 git clone https://github.com/H-XX-D/recall-memory-substrate.git
 cd recall-memory-substrate
 npm install
-npm test             # verify the checkout: 138 unit/integration tests
+npm test             # verify the checkout: 162 unit/integration tests
 npm run install:local   # build + npm link → global `recall` / `recall-mcp`
 ```
 
@@ -68,7 +68,7 @@ are git-ignored by default.
 From a source checkout you can also run the full verification suite:
 
 ```bash
-npm test          # 138 unit/integration tests
+npm test          # 162 unit/integration tests
 npm run e2e       # 94 end-to-end checks
 npm run smoke     # init + status on a throwaway db
 npm run smoke:mcp # stdio MCP initialize + tools/list smoke
@@ -95,6 +95,17 @@ recall claude enable-auto-memory   # revert: re-enable Claude's native note-memo
 Keep native auto-memory during sync with `RECALL_KEEP_AUTOMEMORY=1`. Touches
 `~/.claude/skills/recall/`, `~/.claude.json` (MCP), and `~/.claude/settings.json`
 (hook + env) — nothing else.
+
+Bring your existing Claude Code auto-memory along:
+
+```bash
+recall import auto-memory [--root path] [--project name] [--apply] [--db path]
+```
+
+This imports `~/.claude/projects/<slug>/memory/*.md` files into Recall as
+calibrated cells. It is dry-run by default — pass `--apply` to write. The
+import is idempotent per file content, and a changed file supersedes its prior
+version via a `contradicts` edge: own your memory, cancel the subscription.
 
 **OpenAI Codex:**
 
@@ -149,6 +160,13 @@ maintenance directly instead:
 ```bash
 recall daemon run-once --derive
 recall daemon run --interval-ms 60000
+```
+
+`recall repair` prunes dangling or unresolvable trust edges. It is dry-run by
+default; pass `--apply` to delete:
+
+```bash
+recall repair [--apply] [--db path]
 ```
 
 ## Upgrading

@@ -13,7 +13,7 @@ and quick examples, start with the top-level [`../README.md`](../README.md).
 |---|---|
 | [`11_INSTALLATION.md`](11_INSTALLATION.md) | Installing Recall on a fresh machine; Node version requirements; standard install locations |
 | [`05_CLI_TUI.md`](05_CLI_TUI.md) | Command-line surface and the read-only terminal UI |
-| [`20_BACKUP_AND_RECOVERY.md`](20_BACKUP_AND_RECOVERY.md) | Portable graph export/import, file-level backups, rollback, and upgrade safety |
+| [`20_BACKUP_AND_RECOVERY.md`](20_BACKUP_AND_RECOVERY.md) | Portable graph export/import, file-level backups, rollback, and upgrade safety; plus `recall import auto-memory` to bring existing Claude Code auto-memory files in as calibrated cells |
 | [`LLM_INTEGRATION.md`](LLM_INTEGRATION.md) | Full operating contract for LLM agents: read this before composing your first write proposal |
 | [`LLM_SYSTEM_PROMPT.md`](LLM_SYSTEM_PROMPT.md) | Drop-in system prompt that teaches an LLM how to use Recall |
 | [`../python/QUICKSTART.md`](../python/QUICKSTART.md) | Verified end-to-end walkthrough using the Python client toolkit |
@@ -113,7 +113,7 @@ Recall 0.2.x) is:
 | `recall init` | None | 11, LLM_INTEGRATION |
 | `recall version` | None | 05, 11 |
 | `recall status` / `storage` | None | 11 |
-| `recall export` / `import` | None | 05, 20 |
+| `recall export` / `import` | `import`: `auto-memory` (also archive restore) | 05, 20 |
 | `recall tui` | None | 05 |
 | `recall validate` | None | 02, 05 |
 | `recall admit` / `write-propose` | None | 02, 05 |
@@ -132,11 +132,14 @@ Recall 0.2.x) is:
 | `recall operate` | `once`, `list`, `show` | 13 |
 | `recall acp` | `status`, `send`, `list`, `show`, `process`, `run` | 13 |
 | `recall beliefs` / `trust` / `calibration` | None | 13 |
-| `recall maintenance` / `tick` / `compact` | None | 13 |
+| `recall maintenance` / `tick` / `compact` / `repair` | None | 13 |
 | `recall blind-lock` | `add` | 13 |
 | `recall daemon` | `status`, `run-once`, `run`, `plist`, `install`, `uninstall`, `service-status` | 13 |
 | `recall secrets` | `list`, `save`, `get` | 12, 15 |
 | `recall mcp config` | None | LLM_INTEGRATION, LLM_SYSTEM_PROMPT |
+| `recall incept` | None | 11 |
+| `recall claude` | `sync`, `status`, `enable-auto-memory`, `disable-auto-memory` | 11 |
+| `recall codex` | `sync`, `status` | 11 |
 
 ### Semantic backend
 

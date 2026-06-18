@@ -30,7 +30,7 @@ operating prompt.
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 99 unit/integration tests
+npm test          # 162 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 ```
