@@ -71,6 +71,7 @@
     "bench:public": "npm run build && node --disable-warning=ExperimentalWarning scripts/public-bench.mjs",
     "bench:sentinel": "npm run build && node --disable-warning=ExperimentalWarning scripts/sentinel-bench.mjs",
     "bench:automemory": "npm run build && node --disable-warning=ExperimentalWarning scripts/automemory-bench.mjs",
+    "stress:substrate": "npm run build && node --disable-warning=ExperimentalWarning scripts/memory-substrate-stress.mjs",
     "ab:automemory": "npm run build && node --disable-warning=ExperimentalWarning scripts/automemory-ab.mjs",
     "install:local": "bash scripts/install-local.sh",
     "smoke:mcp": "npm run build && node scripts/mcp-smoke.mjs",
@@ -81,7 +82,7 @@
     "demo": "npm run build && bash scripts/demo-cross-session.sh"
   },
   "devDependencies": {
-    "@types/node": "^24.10.0",
-    "typescript": "^5.9.3"
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.3"
   }
 }
