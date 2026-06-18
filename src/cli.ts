@@ -14,6 +14,8 @@ import { runDaemonOnce } from "./core/daemon.js";
 import { defaultEvalSuite, type RecallEvalSuite } from "./core/evals.js";
 import { exportRecallArchive, importRecallArchive } from "./core/export.js";
 import { importAutoMemory } from "./core/auto-memory-adapter.js";
+import { importMem0 } from "./core/mem0-adapter.js";
+import { importZep } from "./core/zep-adapter.js";
 import { buildPageIndex, getRecallPage, type RecallPageName } from "./core/pages.js";
 import { runOperatingCycle } from "./core/operator.js";
 import { validateWriteProposal } from "./core/schema.js";
@@ -74,6 +76,7 @@ interface ParsedArgs {
   force: boolean;
   apply: boolean;
   root?: string;
+  file?: string;
 }
 
 function main(): void {
@@ -156,7 +159,7 @@ function main(): void {
     return;
   }
 
-  if (command === "import" && subcommand !== "auto-memory") {
+  if (command === "import" && subcommand !== "auto-memory" && subcommand !== "mem0" && subcommand !== "zep") {
     const archive = readJsonArg(args);
     console.log(JSON.stringify({ result: importRecallArchive(args.db, archive, { replace: args.force }) }, null, 2));
     return;
@@ -258,6 +261,40 @@ function main(): void {
 
     if (command === "import" && subcommand === "auto-memory") {
       const summary = importAutoMemory(store, { root: args.root, project: args.project[0], apply: args.apply });
+      console.log(JSON.stringify(summary, null, 2));
+      return;
+    }
+
+    if (command === "import" && subcommand === "mem0") {
+      const file = args.file;
+      if (!file) {
+        fail("recall import mem0 requires --file <export.json>");
+        return;
+      }
+      let summary;
+      try {
+        summary = importMem0(store, { file, project: args.project[0], apply: args.apply });
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      console.log(JSON.stringify(summary, null, 2));
+      return;
+    }
+
+    if (command === "import" && subcommand === "zep") {
+      const file = args.file;
+      if (!file) {
+        fail("recall import zep requires --file <export.json>");
+        return;
+      }
+      let summary;
+      try {
+        summary = importZep(store, { file, project: args.project[0], apply: args.apply });
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+        return;
+      }
       console.log(JSON.stringify(summary, null, 2));
       return;
     }
@@ -601,6 +638,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let force = false;
   let apply = false;
   let root: string | undefined;
+  let file: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -691,6 +729,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       apply = true;
     } else if (arg === "--root") {
       root = requireValue(argv, ++index, "--root");
+    } else if (arg === "--file") {
+      file = requireValue(argv, ++index, "--file");
     } else {
       command.push(arg);
     }
@@ -751,7 +791,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     acpToAgent,
     force,
     apply,
-    root
+    root,
+    file
   };
 }
 
@@ -932,6 +973,8 @@ Commands:
   recall export [--db path]                                      print a portable JSON archive to stdout
   recall import --json recall-export.json [--db path] [--force]  restore an archive into an empty db; --force replaces rows
   recall import auto-memory [--root path] [--project name] [--apply] [--db path]  import Claude Code auto-memory files (dry-run default; --apply writes)
+  recall import mem0 --file export.json [--project name] [--apply] [--db path]  import a Mem0 export (get_all/create_memory_export) as calibrated cells (dry-run default)
+  recall import zep --file export.json [--project name] [--apply] [--db path]   import a Zep graph export; reconstructs supersession from bi-temporal facts (dry-run default)
   recall acp [status] [--db path]
   recall acp send --json request.json [--db path]
   recall acp list [--limit 20] [--acp-status queued] [--db path]
