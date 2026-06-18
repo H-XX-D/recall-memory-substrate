@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "node:test";
 import {
   discoverAutoMemoryFiles,
@@ -55,7 +55,7 @@ describe("auto-memory adapter", () => {
     ]);
     try {
       const found = discoverAutoMemoryFiles(root);
-      const names = found.map((f) => f.filePath.split("/").pop()).sort();
+      const names = found.map((f) => basename(f.filePath)).sort();
       assert.deepEqual(names, ["alpha.md", "beta.md"]);
     } finally {
       cleanup();
