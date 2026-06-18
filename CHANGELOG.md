@@ -75,13 +75,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value. The recall arm isolates the graph via an injected MCP (`RECALL_DB`) with
   tools constrained to the recall MCP; the auto-memory arm requires an isolated,
   API-key-authenticated Claude config.
+- **`recall import auto-memory`** (`[--root path] [--project name] [--apply]
+  [--db path]`): imports Claude Code auto-memory files
+  (`~/.claude/projects/<slug>/memory/*.md`) into Recall as calibrated cells.
+  Dry-run by default; `--apply` writes. Idempotent per file content; a changed
+  file supersedes its prior version via a `contradicts` edge — the migration
+  wedge for owning your memory and canceling the subscription.
+- **`recall repair`** (`[--apply] [--db path]`): prunes dangling/unresolvable
+  trust edges; dry-run by default, `--apply` deletes.
 
 ### Fixed
 
 - MCP `initialize` no longer reports a stale hard-coded server version; it reads
   the package version. Public docs, badges, SVG banners, issue templates, and
   installation/test-count references were updated to match the current 0.2.x
-  surface and 138-test suite.
+  surface and 162-test suite.
 - **Claude Code hook** (`integrations/claude/hooks/recall-session-start.py`): the
   SessionStart activity summary no longer mislabels a graph-wide diff as "scoped
   to this directory" — the scope is now derived from `recall project where` and

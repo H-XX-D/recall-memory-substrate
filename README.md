@@ -13,7 +13,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-148%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-162%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -307,6 +307,12 @@ hook that nudges the agent to consult Recall, copies the recall skill into
 sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so Recall is the durable memory layer
 instead of Claude Code's built-in note memory (keep native auto-memory with
 `RECALL_KEEP_AUTOMEMORY=1`; revert with `recall claude enable-auto-memory`).
+Already accumulated native auto-memory? `recall import auto-memory [--root path]
+[--project name] [--apply] [--db path]` imports your
+`~/.claude/projects/<slug>/memory/*.md` files into Recall as calibrated cells
+(dry-run by default; pass `--apply` to write). It is idempotent per file content,
+and a changed file supersedes its prior version via a `contradicts` edge — the
+migration wedge for owning your memory.
 
 **Codex** (`recall codex sync`) copies the recall skill into
 `~/.codex/skills/`, registers the recall MCP server under `[mcp_servers.recall]`
@@ -656,6 +662,7 @@ recall admit    --json proposal.json
 # backup / restore
 recall export > recall-export.json
 recall import --json recall-export.json --db .recall/restored.sqlite3
+recall import auto-memory [--project name] [--apply]   # import Claude Code auto-memory files as calibrated cells (dry-run default)
 
 # undo
 recall rollback list
@@ -673,6 +680,7 @@ recall operate once --derive
 recall beliefs
 recall calibration
 recall maintenance --derive
+recall repair [--apply]               # prune dangling/unresolvable trust edges (dry-run default; --apply deletes)
 
 # daemon
 recall daemon run-once [--derive]
@@ -721,7 +729,7 @@ by audience. Highlights:
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 140 unit/integration tests
+npm test          # 162 unit/integration tests
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 npm run smoke:mcp # stdio MCP initialize + tools/list smoke

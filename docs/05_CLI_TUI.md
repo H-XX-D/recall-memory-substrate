@@ -9,6 +9,10 @@ recall status
 recall storage
 recall export
 recall import --json recall-export.json [--force]
+recall import auto-memory [--root path] [--project name] [--apply] [--db path]
+recall calibration [--db path]
+recall claude [sync|status|enable-auto-memory|disable-auto-memory]
+recall codex [sync|status]
 recall acp status
 recall acp send --json request.json
 recall acp list [--limit 20] [--acp-status completed]
@@ -18,6 +22,7 @@ recall acp run [--interval-ms 5000] [--limit 20]
 recall compact
 recall beliefs
 recall maintenance [--derive]
+recall repair [--apply] [--db path]
 recall tick [--derive]
 recall operate once [--derive] [--compact]
 recall operate once --no-eval --no-tick --no-daemon
@@ -57,6 +62,15 @@ recall daemon run-once [--derive]
 recall daemon run [--derive]
 recall daemon uninstall
 ```
+
+`recall import auto-memory` imports Claude Code auto-memory files
+(`~/.claude/projects/<slug>/memory/*.md`) into Recall as calibrated cells. It is
+dry-run by default; `--apply` writes. It is idempotent per file content, and a
+changed file supersedes its prior version via a `contradicts` edge — the
+migration wedge for owning your memory. `recall repair` prunes
+dangling/unresolvable trust edges (dry-run by default; `--apply` deletes), and
+`recall calibration` reports per-actor Brier calibration — stated confidence
+versus contradiction outcomes.
 
 Routine memory writes are not a user workflow. Once Recall is running, the LLM
 submits strict write proposals through MCP `recall_write`, and admission/firewall

@@ -10,7 +10,7 @@ The roadmap is organized around Recall's three rings. A change is "done" only
 when it lands schema-first, tested, and through the same admission path
 everything else uses.
 
-> **Legend:** ✅ shipped in 0.1.0 · 🛠️ actively planned · 🔭 exploratory
+> **Legend:** ✅ shipped in 0.2.0 · 🛠️ actively planned · 🔭 exploratory
 
 ---
 
@@ -69,7 +69,11 @@ These don't change. They're the filter every roadmap item passes through:
 - 🛠️ Workflow-engine CLI surface (`recall workflow allocate` shipped; the
   remaining commands are planned, see
   [`docs/09_WORKFLOW_ENGINE.md`](docs/09_WORKFLOW_ENGINE.md))
-- 🛠️ Importers for common note/agent-log formats, writing through admission
+- ✅ Auto-memory importer (`recall import auto-memory [--root path] [--project name] [--apply] [--db path]`):
+  imports Claude Code auto-memory files (`~/.claude/projects/<slug>/memory/*.md`)
+  as calibrated cells through admission; dry-run by default with `--apply`,
+  idempotent per file content, supersedes changed files via a `contradicts` edge
+- 🛠️ Importers for additional note/agent-log formats, writing through admission
 - 🔭 Additional embedding backends and external graph integrations
 - 🔭 A short, copy-pasteable "first 5 minutes" demo and a recorded walkthrough
 

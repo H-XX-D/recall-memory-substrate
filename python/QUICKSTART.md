@@ -27,7 +27,28 @@ Python tools auto-discover this path by default. You can override with the
 export RECALL_DB=~/projects/myproject/.recall/recall.sqlite3
 ```
 
-## 2. Write your first cell
+## 2. Import your existing Claude Code memory
+
+If you're coming from Claude Code, you already have an accumulated memory store
+worth migrating. `recall import auto-memory` imports Claude Code auto-memory
+files (`~/.claude/projects/<slug>/memory/*.md`) into Recall as calibrated cells,
+so you start from a populated graph instead of an empty one:
+
+```bash
+# Dry-run preview (default — no writes):
+recall import auto-memory --project myproject
+
+# Apply (write the calibrated cells):
+recall import auto-memory --project myproject --apply
+```
+
+It is dry-run by default; pass `--apply` to write. The import is idempotent per
+file content, and a changed file supersedes its prior version via a
+`contradicts` edge — the migration wedge for owning your memory. You can also
+point at a different store with `--root path` or a different database with
+`--db path`.
+
+## 3. Write your first cell
 
 Pick the directory containing the Python tools (we'll call it `$SCRIPTS`):
 
@@ -62,7 +83,7 @@ Successful admission returns a JSON response with the new cell's ID:
 { "accepted": true, "node": { "id": "abc12345-...", "title": "...", ... } }
 ```
 
-## 3. Peek the cell you just wrote
+## 4. Peek the cell you just wrote
 
 ```bash
 # Cheapest possible probe — just the title (~150 bytes):
@@ -79,7 +100,7 @@ The summary shows everything an agent needs to decide whether to fetch the
 full body: title, kind, scope, topics, lifecycle, entity sample, provenance,
 body excerpt, and relation counts by kind.
 
-## 4. Search across the graph
+## 5. Search across the graph
 
 ```bash
 # Find cells matching a keyword or substring:
@@ -92,7 +113,7 @@ python3 $SCRIPTS/recall_peek.py --match "auth" --kind decision --limit 5
 python3 $SCRIPTS/recall_peek.py --match "auth" --project myproject --limit 5
 ```
 
-## 5. See what's changed
+## 6. See what's changed
 
 ```bash
 # Activity in the last hour, with a human-readable summary:
@@ -105,7 +126,7 @@ python3 $SCRIPTS/recall_diff.py --project myproject --since 1d --summary
 python3 $SCRIPTS/recall_diff.py --since-cell abc12345 --summary
 ```
 
-## 6. Auto-route queries via the meta-router
+## 7. Auto-route queries via the meta-router
 
 The router picks the right tool based on the question shape:
 
@@ -126,7 +147,7 @@ python3 $SCRIPTS/recall_router.py "explain the authentication architecture"
 python3 $SCRIPTS/recall_router.py "your query" --explain-only
 ```
 
-## 7. Check graph health
+## 8. Check graph health
 
 ```bash
 # Compact summary of graph state (stats + warnings + contradictions + stale):
@@ -139,7 +160,7 @@ python3 $SCRIPTS/recall_health_peek.py --min-severity 0.85
 python3 $SCRIPTS/recall_health_peek.py --section contradictions --limit 20
 ```
 
-## 8. Extract a codebase (Python or JavaScript/TypeScript)
+## 9. Extract a codebase (Python or JavaScript/TypeScript)
 
 ```bash
 # Python codebase:
@@ -159,7 +180,7 @@ This creates a cell per module and per top-level symbol (function, class,
 method), with entity tags that the linker can use to create typed
 dependency hyperedges.
 
-## 9. Create typed code-dependency hyperedges
+## 10. Create typed code-dependency hyperedges
 
 After extracting code cells, run the linker to materialize relationships
 between them as hyperedges (`code-defined-in`, `code-references`,
@@ -176,7 +197,7 @@ python3 $SCRIPTS/recall_code_link.py --project myproject --apply
 python3 $SCRIPTS/recall_code_link.py --project myproject --apply --skip-existing
 ```
 
-## 10. Ingest CI test results
+## 11. Ingest CI test results
 
 Connect test outcomes to function-under-test cells via typed hyperedges
 (`test-supports` for passes, `test-contradicts` for failures):
@@ -196,7 +217,7 @@ python3 $SCRIPTS/recall_ci_ingest.py \
   --results report.json --project myproject --stats-only
 ```
 
-## 11. Re-extract idempotently when code changes
+## 12. Re-extract idempotently when code changes
 
 Re-running the extractor by default creates duplicate cells. To re-extract
 while preserving history via supersedure hyperedges:
@@ -211,7 +232,7 @@ This creates new cells for each module and symbol, then creates
 cell. Old cells remain in the graph (audit trail) but downstream queries can
 filter to currently-active cells.
 
-## 12. Auto-extract on every commit
+## 13. Auto-extract on every commit
 
 ```bash
 # From the repo where you want auto-extraction:
@@ -222,7 +243,7 @@ chmod +x .git/hooks/post-commit
 export RECALL_SCRIPT_DIR=/path/to/recall/python/scripts
 ```
 
-## 13. Run the benchmark on your own graph
+## 14. Run the benchmark on your own graph
 
 ```bash
 # Operator-vs-naive comparison (stdlib only):

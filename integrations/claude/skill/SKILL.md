@@ -116,6 +116,17 @@ via `contradicts` → cross-session inheritance of the current value.
 - **Verify it's off:** after a "save this to memory" turn, no new file appears
   under `~/.claude/projects/*/memory/` and a Recall cell appears instead.
 
+**Migrate the memory you already have — `recall import auto-memory`.** Disabling
+auto-memory stops *new* facts from landing in flat `.md` files, but it leaves the
+ones you already accumulated stranded under `~/.claude/projects/<slug>/memory/`.
+Before or after flipping the switch, run
+`recall import auto-memory [--root path] [--project name] [--apply] [--db path]`
+to import those `~/.claude/projects/<slug>/memory/*.md` files into Recall as
+calibrated cells. It is **dry-run by default** — pass `--apply` to write. It is
+**idempotent per file content**, and a changed file **supersedes** its prior
+version via a `contradicts` edge. This is the migration wedge: own your memory
+instead of leaving accumulated facts stranded in flat `.md` files.
+
 **Prompt-intent nuance:** a *passive* one-liner ("Remember that prod DB is
 db-east-1.") persists **nowhere** — the agent treats a bare fact-statement as
 conversational context in either configuration. Persistence (and thus the store
@@ -136,8 +147,9 @@ auto-memory off.
    supersede" below).**
 4. Search / semantic / subgraph to retrieve more.
 5. Check beliefs/maintenance when a task depends on old or contested memory,
-   and `recall calibration` when deciding how much to trust a specific
-   actor's high-confidence cells.
+   `recall calibration` when deciding how much to trust a specific actor's
+   high-confidence cells, and `recall repair` to prune dangling/unresolvable
+   trust edges (dry-run by default; `--apply` deletes).
 
 ## Corrections supersede — never silently overwrite
 
@@ -170,7 +182,7 @@ note file.
 | Write memory | `recall_write` | `recall validate --json p.json` then `recall admit --json p.json` |
 | Lexical / semantic search | `recall_search` / `recall_semantic` | `recall search "q"` / `recall semantic "q"` |
 | Subgraph from tags | `recall_subgraph` | `recall subgraph --project X --category memory` |
-| Memory health | `recall_beliefs` / `recall_maintenance` | `recall beliefs` / `recall maintenance` |
+| Memory health | `recall_beliefs` / `recall_maintenance` | `recall beliefs` / `recall maintenance` / `recall repair` — prune dangling/unresolvable trust edges (dry-run default; `--apply` deletes) |
 | Actor calibration | (in `recall_beliefs` report) | `recall calibration` — per-actor Brier score: stated confidence vs survived-contradiction outcomes |
 | Counts / footprint | `recall_status` / `recall_storage` | `recall status` / `recall storage` |
 

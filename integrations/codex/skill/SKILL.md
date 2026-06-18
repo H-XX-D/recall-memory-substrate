@@ -27,7 +27,20 @@ works. The wrapper auto-routes to the right per-project DB by walking up from th
 current working directory; pass `--db <path>` to target a specific DB. Verbs:
 `recall compile "task"`, `recall search "q"`, `recall semantic "q"`,
 `recall cell show <id>`, `recall validate`/`recall admit` (the write path),
-`recall status`, `recall beliefs`, `recall maintenance`.
+`recall status`, `recall beliefs`, `recall maintenance`,
+`recall repair` (prune dangling/unresolvable trust edges; dry-run default,
+`--apply` deletes), `recall calibration` (per-actor Brier calibration: stated
+confidence vs contradiction outcomes), `recall import auto-memory`
+(`[--root path] [--project name] [--apply] [--db path]`).
+
+## Migrate existing Claude Code auto-memory
+
+To bring existing Claude Code auto-memory into Recall, run
+`recall import auto-memory [--root path] [--project name]`. It imports Claude
+Code auto-memory files (`~/.claude/projects/<slug>/memory/*.md`) as calibrated
+Recall cells — dry-run by default; pass `--apply` to write. It is idempotent per
+file content, and a changed source file supersedes its prior version via a
+`contradicts` edge. This is the migration wedge: own your memory.
 
 ## Operating loop
 
