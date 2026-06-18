@@ -66,10 +66,10 @@ recall daemon uninstall
 `recall import auto-memory` imports Claude Code auto-memory files
 (`~/.claude/projects/<slug>/memory/*.md`) into Recall as calibrated cells. It is
 dry-run by default; `--apply` writes. It is idempotent per file content, and a
-changed file supersedes its prior version via a `contradicts` edge — the
-migration wedge for owning your memory. `recall repair` prunes
+changed file supersedes its prior version via a `contradicts` edge. This is the
+migration path for owning your memory. `recall repair` prunes
 dangling/unresolvable trust edges (dry-run by default; `--apply` deletes), and
-`recall calibration` reports per-actor Brier calibration — stated confidence
+`recall calibration` reports per-actor Brier calibration: stated confidence
 versus contradiction outcomes.
 
 Routine memory writes are not a user workflow. Once Recall is running, the LLM

@@ -55,17 +55,17 @@ For the helper's tenant default:
 The Python tools split into three dependency tiers:
 
 ```bash
-# Tier 1 — Core tools. Stdlib only, no install needed.
+# Tier 1: Core tools. Stdlib only, no install needed.
 #   helper, peek, diff, router, code extractors, linker, CI ingest,
 #   all hooks, audit_compliance, longitudinal_tracker (snapshot/report).
 python3 python/scripts/recall_helper.py --help
 
-# Tier 2 — Real embeddings + benchmark suite.
+# Tier 2: Real embeddings + benchmark suite.
 #   Needs sentence-transformers + numpy.
 #   Enables: recall_semantic_real, recall_mpnet_embedder, vector_rag_bench.
 pip install sentence-transformers numpy
 
-# Tier 3 — Optional: TS-side semantic via mpnet (production setup).
+# Tier 3: Optional: TS-side semantic via mpnet (production setup).
 #   After installing tier 2, point Recall at the adapter:
 export RECALL_EMBEDDING_COMMAND='python3 /full/path/to/python/scripts/recall_mpnet_embedder.py'
 python3 python/scripts/recall_semantic_real.py reindex --ts-compatible
@@ -206,14 +206,14 @@ benchmark scenarios, see the top-level `CONTRIBUTING.md` in the repo root.
 
 ## Relationship to the TypeScript core
 
-This Python toolkit **does not replace** the core Recall TypeScript runtime
+This Python toolkit does not replace the core Recall TypeScript runtime
 (`src/`). The TS runtime:
 - Owns the SQLite storage and schema
 - Implements the write-validation firewall
 - Provides the `recall` CLI and `recall-mcp` MCP server
 - Handles secrets side-graph, daemon scheduling, eval machinery
 
-The Python tools **wrap and extend** that core, providing:
+The Python tools wrap and extend that core, providing:
 - Agent-friendly write helpers
 - Token-budget-aware read mechanisms
 - Code extension subsystems

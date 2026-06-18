@@ -156,7 +156,7 @@ title: "<kind>: <file>::<name>"           # kind ∈ function|class|async-functi
 body: |
   # <kind>: <name>
   **File:** `<path>`
-  **Lines:** <start>–<end>
+  **Lines:** <start> to <end>
   **Signature:** `def name(...) -> ...`
   **Parent class:** `<class>`              # if method
   **Decorators:** `@dec1, @dec2`

@@ -40,7 +40,7 @@ Top-5 cells returned per query; their concatenated bodies are the
 | health_contradictions | 24,811 | 3,182 | 7.8× | ✓ | ✓ |
 | code_function_lookup | 8,481 | 1,877 | 4.5× | ✓ | ✓ |
 
-**Aggregate**: vector RAG total 157,489 bytes vs Recall router 17,355 bytes — **9.1× reduction** using router-style operator dispatch.
+**Aggregate**: vector RAG total 157,489 bytes vs Recall router 17,355 bytes, **9.1× reduction** using router-style operator dispatch.
 Relevance: vector RAG 6/7 vs router 6/7.
 
 ## Notes
@@ -48,7 +48,7 @@ Relevance: vector RAG 6/7 vs router 6/7.
 - Embedding model: `all-mpnet-base-v2` (industry-standard production baseline)
 - Top-k: 5 (standard production default; some systems use 3-10)
 - Cosine similarity over normalized embeddings (equivalent to inner product)
-- Same Recall graph as corpus — same available content, different retrieval
+- Same Recall graph as corpus; same available content, different retrieval
 - Vector RAG returns full cell bodies as context (standard production pattern)
 - Embeddings cached after first run; subsequent runs only embed the queries
 - Latency excludes one-time model-load cost (~30-50s first run)

@@ -30,10 +30,10 @@ Run the benchmark against your own graph to see your real numbers.
 ## Setup
 
 ```bash
-# Core benchmark (operator-vs-naive) — stdlib only:
+# Core benchmark (operator-vs-naive), stdlib only:
 python3 python/scripts/recall_bench.py --out my-bench.md
 
-# Vector RAG comparison — install dependencies:
+# Vector RAG comparison, install dependencies:
 pip install sentence-transformers numpy
 python3 python/scripts/recall_bench.py --format json --out router.json
 python3 python/scripts/vector_rag_bench.py --compare-router router.json --out vs-rag.md
