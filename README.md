@@ -45,7 +45,7 @@ contradiction without being asked. No reminding it to save, no separate cloud
 service mining your transcript after the fact. Under the hood a single agent 
 LLM proposes a structured write, an admission firewall validates it, and the
 compiler returnsonly the relevant subgraph, ranked by evidence, fit to a word 
-budget, all inlocal SQLite: no server, no account, no cloud. The reader is the writer 
+budget, all inlocal SQLite: no server, no account, no cloud. The reader is the writer.
 The same model is writing the memory from fresh context. It doesn't rely on a
 seperate model to assume what gets saved or retrieved. The memory is yours, and
 every fact still carries provenance, confidence, and a one-command undo.
