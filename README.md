@@ -462,6 +462,36 @@ Recall makes a few opinionated bets that most memory layers don't:
 The common thread is auditability: provenance on every cell, a firewall on
 every write, and a packet you can actually read.
 
+## A real substitute for built-in auto-memory
+
+Coding agents ship their own memory: a feature that funnels "remember this"
+into flat Markdown files and reads them back every turn. It has one real
+strength, it is ambient. It sits in context the whole time, so the agent
+never has to decide to use it. Everything else about it is thin: the notes
+are flat, corrections pile up with no supersession, there is no trust or
+calibration, and the files are siloed per tool.
+
+Recall closes the one gap and keeps the rest. A session-start hook and a
+per-prompt hook push a small, trust-annotated index of the cells relevant to
+what you just typed straight into the agent's context, so Recall is ambient
+too, with the answer already present instead of a tool the agent has to
+remember to call. That index marks any cell that has been superseded or has
+gone stale, which a flat file can never do, since a pile of notes just
+accumulates contradictions in silence. The short version: the substrate is
+the continuity the agent does not have between turns.
+
+The switch is one command, and it is non-destructive:
+
+```bash
+recall claude sync
+# turns off the built-in auto-memory, installs the hook, skill, and MCP,
+# and imports your existing .md memory (plus mem0 / Zep exports) into the graph
+```
+
+After that the agent reads from the graph and writes back to it on ordinary
+prompts, corrections supersede instead of stacking, and the same memory is
+shared across tools instead of trapped in one tool's file.
+
 ## How Recall compares
 
 The main design split in agent memory is how trust changes when new
