@@ -16,7 +16,7 @@ import {
 } from "./types.js";
 
 const ACTOR_KINDS: readonly ActorKind[] = ["llm", "human", "daemon", "connector", "program"];
-const INTENT_KINDS: readonly IntentKind[] = [
+export const INTENT_KINDS: readonly IntentKind[] = [
   "observation",
   "witness",
   "belief_update",

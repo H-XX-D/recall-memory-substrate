@@ -75,6 +75,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value. The recall arm isolates the graph via an injected MCP (`RECALL_DB`) with
   tools constrained to the recall MCP; the auto-memory arm requires an isolated,
   API-key-authenticated Claude config.
+- **`npm run stress:substrate`** (`scripts/memory-substrate-stress.mjs`): a
+  deterministic long-horizon LLM operating-state harness. It scores whether the
+  graph surface carries supersession/currentness, watcher-gated tool edges, DAG
+  ordering, effective-confidence selection, provenance/trust, and cold-session
+  continuity without relying on model recollection.
 - **`recall import auto-memory`** (`[--root path] [--project name] [--apply]
   [--db path]`): imports Claude Code auto-memory files
   (`~/.claude/projects/<slug>/memory/*.md`) into Recall as calibrated cells.

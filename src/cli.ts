@@ -15,6 +15,7 @@ import { runDaemonOnce } from "./core/daemon.js";
 import { defaultEvalSuite, type RecallEvalSuite } from "./core/evals.js";
 import { exportRecallArchive, importRecallArchive } from "./core/export.js";
 import { importAutoMemory } from "./core/auto-memory-adapter.js";
+import { importGlobalToLocal } from "./core/local-import.js";
 import { importMem0 } from "./core/mem0-adapter.js";
 import { importZep } from "./core/zep-adapter.js";
 import { buildPageIndex, getRecallPage, type RecallPageName } from "./core/pages.js";
@@ -22,7 +23,8 @@ import { runOperatingCycle } from "./core/operator.js";
 import { validateWriteProposal } from "./core/schema.js";
 import { SecretGraphStore } from "./core/secrets.js";
 import { installLaunchAgent, launchAgentStatus, renderLaunchAgentPlist, uninstallLaunchAgent } from "./core/service.js";
-import { claudeIntegrationStatus, setClaudeAutoMemory, syncClaudeIntegration } from "./core/claude-integration.js";
+import { claudeIntegrationStatus, setClaudeAutoMemory } from "./core/claude-integration.js";
+import { globalDbPath, runClaudeSync } from "./core/claude-sync.js";
 import { codexIntegrationStatus, syncCodexIntegration } from "./core/codex-integration.js";
 import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput } from "./core/store.js";
 import { storageStats } from "./core/storage-stats.js";
@@ -78,6 +80,7 @@ interface ParsedArgs {
   apply: boolean;
   root?: string;
   file?: string;
+  globalDb?: string;
 }
 
 function main(): void {
@@ -126,7 +129,17 @@ function main(): void {
 
   if (command === "claude" && (!subcommand || subcommand === "sync")) {
     const keep = process.env.RECALL_KEEP_AUTOMEMORY === "1";
-    console.log(JSON.stringify(syncClaudeIntegration({ disableAutoMemory: !keep }), null, 2));
+    const result = runClaudeSync({ disableAutoMemory: !keep, importMemory: !keep });
+    console.log(JSON.stringify(result, null, 2));
+    if (result.autoMemoryImport) {
+      const s = result.autoMemoryImport;
+      const processed = s.created + s.superseded;
+      // Human-readable summary on stderr so stdout stays valid JSON.
+      process.stderr.write(
+        `Recall: ${processed} auto-memory file(s) processed into the global graph (${result.autoMemoryImportDb}), ` +
+          `${s.skipped} already current. Native auto-memory is now disabled; your original .md files were left in place.\n`,
+      );
+    }
     return;
   }
 
@@ -160,7 +173,7 @@ function main(): void {
     return;
   }
 
-  if (command === "import" && subcommand !== "auto-memory" && subcommand !== "mem0" && subcommand !== "zep") {
+  if (command === "import" && subcommand !== "auto-memory" && subcommand !== "mem0" && subcommand !== "zep" && subcommand !== "local") {
     const archive = readJsonArg(args);
     console.log(JSON.stringify({ result: importRecallArchive(args.db, archive, { replace: args.force }) }, null, 2));
     return;
@@ -263,6 +276,24 @@ function main(): void {
     if (command === "import" && subcommand === "auto-memory") {
       const summary = importAutoMemory(store, { root: args.root, project: args.project[0], apply: args.apply });
       console.log(JSON.stringify(summary, null, 2));
+      return;
+    }
+
+    if (command === "import" && subcommand === "local") {
+      const globalStore = new SQLiteRecallStore(args.globalDb ?? globalDbPath());
+      try {
+        const summary = importGlobalToLocal(globalStore, store, {
+          project: args.project[0],
+          tags: args.tags.length > 0 ? args.tags : args.topics,
+          apply: args.apply,
+          limit: args.limitProvided ? args.limit : undefined,
+        });
+        console.log(JSON.stringify(summary, null, 2));
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+      } finally {
+        globalStore.close();
+      }
       return;
     }
 
@@ -647,6 +678,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let apply = false;
   let root: string | undefined;
   let file: string | undefined;
+  let globalDb: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -739,6 +771,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       root = requireValue(argv, ++index, "--root");
     } else if (arg === "--file") {
       file = requireValue(argv, ++index, "--file");
+    } else if (arg === "--global-db") {
+      globalDb = requireValue(argv, ++index, "--global-db");
     } else {
       command.push(arg);
     }
@@ -800,7 +834,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     force,
     apply,
     root,
-    file
+    file,
+    globalDb
   };
 }
 
@@ -981,6 +1016,7 @@ Commands:
   recall export [--db path]                                      print a portable JSON archive to stdout
   recall import --json recall-export.json [--db path] [--force]  restore an archive into an empty db; --force replaces rows
   recall import auto-memory [--root path] [--project name] [--apply] [--db path]  import Claude Code auto-memory files (dry-run default; --apply writes)
+  recall import local --project name [--tags a,b] [--apply] [--global-db path]  seed the local db from the global graph, scoped by project/tags (dry-run default)
   recall import mem0 --file export.json [--project name] [--apply] [--db path]  import a Mem0 export (get_all/create_memory_export) as calibrated cells (dry-run default)
   recall import zep --file export.json [--project name] [--apply] [--db path]   import a Zep graph export; reconstructs supersession from bi-temporal facts (dry-run default)
   recall acp [status] [--db path]
@@ -1049,8 +1085,9 @@ Commands:
   recall secrets save --title "name" --confirm-secret-save --password-stdin --value-stdin [--tags a,b] [--scope local]
     stdin format for save: first line password, remaining bytes secret
   recall secrets get <id> --password-stdin [--secrets-db path]
-  recall claude sync                  install/refresh the Claude Code integration (hook, skill, MCP) and disable
-                                      built-in auto-memory so agents adopt Recall (RECALL_KEEP_AUTOMEMORY=1 to keep it)
+  recall claude sync                  install/refresh the Claude Code integration (hook, skill, MCP), disable
+                                      built-in auto-memory, and lift existing auto-memory into the global graph
+                                      (RECALL_KEEP_AUTOMEMORY=1 keeps native auto-memory and skips the import)
   recall claude status                report which integration pieces are installed
   recall claude disable-auto-memory   set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 only
   recall claude enable-auto-memory    re-enable Claude Code built-in auto-memory
