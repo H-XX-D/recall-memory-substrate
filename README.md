@@ -89,16 +89,26 @@ The installer above already wires up any agent CLI it finds. To do it yourself
 MCP server, the consult-Recall hook, and makes Recall the durable memory layer:
 
 ```bash
-recall claude sync     # Claude Code: skill + MCP + SessionStart hook; turns OFF native auto-memory
+recall claude sync     # Claude Code: skill + MCP + hook; turns OFF native auto-memory AND lifts existing auto-memory into the global graph
 recall codex sync      # OpenAI Codex:  skill + MCP in config.toml + a Recall directive in AGENTS.md
 recall claude status   # confirm what's wired   (recall codex status for Codex)
 ```
 
 Restart your agent and it's armed: it reads memory before relying on
 recollection and writes durable findings back on its own; you never tell it to
-"save." Both syncs back up your config before editing, are safe to re-run, and
-are reversible (`recall claude enable-auto-memory`). Using a different MCP
-client? See [hook up your agent](#hook-up-your-agent).
+"save." Because `claude sync` turns native auto-memory off, it imports whatever
+Claude auto-memory you already have into the global graph in the same step, so
+the facts you saved under `~/.claude/projects/<slug>/memory/` move into Recall
+instead of being stranded in files the agent no longer reads. That import is
+non-destructive (your `.md` files stay where they are) and idempotent (a re-run
+brings over only what changed); Codex keeps its memory in `AGENTS.md`, which
+`codex sync` wires directly, so there is nothing separate to import there. To
+pull the other way, from the global graph down into a focused project db, run
+`recall import local --project <name>` (or `--tags a,b`); it copies the matching
+global cells and rejoins any hyperedge whose members all land. Both syncs back
+up your config before editing, are safe to re-run, and are reversible (`recall
+claude enable-auto-memory`). Using a different MCP client? See [hook up your
+agent](#hook-up-your-agent).
 
 ## The 60-second tour
 
@@ -315,14 +325,17 @@ recall claude status   # report which pieces are installed (codex status likewis
 hook that nudges the agent to consult Recall, copies the recall skill into
 `~/.claude/skills/`, registers the recall MCP server in `~/.claude.json`, and
 sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so Recall is the durable memory layer
-instead of Claude Code's built-in note memory (keep native auto-memory with
-`RECALL_KEEP_AUTOMEMORY=1`; revert with `recall claude enable-auto-memory`).
-Already accumulated native auto-memory? `recall import auto-memory [--root path]
-[--project name] [--apply] [--db path]` imports your
-`~/.claude/projects/<slug>/memory/*.md` files into Recall as calibrated cells
-(dry-run by default; pass `--apply` to write). It is idempotent per file content,
-and a changed file supersedes its prior version via a `contradicts` edge, the
-migration wedge for owning your memory.
+instead of Claude Code's built-in note memory (keep native auto-memory, and skip
+the import below, with `RECALL_KEEP_AUTOMEMORY=1`; revert with `recall claude
+enable-auto-memory`). In the same step, `claude sync` lifts whatever auto-memory
+you already have into the global graph (`~/.recall/db/global.sqlite3`), so the
+notes you saved before adopting Recall are not orphaned when the agent stops
+reading them. It reads your `~/.claude/projects/<slug>/memory/*.md` files into
+Recall as calibrated cells without deleting them, is idempotent per file content,
+and supersedes a changed file's prior version via a `contradicts` edge. To run
+that import on its own (for example to preview it first), use `recall import
+auto-memory [--root path] [--project name] [--apply] [--db path]` (dry-run by
+default; pass `--apply` to write).
 
 **Codex** (`recall codex sync`) copies the recall skill into
 `~/.codex/skills/`, registers the recall MCP server under `[mcp_servers.recall]`
@@ -716,6 +729,7 @@ recall admit    --json proposal.json
 recall export > recall-export.json
 recall import --json recall-export.json --db .recall/restored.sqlite3
 recall import auto-memory [--project name] [--apply]   # import Claude Code auto-memory files as calibrated cells (dry-run default)
+recall import local --project name [--tags a,b] [--apply]   # seed a local project db from the global graph (dry-run default)
 
 # undo
 recall rollback list
@@ -728,6 +742,7 @@ recall program add <hyperedge-id> --json program.json
 recall dag analyze <overlay-id> --derive
 recall eval run --derive
 recall operate once --derive
+npm run stress:substrate             # deterministic long-horizon memory-substrate stress harness
 
 # health & trust
 recall beliefs
