@@ -9,11 +9,11 @@
 <br/>
 <br/>
 
-**The memory layer your agent just uses. It remembers, corrects itself, and recalls across sessions on its own. Local, free, and yours.**
+**Memory your agent operates with, not a store it has to remember to check. It rides in context every prompt, corrects itself when a fact changes, and recalls across sessions on its own. Local, free, and yours.**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-0d9488.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-0d9488.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-162%20passing-2dd4bf.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-229%20passing-2dd4bf.svg)](#development)
 [![E2E](https://img.shields.io/badge/e2e-94%20checks-2dd4bf.svg)](scripts/e2e.mjs)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20required-5eead4.svg)](#why-recall)
 [![Status](https://img.shields.io/badge/status-early%20runtime-f59e0b.svg)](#project-status)
@@ -41,14 +41,22 @@ closest matches, and it is on you to notice when a fact has gone stale. Recall
 is _push_: the agent and the substrate run a loop together. It checks what it
 already knows before it acts, does the work, and writes back what it learned,
 _superseding_ the old fact when something changes and surfacing the
-contradiction without being asked. No reminding it to save, no separate cloud
-service mining your transcript after the fact. Under the hood a single agent 
-LLM proposes a structured write, an admission firewall validates it, and the
-compiler returnsonly the relevant subgraph, ranked by evidence, fit to a word 
-budget, all inlocal SQLite: no server, no account, no cloud. The reader is the writer.
-The same model is writing the memory from fresh context. It doesn't rely on a
-seperate model to assume what gets saved or retrieved. The memory is yours, and
-every fact still carries provenance, confidence, and a one-command undo.
+contradiction without being asked.
+
+And it is _ambient_. A per-prompt hook pushes a small, trust-annotated index of
+the cells relevant to what you just typed straight into the agent's context,
+with superseded ones flagged. The agent never has to remember to look; the
+relevant memory is already in front of it. The substrate is the continuity the
+agent does not have between turns.
+
+No reminding it to save, no separate cloud service mining your transcript after
+the fact. Under the hood a single agent LLM proposes a structured write, an
+admission firewall validates it, and the compiler returns only the relevant
+subgraph, ranked by evidence, fit to a word budget, all in local SQLite: no
+server, no account, no cloud. The reader is the writer, the same model writing
+memory from fresh context, with no separate model guessing what to save or
+retrieve. The memory is yours, and every fact still carries provenance,
+confidence, and a one-command undo.
 
 One installable Node.js tool: CLI, read-only TUI, MCP server, quiet
 maintenance daemon, strict write schema, semantic search, encrypted secrets
@@ -491,6 +499,19 @@ recall claude sync
 After that the agent reads from the graph and writes back to it on ordinary
 prompts, corrections supersede instead of stacking, and the same memory is
 shared across tools instead of trapped in one tool's file.
+
+What a flat file fundamentally cannot do is tell you a note has gone stale.
+Markdown memory just accumulates contradictions in silence, and the agent reads
+the oldest and the newest with equal confidence. Recall's per-prompt index marks
+any cell that has been superseded or has aged out, and escalates from a quiet
+pointer to a hard "check this before you act on it" only when a cell you are
+about to rely on is actually contested. Ambient, and honest about its own
+staleness.
+
+Switching loses nothing. `recall claude sync` imports your existing auto-memory
+`.md` (and mem0 or Zep exports) into the graph on the way in, so the notes you
+saved before adopting Recall are not stranded in files the agent will stop
+reading. Turn the shadow off, and bring your memory with you.
 
 ## How Recall compares
 
