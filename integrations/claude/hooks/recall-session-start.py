@@ -185,35 +185,57 @@ def prompt_digest(prompt: str, cwd: str) -> str:
     if not rel:
         return ""
 
-    # ids + titles only: strip the trailing [kind:id], keep a short id, and
-    # truncate what remains (which is title-first) so summaries do not bleed in.
+    # Danger sets: which cells are the SUPERSEDED side of a contradiction (the
+    # target after `->`) or are flagged stale. Used to mark a row only when the
+    # row ITSELF may not be current, so the dig call scales with real risk
+    # instead of crying wolf on every dense-graph supersession trail.
+    conflict_lines = secs.get("conflicts", [])
+    stale_lines = secs.get("stale_or_low_trust", [])
+    challenged_ids = set(re.findall(r"->([0-9a-f]{8})", " ".join(conflict_lines)))
+    stale_ids = set(re.findall(r"stale:([0-9a-f]{8})", " ".join(stale_lines)))
+
+    # ids + titles only: strip the trailing [kind:id], keep a short id, truncate
+    # the rest (title-first), and flag the row if the cell is itself stale/superseded.
     index = []
+    flagged = False
     for ln in rel[:5]:
         m = re.search(r"\[([a-z_]+):([0-9a-f]{8})[0-9a-f-]*\]\s*$", ln)
+        short = m.group(2) if m else ""
         cid = f"{m.group(1)}:{m.group(2)}" if m else ""
         body = re.sub(r"\s*\[[a-z_]+:[0-9a-f-]+\]\s*$", "", ln).lstrip("- ").strip()
-        index.append(f"- {_trim(body, 110)}" + (f"  [{cid}]" if cid else ""))
+        tag = ""
+        if short and short in stale_ids:
+            tag, flagged = "  [STALE]", True
+        elif short and short in challenged_ids:
+            tag, flagged = "  [SUPERSEDED?]", True
+        index.append(f"- {_trim(body, 110)}" + (f"  [{cid}]" if cid else "") + tag)
     if not index:
         return ""
 
     parts = ["[Recall mini-index for THIS prompt (ids + titles only). You now know what exists, so do not ask or assert blind:]"]
     parts += index
 
-    n_conf = len(secs.get("conflicts", []))
-    n_stale = len(secs.get("stale_or_low_trust", []))
-    flags = []
-    if n_conf:
-        flags.append(f"{n_conf} challenged")
-    if n_stale:
-        flags.append(f"{n_stale} stale/low-trust")
-    if flags:
-        parts.append("tripwires touching this topic: " + ", ".join(flags) + ".")
-
-    parts.append(
-        "This is awareness, NOT a substitute. For anything load-bearing, run "
-        'recall compile "<task>" for bodies, the full conflict trace, and calibration, '
-        "and use search / subgraph / recall cell show <id> to dig."
-    )
+    if flagged:
+        # A SHOWN row may not be current: reading its title alone is unsafe.
+        parts.append(
+            "DIG REQUIRED: a row above is marked [SUPERSEDED?] or [STALE]; its title may be out of date. "
+            'Run recall compile "<task>" and recall cell show <id> on it BEFORE you act on it.'
+        )
+    elif conflict_lines or stale_lines:
+        bits = []
+        if conflict_lines:
+            bits.append(f"{len(conflict_lines)} challenged")
+        if stale_lines:
+            bits.append(f"{len(stale_lines)} stale/low-trust")
+        parts.append(
+            "tripwires elsewhere on this topic (" + ", ".join(bits) + "). "
+            'If you act here, run recall compile "<task>" for the conflict trace first.'
+        )
+    else:
+        parts.append(
+            "This is awareness, not a substitute. For anything load-bearing, run "
+            'recall compile "<task>" for bodies and calibration, and search / subgraph / cell show to dig.'
+        )
     return "\n".join(parts)
 
 
