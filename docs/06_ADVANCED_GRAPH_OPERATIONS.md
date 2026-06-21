@@ -49,6 +49,13 @@ arbitrary JavaScript. The deterministic operations are:
   across distinct actors by default (`params.role` filters eligible
   members). A contradicted approver's approval stops counting. Quorum runs
   always derive their attestation.
+- `trend`: finite-difference calculus over the program's run history. Each run
+  appends the bundle's current value to a sliding window; the operation reports
+  direction, slope, and acceleration and trips on a sustained directional streak
+  or a slope past `params.delta`. Where `watch` asks whether a value moved,
+  `trend` asks which way it has been moving and how fast, so a bundle whose
+  effective confidence is quietly eroding over many runs trips before it ever
+  crosses a hard threshold.
 
 `--derive` converts operation output into a strict witness proposal and
 admits it through the normal write path, producing a rollbackable

@@ -106,14 +106,14 @@ contributing requires.
 
 The CLI commands documented across these files map to actual implementations
 in [`../src/cli.ts`](../src/cli.ts). The current implemented surface (as of
-Recall 0.2.x) is:
+Recall 0.3.x) is:
 
 | Command | Subcommands | Documented in |
 |---|---|---|
 | `recall init` | None | 11, LLM_INTEGRATION |
 | `recall version` | None | 05, 11 |
 | `recall status` / `storage` | None | 11 |
-| `recall export` / `import` | `import`: `auto-memory` (also archive restore) | 05, 20 |
+| `recall export` / `import` | `import`: `auto-memory`, `mem0`, `zep`, `local` (also archive restore) | 05, 20 |
 | `recall tui` | None | 05 |
 | `recall validate` | None | 02, 05 |
 | `recall admit` / `write-propose` | None | 02, 05 |
@@ -170,13 +170,20 @@ enforcement is producing better outcomes over time. See
 ## Where things changed recently
 
 For changes since the last release, see [`../CHANGELOG.md`](../CHANGELOG.md).
-The headline unreleased changes: **effective confidence** (a live,
-graph-computed trust value on every cell, driving ranking and packets) and
-**active relations** (scored tripwire bundles plus `watch`/`drift`/`quorum`
-program operations; see
-[`06_ADVANCED_GRAPH_OPERATIONS.md`](06_ADVANCED_GRAPH_OPERATIONS.md)).
-Compile packets surface incoming challenges, per-cell `eff:` values, and
-the standing programs covering each selected cell.
+The headline changes in 0.3.0: the **Claude Code three-mode hook** installed by
+`recall claude sync` (the SessionStart directive, the UserPromptSubmit push with
+a danger-proportional dig, and the Stop dig backstop that blocks a turn from
+ending until a flagged cell is read; see
+[`17_ENFORCING_USAGE.md`](17_ENFORCING_USAGE.md)), the **`trend`** program
+operation (finite-difference calculus over a program's run history; see
+[`06_ADVANCED_GRAPH_OPERATIONS.md`](06_ADVANCED_GRAPH_OPERATIONS.md)), and
+**Mem0, Zep, and local importers** (`recall import mem0|zep|local`; see
+[`20_BACKUP_AND_RECOVERY.md`](20_BACKUP_AND_RECOVERY.md)). The 0.2.0 work this
+builds on: **effective confidence** (a live, graph-computed trust value on every
+cell, driving ranking and packets) and **active relations** (scored tripwire
+bundles plus `watch`/`drift`/`quorum` program operations). Compile packets
+surface incoming challenges, per-cell `eff:` values, and the standing programs
+covering each selected cell.
 
 For changes to the docs themselves, see git history on this directory.
 

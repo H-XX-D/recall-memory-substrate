@@ -32,6 +32,34 @@ Four real causes, each addressable by a different technique:
    text directly doesn't. At the margin, the path of least resistance is
    to skip the tool call.
 
+## The shipped path: `recall claude sync`
+
+The techniques below are the portable building blocks. The product wires them
+into one installed hook, `integrations/claude/hooks/recall-session-start.py`,
+put in place by `recall claude sync`. It runs in three modes and is the closed
+loop in practice:
+
+- **SessionStart** emits the operating directive plus a 7-day activity summary.
+- **UserPromptSubmit (`--prompt`)** is the push (Technique 1, productized): a
+  mini index of the cells relevant to the prompt, ids and titles plus tripwire
+  counts, deliberately incomplete so the agent still runs a real `recall
+  compile`. The dig is danger-proportional: a row is marked `[SUPERSEDED?]` or
+  `[STALE]` only when it is itself the superseded or stale cell, escalating to
+  `DIG REQUIRED` only then.
+- **Stop (`--stop`)** is the dig backstop, the one structural enforcement point
+  in the soft loop. When a row was flagged `DIG REQUIRED`, it blocks the turn
+  from ending until the transcript shows the agent actually read the flagged
+  cell. It is single-shot and loop-guarded (it nudges once, never hard-traps)
+  and fails open on any error. This closes the gap that made the dig a
+  suggestion: the push and the firewalled write are structural, but the dig
+  itself was behavioral until this mode gave it a backstop.
+
+The `.sample` templates in `python/hooks/` documented below are the lower-level,
+runtime-agnostic version of the same ideas (and the PreToolUse guard, Technique
+4, is hard enforcement the shipped hook does not install by default). Use
+`recall claude sync` for Claude Code; use the templates to wire another runtime
+or to add hard enforcement.
+
 ## The fix: ambient presence, not stronger prompting
 
 Stronger system prompts don't work; they fade like the original. The
@@ -368,6 +396,7 @@ actually work" answerable instead of speculative.
 |---|---|
 | UserPromptSubmit injection (soft) | **shipped**: see Technique 1 |
 | Stop / SubagentStop reminder (soft) | **shipped**: see Technique 2 |
+| Stop dig backstop (`recall claude sync`, `--stop`) | **shipped**: blocks turn end until a `DIG REQUIRED` cell is read; single-shot, loop-guarded, fail-open |
 | System prompt operating contract | **shipped**: see Technique 3 |
 | PreToolUse guard / mandatory write-on-decision (hard) | **shipped**: see Technique 4 |
 | Compliance attestation per session | planned: hash chain of writes and reads for audit-trail use |

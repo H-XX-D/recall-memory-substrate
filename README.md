@@ -321,9 +321,10 @@ recall codex sync      # OpenAI Codex
 recall claude status   # report which pieces are installed (codex status likewise)
 ```
 
-**Claude Code** (`recall claude sync`) installs a SessionStart/UserPromptSubmit
-hook that nudges the agent to consult Recall, copies the recall skill into
-`~/.claude/skills/`, registers the recall MCP server in `~/.claude.json`, and
+**Claude Code** (`recall claude sync`) installs the three-mode consult-Recall
+hook (SessionStart, UserPromptSubmit, and Stop, detailed below), copies the
+recall skill into `~/.claude/skills/`, registers the recall MCP server in
+`~/.claude.json`, and
 sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so Recall is the durable memory layer
 instead of Claude Code's built-in note memory (keep native auto-memory, and skip
 the import below, with `RECALL_KEEP_AUTOMEMORY=1`; revert with `recall claude
@@ -336,6 +337,26 @@ and supersedes a changed file's prior version via a `contradicts` edge. To run
 that import on its own (for example to preview it first), use `recall import
 auto-memory [--root path] [--project name] [--apply] [--db path]` (dry-run by
 default; pass `--apply` to write).
+
+The hook runs in three modes, and together they are the closed loop that keeps
+an agent on Recall:
+
+- **SessionStart** emits the standing directive plus a short summary of what
+  changed in the graph in the last 7 days, scoped to the project the current
+  directory routes to.
+- **UserPromptSubmit** is the push. Before each prompt reaches the model, it
+  injects a mini index of the cells relevant to that prompt: ids and titles
+  only, plus a count of the tripwires (challenged or stale cells) on the topic.
+  It is deliberately incomplete, so the agent still runs a real `recall compile`
+  instead of treating the index as the answer. The dig is danger-proportional: a
+  shown row is marked `[SUPERSEDED?]` or `[STALE]` only when that row is itself
+  the superseded or stale cell, and it escalates to `DIG REQUIRED` only then, so
+  it does not cry wolf on every prompt.
+- **Stop** is the backstop. When a row was flagged `DIG REQUIRED`, this mode
+  blocks the turn from ending until the transcript shows the agent actually read
+  the flagged cell, then steps out of the way. It is single-shot and
+  loop-guarded, so it nudges once and never traps a turn, and it fails open on
+  any error.
 
 **Codex** (`recall codex sync`) copies the recall skill into
 `~/.codex/skills/`, registers the recall MCP server under `[mcp_servers.recall]`
