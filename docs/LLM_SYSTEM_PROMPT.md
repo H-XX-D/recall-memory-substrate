@@ -70,6 +70,25 @@ At the end of substantial work:
 3. Prefer compact summaries that will compile well into future context packets.
 ```
 
+## Running under the Claude Code hook
+
+If you installed the integration with `recall claude sync`, three hooks already
+enforce most of the above, so the agent does not rely on prompt discipline alone:
+
+- **SessionStart** injects this directive plus a short summary of recent graph
+  activity.
+- **UserPromptSubmit** pushes a mini index of the cells relevant to each prompt
+  (ids and titles plus tripwire counts) before the model sees it. Treat the
+  index as a map, not the answer: run a real `recall compile` for anything
+  load-bearing, and especially when a row is marked `[SUPERSEDED?]`, `[STALE]`,
+  or `DIG REQUIRED`.
+- **Stop** is the dig backstop: if a row was flagged `DIG REQUIRED` and the turn
+  ends without a real Recall read, it blocks the turn until you read the flagged
+  cell. The simplest way to never hit it is to compile when the push flags
+  something.
+
+See [`17_ENFORCING_USAGE.md`](17_ENFORCING_USAGE.md).
+
 ## Where To Put This
 
 Put the pasteable instruction anywhere your LLM or agent framework stores

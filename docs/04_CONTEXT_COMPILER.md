@@ -58,7 +58,7 @@ not a graph dump.
   cause tag as the dig heuristic: a challenged cell warrants a peek before
   you rely on it.
 - `standing_programs` lists the enabled programs (watch, drift, quorum,
-  score) covering each selected cell, with program and hyperedge handles.
+  trend, score) covering each selected cell, with program and hyperedge handles.
   When you write new evidence about a guarded cell, tie it into the listed
   bundle instead of orphaning it.
 - `conflicts` includes each selected cell's incoming `contradicts`/`concerns`

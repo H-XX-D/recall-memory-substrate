@@ -72,6 +72,15 @@ dangling/unresolvable trust edges (dry-run by default; `--apply` deletes), and
 `recall calibration` reports per-actor Brier calibration: stated confidence
 versus contradiction outcomes.
 
+`recall claude sync` and `recall codex sync` wire Recall into Claude Code and
+Codex (the skill, the MCP server, and the displacement of native auto-memory).
+For Claude Code the hook runs in three modes: a SessionStart directive plus a
+7-day activity summary, a UserPromptSubmit push (a mini index of relevant cells
+with a danger-proportional dig), and a Stop dig backstop that blocks the turn
+from ending until a flagged cell is read. See
+[`17_ENFORCING_USAGE.md`](17_ENFORCING_USAGE.md) and
+[`11_INSTALLATION.md`](11_INSTALLATION.md).
+
 Routine memory writes are not a user workflow. Once Recall is running, the LLM
 submits strict write proposals through MCP `recall_write`, and admission/firewall
 decide what can land. CLI write/admit commands may exist for connector plumbing,
