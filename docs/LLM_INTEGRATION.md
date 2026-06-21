@@ -202,7 +202,7 @@ Three packet signals govern how much to trust and where to dig:
   peek the challenger before relying on the claim.
 - `conflicts` lists each selected cell's incoming challengers with handles.
   A cell appearing here is contested, no matter how confident its line reads.
-- `standing_programs` lists the gates (watch, drift, quorum, score) covering
+- `standing_programs` lists the gates (watch, drift, quorum, trend, score) covering
   selected cells, with program and hyperedge handles. When writing new
   evidence about a guarded cell, reference the listed bundle so the gate
   sees it. Do not orphan evidence next to an existing gate.
@@ -289,6 +289,16 @@ announced once:
   (Edit, Write, destructive Bash) unless a recent Recall cell records the
   rationale for the change (`recall_pretooluse_guard.py.sample`).
 
-The soft layers nudge; the guard enforces. Setup, decision rules,
-configuration controls, and compliance auditing live in
+The soft layers nudge; the guard enforces.
+
+For Claude Code specifically, `recall claude sync` installs the productized
+version of the first two as one hook: a UserPromptSubmit push that injects a mini
+index of the cells relevant to the prompt (ids and titles plus tripwire counts,
+deliberately incomplete so you still run a real `recall_compile` for anything
+load-bearing), and a Stop dig backstop that blocks the turn from ending until the
+transcript shows a real Recall read when a row was flagged `DIG REQUIRED`. The
+`.sample` templates remain the runtime-agnostic building blocks and the hard
+PreToolUse guard.
+
+Setup, decision rules, configuration controls, and compliance auditing live in
 [Enforcing Recall Usage](17_ENFORCING_USAGE.md).
