@@ -41,7 +41,11 @@ DIRECTIVE = (
     "Asking the user for a fact you could retrieve is the same failure as asserting from "
     "unchecked memory: search Recall before asking.\n"
     "Write durable findings back via the write helper / `recall admit`. "
-    "Do not assert from memory you have not checked here."
+    "Do not assert from memory you have not checked here.\n"
+    "You can also stand up a hyperedge PROGRAM that runs OUTSIDE the loop and keeps a rolling read "
+    "(trend, watch, drift, quorum, score). When a value worth tracking over time, a state to watch "
+    "for change, an attribution to monitor, or a claim needing k-of-m sign-off recurs, OFFER to "
+    "create one instead of re-deriving it by hand."
 )
 
 
