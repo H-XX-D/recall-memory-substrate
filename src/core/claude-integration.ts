@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
  *
  * Idempotently installs (and on re-run, refreshes to the bundled "best
  * functional version") everything that makes a Claude Code agent adopt Recall:
- *   1. the consult-recall hook script (SessionStart + UserPromptSubmit),
+ *   1. the consult-recall hook script (SessionStart + UserPromptSubmit + Stop),
  *   2. the recall skill,
  *   3. the recall MCP server registration (user scope, ~/.claude.json),
  *   4. CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 so Recall is not shadowed by Claude
@@ -68,10 +68,11 @@ export interface ClaudeIntegrationStatus {
 // Pure helpers (unit-tested; no filesystem access)
 // ---------------------------------------------------------------------------
 
-/** The canonical SessionStart + UserPromptSubmit hook groups for a given script path. */
+/** The canonical SessionStart + UserPromptSubmit + Stop hook groups for a given script path. */
 export function recallHookGroups(hookCommandPath: string): {
   SessionStart: unknown;
   UserPromptSubmit: unknown;
+  Stop: unknown;
 } {
   const q = JSON.stringify(hookCommandPath);
   return {
@@ -80,6 +81,9 @@ export function recallHookGroups(hookCommandPath: string): {
     },
     UserPromptSubmit: {
       hooks: [{ type: "command", command: `python3 ${q} --prompt`, timeout: 10 }],
+    },
+    Stop: {
+      hooks: [{ type: "command", command: `python3 ${q} --stop`, timeout: 10 }],
     },
   };
 }
@@ -107,7 +111,7 @@ export function mergeSettings(
   const groups = recallHookGroups(opts.hookCommandPath);
 
   const hooks: Record<string, unknown> = { ...((next.hooks as Record<string, unknown>) ?? {}) };
-  for (const event of ["SessionStart", "UserPromptSubmit"] as const) {
+  for (const event of ["SessionStart", "UserPromptSubmit", "Stop"] as const) {
     const prev = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
     const withoutRecall = prev.filter((g) => !isRecallGroup(g));
     const nextArr = [...withoutRecall, groups[event]];
