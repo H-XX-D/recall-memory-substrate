@@ -85,7 +85,7 @@ describe("importAutoMemoryToGlobal", () => {
   });
 
   it("globalDbPath resolves under ~/.recall/db", () => {
-    assert.match(globalDbPath(), /\.recall\/db\/global\.sqlite3$/);
+    assert.match(globalDbPath(), /\.recall[\\/]db[\\/]global\.sqlite3$/);
   });
 });
 
