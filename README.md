@@ -421,8 +421,15 @@ on the decision built on it, that decision's effective confidence falls,
 and a watcher on the decision can fire next. Run a watch from cron and a
 standing decision becomes a monitored service.
 
-Two more operations round out the set:
+A few more operations round out the set:
 
+- `trend` is finite-difference calculus over a program's run history. Each run
+  appends the bundle's current value to a sliding window, then reports
+  direction, slope, and acceleration, tripping on a sustained directional
+  streak or a slope past `delta`. Where `watch` asks whether a value moved,
+  `trend` asks which way it has been moving and how fast, so a belief whose
+  conviction is quietly eroding over many runs trips before it ever crosses a
+  hard threshold.
 - `drift` is watch with attribution. A tripped run names which member
   moved (`topMover`, plus a ranked `movers` list), so you can see what
   caused a gate to fall.
