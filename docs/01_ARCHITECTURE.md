@@ -42,6 +42,21 @@ recall://cell/<project>/<category>/<type>/<subject>/<idea>/<timestamp>/<id>
 Facet tags are useful but not mandatory. Missing address facets are derived from
 scope, intent, title, topic, and provenance timestamp.
 
+Every cell carries two confidences: the immutable stated confidence the writer
+asserted, and a living effective confidence the graph computes on every read
+from incoming `supports`/`contradicts`/`concerns` and per-actor calibration
+(`clamp01(stated × actor-calibration + support − challenge)`). Ranking and
+compile packets use the effective value, so a contradicted cell sinks on its own
+with no model in the loop. Corrections supersede rather than overwrite: a new
+fact admitted with a `contradicts` edge demotes the prior cell and surfaces the
+resolution to later sessions instead of leaving two competing rows.
+
+Storage is per-project. The CLI wrapper routes each call to a SQLite database by
+walking up from the current directory through a registry of project roots (first
+match wins), falling back to a shared global database. Reads can federate the
+project and global databases with `--include-global`; writes always land in
+exactly one database.
+
 Primary node classes:
 
 - observation
@@ -132,8 +147,13 @@ Declared graph operations transform graph-local inputs into declared outputs.
 They must be versioned, sandboxed, permissioned, testable, and auditable.
 
 The current implementation supports multi-party graph relations and a sandboxed
-`recall.program.v1` runtime with deterministic `score`, `emit_witness`, and
-`tag_projection` operations. It does not execute arbitrary user code.
+`recall.program.v1` runtime with deterministic operations: `score`,
+`emit_witness`, `tag_projection`, `watch` (a standing reflex that trips when a
+bundle's effective confidence moves past a delta), `drift` (watch with member
+attribution), `quorum` (k-of-m sign-off as a graph object), and `trend`
+(finite-difference calculus over a program's run history: direction, slope, and
+acceleration). It does not execute arbitrary user code. See
+[`06_ADVANCED_GRAPH_OPERATIONS.md`](06_ADVANCED_GRAPH_OPERATIONS.md).
 
 Program, DAG, eval, and daemon outputs can be closed back into graph memory with
 explicit derivation mode. Derivation creates strict `recall.write.v1` proposals
