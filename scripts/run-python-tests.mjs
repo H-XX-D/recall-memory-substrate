@@ -50,7 +50,11 @@ if (!python) {
   process.exit(0);
 }
 
-for (const script of ["python/tests/toolkit_unit_tests.py", "python/hooks/test_hooks.py"]) {
+for (const script of [
+  "python/tests/toolkit_unit_tests.py",
+  "python/hooks/test_hooks.py",
+  "integrations/claude/hooks/test_dig_backstop.py",
+]) {
   const result = spawnSync(python, [script], { stdio: "inherit", env });
   if (result.status !== 0) {
     process.exit(result.status ?? 1);

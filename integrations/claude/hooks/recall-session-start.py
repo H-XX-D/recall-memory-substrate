@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""SessionStart + UserPromptSubmit hook for the Recall active-memory substrate.
+"""SessionStart + UserPromptSubmit + Stop hook for the Recall active-memory substrate.
 
-Two modes:
+Three modes:
 
   default (SessionStart): emit the standing directive plus a cheap 7d
     recent-activity summary, scoped to whichever Recall DB the current
@@ -18,12 +18,21 @@ Two modes:
     runs a real `recall compile` and keeps the deeper tooling (search, subgraph,
     cell expansion) in play. The push is the invitation, not the substitute.
 
+  --stop (Stop): the dig backstop. The push can flag a row DIG REQUIRED, but a
+    UserPromptSubmit hook cannot enforce the dig because it returns before the
+    model acts. So the push records the obligation as per-session state, and
+    this mode blocks the turn from ending until the transcript shows a real
+    Recall read during the turn. Single-shot and loop-guarded: it nudges once,
+    never hard-traps.
+
 Fail-open by design: any error, timeout, or missing dependency falls back to the
 directive alone. A prompt/session hook must never break submission. The
 per-prompt compile is given a hard 4s timeout because it runs on every prompt.
 """
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -154,7 +163,7 @@ def _trim(line: str, n: int) -> str:
     return (line[: n - 1] + "…") if len(line) > n else line
 
 
-def prompt_digest(prompt: str, cwd: str) -> str:
+def prompt_digest(prompt: str, cwd: str, flagged_out=None) -> str:
     """Build a MINI index of cells relevant to `prompt`: ids + titles only, plus
     a count of the tripwires (challenged / stale cells) touching the topic.
 
@@ -210,8 +219,12 @@ def prompt_digest(prompt: str, cwd: str) -> str:
         tag = ""
         if short and short in stale_ids:
             tag, flagged = "  [STALE]", True
+            if flagged_out is not None:
+                flagged_out.append(short)
         elif short and short in challenged_ids:
             tag, flagged = "  [SUPERSEDED?]", True
+            if flagged_out is not None:
+                flagged_out.append(short)
         index.append(f"- {_trim(body, 110)}" + (f"  [{cid}]" if cid else "") + tag)
     if not index:
         return ""
@@ -243,18 +256,136 @@ def prompt_digest(prompt: str, cwd: str) -> str:
     return "\n".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# Dig backstop (Stop hook)
+# ---------------------------------------------------------------------------
+# The per-prompt push can flag a row DIG REQUIRED, but a UserPromptSubmit hook
+# cannot enforce the dig: it has already returned before the model acts. So the
+# push records the obligation as per-session state, and the Stop hook below
+# refuses to let the turn end until the transcript shows a real Recall read.
+# Single-shot + loop-guarded: it nudges once, never hard-traps.
+
+STATE_DIR = os.path.expanduser("~/.recall/.dig_pending")
+
+# A Recall READ inside a transcript tool_use line: CLI verbs or the MCP read tools.
+RECALL_READ_RE = re.compile(
+    r"recall\s+(?:compile|search|semantic|cell\s+show|subgraph|beliefs|maintenance)"
+    r"|recall_peek\.py"
+    r"|mcp__recall__recall_(?:compile|search|semantic|cell|subgraph|beliefs|status)",
+    re.IGNORECASE,
+)
+
+
+def _state_path(session_id: str) -> str:
+    if not session_id:
+        return ""
+    safe = hashlib.sha1(session_id.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(STATE_DIR, safe + ".json")
+
+
+def _transcript_len(transcript_path: str) -> int:
+    try:
+        if transcript_path and os.path.exists(transcript_path):
+            with open(transcript_path, "r", encoding="utf-8", errors="ignore") as f:
+                return sum(1 for _ in f)
+    except Exception:
+        pass
+    return 0
+
+
+def write_pending_dig(data: dict, flagged_ids) -> None:
+    """Persist (when flagged) or clear (when not) this turn's dig obligation,
+    keyed by session id. Records the transcript length at submit time so the
+    Stop hook only scans tool calls made during this turn. Fail-open."""
+    path = _state_path(data.get("session_id") or "")
+    if not path:
+        return
+    try:
+        if flagged_ids:
+            os.makedirs(STATE_DIR, exist_ok=True)
+            payload = {
+                "ids": sorted(set(flagged_ids)),
+                "from_line": _transcript_len(data.get("transcript_path", "")),
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+        elif os.path.exists(path):
+            os.remove(path)  # no obligation this turn: clear any stale one
+    except Exception:
+        pass
+
+
+def did_dig(transcript_path: str, from_line: int) -> bool:
+    """True if a Recall READ tool call appears in transcript lines [from_line:].
+    Requires the line to be a tool_use so a prose mention does not count.
+    Fail-open: if the transcript cannot be read, return True (allow)."""
+    try:
+        if not transcript_path or not os.path.exists(transcript_path):
+            return True
+        with open(transcript_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+    except Exception:
+        return True
+    for raw in lines[max(0, from_line):]:
+        if "tool_use" in raw and RECALL_READ_RE.search(raw):
+            return True
+    return False
+
+
+def stop_backstop(data: dict) -> str:
+    """Return a block reason if the turn must not end yet, else "". The
+    obligation is consumed on read, so the backstop fires at most once per
+    flagged turn (a nudge with teeth, never a hard trap). Fail-open."""
+    if data.get("stop_hook_active"):
+        return ""  # already blocked once this cycle; never loop
+    path = _state_path(data.get("session_id") or "")
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception:
+        return ""
+    try:
+        os.remove(path)  # single-shot: consume the obligation now
+    except Exception:
+        pass
+    ids = state.get("ids") or []
+    if not ids:
+        return ""
+    if did_dig(data.get("transcript_path", ""), int(state.get("from_line", 0) or 0)):
+        return ""
+    shown = ", ".join(ids[:5])
+    return (
+        "DIG REQUIRED fired this turn on superseded/stale Recall cell(s): "
+        f"{shown}. The turn ended without reading them. Run "
+        'recall compile "<task>" (or recall cell show <id>) on the flagged '
+        "cell(s), and correct anything asserted from a stale row, before finishing."
+    )
+
+
 def main() -> int:
+    # --stop:   dig backstop (block the turn end until a flagged row was dug).
     # --prompt: per-prompt push (directive + mini relevance index).
-    # default: full SessionStart payload (directive + 7d recent-activity diff).
-    prompt_mode = "--prompt" in sys.argv[1:]
-    event = "UserPromptSubmit" if prompt_mode else "SessionStart"
+    # default:  full SessionStart payload (directive + 7d recent-activity diff).
+    argv = sys.argv[1:]
     data = read_hook_input()
+
+    if "--stop" in argv:
+        reason = stop_backstop(data)
+        print(json.dumps({"decision": "block", "reason": reason} if reason else {}))
+        return 0
+
+    prompt_mode = "--prompt" in argv
+    event = "UserPromptSubmit" if prompt_mode else "SessionStart"
 
     ctx = DIRECTIVE
     if prompt_mode:
-        digest = prompt_digest(data.get("prompt", ""), data.get("cwd", ""))
+        flagged_ids: list = []
+        digest = prompt_digest(data.get("prompt", ""), data.get("cwd", ""), flagged_ids)
         if digest:
             ctx = digest + "\n\n" + DIRECTIVE
+        write_pending_dig(data, flagged_ids)
     else:
         summary = recent_summary()
         if summary:

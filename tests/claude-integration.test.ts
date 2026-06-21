@@ -16,9 +16,9 @@ import {
 const HOOK = "/home/u/.claude/hooks/recall-session-start.py";
 
 describe("mergeSettings", () => {
-  it("injects both hook events and the auto-memory env var into an empty config", () => {
+  it("injects all three hook events and the auto-memory env var into an empty config", () => {
     const { next, changed } = mergeSettings({}, { hookCommandPath: HOOK, disableAutoMemory: true });
-    assert.deepEqual(changed.sort(), ["env.CLAUDE_CODE_DISABLE_AUTO_MEMORY", "hooks.SessionStart", "hooks.UserPromptSubmit"].sort());
+    assert.deepEqual(changed.sort(), ["env.CLAUDE_CODE_DISABLE_AUTO_MEMORY", "hooks.SessionStart", "hooks.UserPromptSubmit", "hooks.Stop"].sort());
     assert.equal((next.env as Record<string, string>).CLAUDE_CODE_DISABLE_AUTO_MEMORY, "1");
     const ss = (next.hooks as Record<string, unknown[]>).SessionStart;
     assert.equal(ss.length, 1);
@@ -86,11 +86,13 @@ describe("upsertMcpServer", () => {
 });
 
 describe("recallHookGroups", () => {
-  it("uses --prompt for UserPromptSubmit and the bare command for SessionStart", () => {
+  it("uses --prompt for UserPromptSubmit, --stop for Stop, and the bare command for SessionStart", () => {
     const g = recallHookGroups(HOOK);
     assert.match(JSON.stringify(g.SessionStart), /recall-session-start\.py/);
-    assert.doesNotMatch(JSON.stringify(g.SessionStart), /--prompt/);
+    assert.doesNotMatch(JSON.stringify(g.SessionStart), /--prompt|--stop/);
     assert.match(JSON.stringify(g.UserPromptSubmit), /--prompt/);
+    assert.match(JSON.stringify(g.Stop), /--stop/);
+    assert.doesNotMatch(JSON.stringify(g.Stop), /--prompt/);
   });
 });
 
