@@ -86,7 +86,7 @@ every update) and backs up your config before editing.
 
 ```bash
 recall claude sync     # installs the recall skill + MCP server + the
-                       # SessionStart/UserPromptSubmit consult-Recall hook, and sets
+                       # three-mode consult-Recall hook (push + dig backstop), and sets
                        # CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 so Recall is THE memory layer
 recall claude status   # report which pieces are installed
 recall claude enable-auto-memory   # revert: re-enable Claude's native note-memory
@@ -94,7 +94,10 @@ recall claude enable-auto-memory   # revert: re-enable Claude's native note-memo
 
 Keep native auto-memory during sync with `RECALL_KEEP_AUTOMEMORY=1`. Touches
 `~/.claude/skills/recall/`, `~/.claude.json` (MCP), and `~/.claude/settings.json`
-(hook + env), and nothing else.
+(hook + env), and nothing else. The hook runs in three modes (SessionStart
+directive, the UserPromptSubmit push with a danger-proportional dig, and the
+Stop dig backstop that blocks a turn from ending until a flagged cell is read);
+see [`17_ENFORCING_USAGE.md`](17_ENFORCING_USAGE.md) for what each mode does.
 
 Bring your existing Claude Code auto-memory along:
 

@@ -20,6 +20,28 @@ Secrets side graph.
 - Reading a secret requires the password again.
 - Passwords should be passed through stdin, not command-line arguments.
 
+## The admission firewall
+
+The rejection in the first rule is enforced by `src/core/firewall.ts`, which
+screens every write proposal before admission and refuses content that matches a
+known secret shape:
+
+- vendor key prefixes (for example Stripe `sk_live_` / `rk_live_`, AWS secret
+  access keys),
+- private-key blocks (`-----BEGIN ... PRIVATE KEY-----`),
+- secret-named assignments (`password:`, `api_key=`, `client_secret=`, and the
+  like, where a six-or-more-character value follows),
+- `KEY=value` env dumps whose key name itself reads as a secret (for example
+  `export DB_PASSWORD=...`),
+
+and it rejects outright any proposal marked `policy.sensitivity: "secret"`. It is
+a high-recall heuristic backstop, not a guarantee: it stops the common accidents
+(an agent pasting a live credential into memory), but it cannot catch a secret
+that does not look like one, so a bare high-entropy string with no telltale name
+will pass. Treat it as the net that keeps obvious leaks out of the plaintext
+graph, and put anything you actually need to keep in the encrypted side graph
+below.
+
 ## CLI
 
 Save:

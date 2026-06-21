@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-21
+
 ### Security
 
 - **Secret firewall broadened** (`src/core/firewall.ts`): an adversarial stress
@@ -36,6 +38,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Claude Code per-prompt push and dig backstop**
+  (`integrations/claude/hooks/recall-session-start.py`): the consult-Recall hook
+  now runs in three modes, all installed by `recall claude sync`. SessionStart
+  emits the directive plus a 7-day activity summary. UserPromptSubmit
+  (`--prompt`) is the push: it injects a MINI index of the cells relevant to the
+  prompt (ids and titles plus tripwire counts), deliberately incomplete so the
+  agent still runs a real `recall compile`. The danger-proportional dig marks a
+  shown row `[SUPERSEDED?]` or `[STALE]` only when that row is itself the
+  superseded or stale target, escalating to `DIG REQUIRED` only then, so it does
+  not cry wolf. Stop (`--stop`) is the backstop: it records the per-session dig
+  obligation and blocks the turn from ending until the transcript shows a real
+  Recall read, single-shot and loop-guarded so it nudges once and never
+  hard-traps. Covered by `integrations/claude/hooks/test_dig_backstop.py`.
+- **`trend` program operation** (`src/core/programs.ts`): finite-difference
+  calculus over a program's run history. Each run appends the bundle's current
+  value to a sliding window; the operation reports direction, slope, and
+  acceleration and trips on a sustained directional streak or a slope past
+  `delta`. Where `watch` asks whether a value moved, `trend` asks which way it
+  has been moving and how fast.
+- **Mem0 and Zep importers** (`recall import mem0|zep`): migrate an exported
+  Mem0 or Zep store into Recall as calibrated cells through the shared import
+  core. The Zep adapter reconstructs supersession from bi-temporal history (an
+  invalidated fact is superseded by its replacement via a `contradicts` edge).
+  Dry-run by default; `--apply` writes.
+- **`recall import local`**: lift global or cross-cutting cells into the
+  per-project database that the current directory routes to, so memory written
+  before a project was registered moves into its own graph. Dry-run by default.
 - **Release-readiness surface**: `recall version` now reports the package
   version shared by the CLI and MCP `initialize`; `recall export` /
   `recall import --json ... [--force]` provide a portable `recall.export.v1`
@@ -269,6 +298,7 @@ memory.
   hook, PreToolUse guard) with rollout guidance and longitudinal
   metrics interpretation.
 
-[Unreleased]: https://github.com/H-XX-D/recall-memory-substrate/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/H-XX-D/recall-memory-substrate/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/H-XX-D/recall-memory-substrate/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/H-XX-D/recall-memory-substrate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/H-XX-D/recall-memory-substrate/releases/tag/v0.1.0
