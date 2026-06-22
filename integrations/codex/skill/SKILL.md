@@ -33,6 +33,11 @@ current working directory; pass `--db <path>` to target a specific DB. Verbs:
 confidence vs contradiction outcomes), `recall import auto-memory`
 (`[--root path] [--project name] [--apply] [--db path]`).
 
+**Slash prompt path**: `recall codex sync` also installs
+`~/.codex/prompts/recall.md`. After restarting Codex or opening a new chat,
+invoke it as `/prompts:recall` (or search `recall` in the slash menu) to start a
+Recall-oriented turn explicitly.
+
 ## Migrate existing Claude Code auto-memory
 
 To bring existing Claude Code auto-memory into Recall, run

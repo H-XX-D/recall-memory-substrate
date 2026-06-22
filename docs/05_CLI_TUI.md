@@ -73,7 +73,8 @@ dangling/unresolvable trust edges (dry-run by default; `--apply` deletes), and
 versus contradiction outcomes.
 
 `recall claude sync` and `recall codex sync` wire Recall into Claude Code and
-Codex (the skill, the MCP server, and the displacement of native auto-memory).
+Codex (the skill, the MCP server, the Codex `/prompts:recall` custom prompt,
+and the displacement of native auto-memory).
 For Claude Code the hook runs in three modes: a SessionStart directive plus a
 7-day activity summary, a UserPromptSubmit push (a mini index of relevant cells
 with a danger-proportional dig), and a Stop dig backstop that blocks the turn

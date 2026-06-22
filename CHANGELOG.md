@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Codex slash prompt installed by sync** (`recall codex sync`): the Codex
+  integration now also writes the documented custom prompt file at
+  `~/.codex/prompts/recall.md`, so Recall can be invoked from Codex's slash menu
+  as `/prompts:recall` after a restart/new chat. `recall codex status` now
+  reports whether that slash prompt is installed, and the Codex integration test
+  covers the prompt plus idempotent re-runs.
+
 ## [0.3.0] - 2026-06-21
 
 ### Security

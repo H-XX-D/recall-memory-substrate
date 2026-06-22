@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
  *   1. the recall skill (~/.codex/skills/recall/),
  *   2. the recall MCP server registration in ~/.codex/config.toml
  *      ([mcp_servers.recall]),
- *   3. a marker-delimited "consult Recall" directive in ~/.codex/AGENTS.md —
+ *   3. a custom prompt slash command at ~/.codex/prompts/recall.md,
+ *   4. a marker-delimited "consult Recall" directive in ~/.codex/AGENTS.md —
  *      Codex's always-read global instruction surface, the analog of Claude
  *      Code's SessionStart hook.
  *
@@ -37,6 +38,8 @@ export interface CodexIntegrationOptions {
   configPath?: string;
   /** Defaults to <codexHome>/AGENTS.md */
   agentsPath?: string;
+  /** Defaults to <codexHome>/prompts/recall.md */
+  slashPromptPath?: string;
   /** Defaults to the bundled integrations/codex directory */
   assetsRoot?: string;
   /** Shared skill scripts/reference root. Defaults to the bundled integrations/claude/skill. */
@@ -52,10 +55,13 @@ export interface CodexIntegrationResult {
   skillDir: string;
   configPath: string;
   agentsPath: string;
+  slashPromptPath: string;
   mcpRegistered: boolean;
+  slashCommandInstalled: boolean;
   agentsDirectiveInstalled: boolean;
   configBackup: string | null;
   agentsBackup: string | null;
+  slashPromptBackup: string | null;
   actions: string[];
   notice: string;
 }
@@ -64,9 +70,11 @@ export interface CodexIntegrationStatus {
   codexHome: string;
   skillInstalled: boolean;
   mcpRegistered: boolean;
+  slashCommandInstalled: boolean;
   agentsDirectiveInstalled: boolean;
   configPath: string;
   agentsPath: string;
+  slashPromptPath: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +99,36 @@ export function recallAgentsBlock(): string {
     "  every future session sees the current answer and that the old was overruled.",
     "- Never store secrets in normal memory.",
     AGENTS_END,
+    "",
+  ].join("\n");
+}
+
+/** The documented Codex custom-prompt slash entry installed by `recall codex sync`. */
+export function recallSlashPrompt(): string {
+  return [
+    "---",
+    "description: Use Recall active memory for this task",
+    "argument-hint: [TASK=\"what to work on\"]",
+    "---",
+    "",
+    "Use Recall as the durable memory layer for this request before relying on recollection.",
+    "",
+    "If arguments were supplied, treat them as the task: $ARGUMENTS.",
+    "If no arguments were supplied, infer the task from the current user request.",
+    "",
+    "Start by compiling an ID-first Recall context packet:",
+    "",
+    "```bash",
+    "recall compile \"$ARGUMENTS\" --words 900",
+    "```",
+    "",
+    "When $ARGUMENTS is empty, replace it with a concise description of the current task.",
+    "Use the returned cell IDs as evidence handles, expand lazily with `recall cell show <id>`",
+    "only when exact content matters, then do the work.",
+    "",
+    "Write durable outcomes back through `recall_write` or `recall admit`. If the new memory",
+    "corrects or invalidates an older cell, first find the prior cell and write the update with",
+    "`evidence.contradicts` pointing at that prior cell id.",
     "",
   ].join("\n");
 }
@@ -243,6 +281,7 @@ export function syncCodexIntegration(options: CodexIntegrationOptions = {}): Cod
   const codexHome = options.codexHome ?? defaultCodexHome();
   const configPath = options.configPath ?? join(codexHome, "config.toml");
   const agentsPath = options.agentsPath ?? join(codexHome, "AGENTS.md");
+  const slashPromptPath = options.slashPromptPath ?? join(codexHome, "prompts", "recall.md");
   const assetsRoot = options.assetsRoot ?? defaultAssetsRoot();
   const sharedSkillRoot = options.sharedSkillRoot ?? defaultSharedSkillRoot();
   const mcpCommand = options.mcpCommand ?? "recall-mcp";
@@ -268,7 +307,15 @@ export function syncCodexIntegration(options: CodexIntegrationOptions = {}): Cod
     actions.push(`mcp registered: ${configPath}`);
   }
 
-  // 3. AGENTS.md directive, backed up before edit
+  // 3. custom prompt slash command, backed up before edit
+  const slashPrompt = recallSlashPrompt();
+  let slashPromptBackup: string | null = null;
+  if (readText(slashPromptPath) !== slashPrompt) {
+    slashPromptBackup = backupAndWrite(slashPromptPath, slashPrompt);
+    actions.push(`slash command installed: ${slashPromptPath}`);
+  }
+
+  // 4. AGENTS.md directive, backed up before edit
   const agents = mergeAgentsMd(readText(agentsPath));
   let agentsBackup: string | null = null;
   if (agents.changed) {
@@ -277,19 +324,23 @@ export function syncCodexIntegration(options: CodexIntegrationOptions = {}): Cod
   }
 
   const notice =
-    "Recall wired into Codex: skill + MCP server + AGENTS.md directive. Codex has no single native-memory "
+    "Recall wired into Codex: skill + MCP server + /prompts:recall slash prompt + AGENTS.md directive. Codex has no single native-memory "
     + "kill switch, so Recall is positioned as the durable memory layer via the always-read AGENTS.md directive. "
-    + "Re-run `recall codex sync` anytime to refresh to the latest bundled version.";
+    + "Re-run `recall codex sync` anytime to refresh to the latest bundled version. Restart Codex or open a new chat "
+    + "after installing/updating custom prompts so the slash menu reloads.";
 
   return {
     codexHome,
     skillDir,
     configPath,
     agentsPath,
+    slashPromptPath,
     mcpRegistered: true,
+    slashCommandInstalled: true,
     agentsDirectiveInstalled: true,
     configBackup,
     agentsBackup,
+    slashPromptBackup,
     actions,
     notice,
   };
@@ -299,14 +350,19 @@ export function codexIntegrationStatus(options: CodexIntegrationOptions = {}): C
   const codexHome = options.codexHome ?? defaultCodexHome();
   const configPath = options.configPath ?? join(codexHome, "config.toml");
   const agentsPath = options.agentsPath ?? join(codexHome, "AGENTS.md");
+  const slashPromptPath = options.slashPromptPath ?? join(codexHome, "prompts", "recall.md");
   const config = readText(configPath);
   const agents = readText(agentsPath);
+  const slashPrompt = readText(slashPromptPath);
   return {
     codexHome,
     skillInstalled: existsSync(join(codexHome, "skills", MCP_NAME, "SKILL.md")),
     mcpRegistered: /\[mcp_servers\.recall\]/.test(config),
+    slashCommandInstalled: slashPrompt.includes("Use Recall active memory for this task")
+      && slashPrompt.includes("recall compile"),
     agentsDirectiveInstalled: agents.includes(AGENTS_BEGIN),
     configPath,
     agentsPath,
+    slashPromptPath,
   };
 }

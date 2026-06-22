@@ -1092,8 +1092,9 @@ Commands:
   recall claude disable-auto-memory   set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 only
   recall claude enable-auto-memory    re-enable Claude Code built-in auto-memory
   recall codex sync                   install/refresh the Codex integration (skill, MCP server in config.toml,
-                                      and a Recall directive in ~/.codex/AGENTS.md). Codex has no native-memory
-                                      kill switch, so displacement is prompt-level via the AGENTS.md directive
+                                      /prompts:recall custom prompt, and a Recall directive in ~/.codex/AGENTS.md).
+                                      Codex has no native-memory kill switch, so displacement is prompt-level via
+                                      the AGENTS.md directive
   recall codex status                 report which Codex integration pieces are installed
 `);
 }

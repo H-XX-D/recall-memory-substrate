@@ -90,7 +90,7 @@ MCP server, the consult-Recall hook, and makes Recall the durable memory layer:
 
 ```bash
 recall claude sync     # Claude Code: skill + MCP + hook; turns OFF native auto-memory AND lifts existing auto-memory into the global graph
-recall codex sync      # OpenAI Codex:  skill + MCP in config.toml + a Recall directive in AGENTS.md
+recall codex sync      # OpenAI Codex:  skill + MCP + /prompts:recall + Recall directive in AGENTS.md
 recall claude status   # confirm what's wired   (recall codex status for Codex)
 ```
 
@@ -101,8 +101,10 @@ Claude auto-memory you already have into the global graph in the same step, so
 the facts you saved under `~/.claude/projects/<slug>/memory/` move into Recall
 instead of being stranded in files the agent no longer reads. That import is
 non-destructive (your `.md` files stay where they are) and idempotent (a re-run
-brings over only what changed); Codex keeps its memory in `AGENTS.md`, which
-`codex sync` wires directly, so there is nothing separate to import there. To
+brings over only what changed); Codex keeps its standing instructions in
+`AGENTS.md`, which `codex sync` wires directly, and it also installs the
+documented custom prompt at `~/.codex/prompts/recall.md` so the slash menu can
+surface Recall after a Codex restart or new chat. To
 pull the other way, from the global graph down into a focused project db, run
 `recall import local --project <name>` (or `--tags a,b`); it copies the matching
 global cells and rejoins any hyperedge whose members all land. Both syncs back
@@ -242,7 +244,7 @@ each clip. Browse them all in the [companion gallery](https://h-xx-d.github.io/r
 
 | Screencast | What it shows |
 |---|---|
-| **Install in one command** | `recall claude sync` / `recall codex sync` wires the skill, MCP, and consult-Recall hook, and turns off native note-memory |
+| **Install in one command** | `recall claude sync` / `recall codex sync` wires the skill, MCP, Recall command surface, and durable-memory directive/hook |
 | **[Autonomous memory across sessions](assets/recall-claude-demo.mp4)** | three `claude` sessions, natural prompts, nobody says "save"; persist → supersede → cold-session recall |
 | **Supersession mechanics** *(the clip above)* | the `contradicts` edge, read-time demotion, multi-link chains |
 | **Rollback a write** | journaled, reversible undo; archives the node, strips its relations |
@@ -360,12 +362,15 @@ an agent on Recall:
 
 **Codex** (`recall codex sync`) copies the recall skill into
 `~/.codex/skills/`, registers the recall MCP server under `[mcp_servers.recall]`
-in `~/.codex/config.toml`, and injects a marker-delimited Recall directive into
-`~/.codex/AGENTS.md`, Codex's always-read global instructions, the analog of
-Claude Code's SessionStart hook. Codex exposes no native-memory kill switch, so
-Recall is positioned as the durable memory layer at the prompt level via that
-directive. All edits are backed up before write, preserve your existing config,
-and are idempotent.
+in `~/.codex/config.toml`, installs the custom prompt slash entry at
+`~/.codex/prompts/recall.md` (invoke it as `/prompts:recall`, or search
+`recall` in the slash menu), and injects a marker-delimited Recall directive
+into `~/.codex/AGENTS.md`, Codex's always-read global instructions, the analog
+of Claude Code's SessionStart hook. Codex exposes no native-memory kill switch,
+so Recall is positioned as the durable memory layer at the prompt level via that
+directive. After adding or updating a custom prompt, restart Codex or open a new
+chat so the slash menu reloads. All edits are backed up before write, preserve
+your existing config, and are idempotent.
 
 ## How it works
 

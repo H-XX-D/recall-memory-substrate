@@ -115,14 +115,18 @@ version via a `contradicts` edge: own your memory, cancel the subscription.
 ```bash
 recall codex sync      # installs the recall skill, registers the MCP server under
                        # [mcp_servers.recall] in ~/.codex/config.toml, and adds a
-                       # Recall directive to ~/.codex/AGENTS.md (Codex's always-read instructions)
+                       # /prompts:recall custom prompt plus a Recall directive to
+                       # ~/.codex/AGENTS.md (Codex's always-read instructions)
 recall codex status    # report which pieces are installed
 ```
 
 Codex exposes no native-memory kill switch, so displacement is prompt-level via
 the AGENTS.md directive. Restart the agent after either sync and it's armed:
 it consults memory before relying on recollection and writes durable findings
-back on its own; you never have to tell it to "save."
+back on its own; you never have to tell it to "save." `recall codex sync` also
+creates `~/.codex/prompts/recall.md`; after restarting Codex or opening a new
+chat, use `/prompts:recall` (or search `recall` in the slash menu) to explicitly
+start a Recall-oriented turn.
 
 ## Other MCP clients (manual setup)
 

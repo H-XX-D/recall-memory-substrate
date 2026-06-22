@@ -10,6 +10,7 @@ import {
   codexIntegrationStatus,
   mergeAgentsMd,
   recallAgentsBlock,
+  recallSlashPrompt,
   syncCodexIntegration,
   upsertCodexMcpServer,
 } from "../src/core/codex-integration.js";
@@ -72,6 +73,17 @@ describe("recallAgentsBlock", () => {
     assert.match(b, /recall:end/);
     assert.match(b, /Read first/);
     assert.match(b, /evidence\.contradicts/);
+  });
+});
+
+describe("recallSlashPrompt", () => {
+  it("is a Codex custom prompt with Recall compile + write-back guidance", () => {
+    const prompt = recallSlashPrompt();
+    assert.match(prompt, /^---\ndescription:/);
+    assert.match(prompt, /argument-hint:/);
+    assert.match(prompt, /\$ARGUMENTS/);
+    assert.match(prompt, /recall compile/);
+    assert.match(prompt, /evidence\.contradicts/);
   });
 });
 
@@ -144,19 +156,27 @@ describe("syncCodexIntegration (filesystem round-trip)", () => {
       assert.ok(existsSync(join(r1.skillDir, "SKILL.md")));
       assert.ok(existsSync(configPath));
       assert.ok(existsSync(agentsPath));
+      assert.ok(existsSync(join(codexHome, "prompts", "recall.md")));
 
       const status = codexIntegrationStatus(opts);
       assert.deepEqual(
-        { skill: status.skillInstalled, mcp: status.mcpRegistered, agents: status.agentsDirectiveInstalled },
-        { skill: true, mcp: true, agents: true },
+        {
+          skill: status.skillInstalled,
+          mcp: status.mcpRegistered,
+          slash: status.slashCommandInstalled,
+          agents: status.agentsDirectiveInstalled,
+        },
+        { skill: true, mcp: true, slash: true, agents: true },
       );
       assert.match(readFileSync(configPath, "utf8"), /\[mcp_servers\.recall\]/);
       assert.match(readFileSync(agentsPath, "utf8"), /recall:begin/);
+      assert.match(readFileSync(status.slashPromptPath, "utf8"), /description: Use Recall active memory/);
 
       // second run: already canonical -> no backups created
       const r2 = syncCodexIntegration(opts);
       assert.equal(r2.configBackup, null, "idempotent re-run leaves config unchanged");
       assert.equal(r2.agentsBackup, null, "idempotent re-run leaves AGENTS.md unchanged");
+      assert.equal(r2.slashPromptBackup, null, "idempotent re-run leaves slash prompt unchanged");
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }
