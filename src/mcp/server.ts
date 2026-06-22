@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { admitWriteProposal } from "../core/admission.js";
+import { buildProposal, type BuildProposalInput } from "../core/proposal-builder.js";
+import { compactCell, compactHit, compactNode, compactReceipt, compactSemanticHit } from "./compact.js";
 import { analyzeMemory, memoryHealthToProposal } from "../core/analysis.js";
 import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle, runAcpExchange } from "../core/acp.js";
 import { inspectCell } from "../core/cell-context.js";
@@ -176,15 +178,18 @@ function callTool(name: string, args: Record<string, unknown>, store: SQLiteReca
     return textResult(JSON.stringify(output, null, 2));
   }
   if (name === "recall_cell") {
-    return textResult(JSON.stringify(inspectCell(store, stringArg(args, "idOrAddress")), null, 2));
+    const cell = inspectCell(store, stringArg(args, "idOrAddress"));
+    return textResult(JSON.stringify(wantsCompact(args) ? compactCell(cell) : cell, null, 2));
   }
   if (name === "recall_search") {
     const query = stringArg(args, "query");
-    return textResult(JSON.stringify({ query, results: store.search(query, 20) }, null, 2));
+    const hits = store.search(query, numberArg(args, "limit", 20));
+    return textResult(JSON.stringify({ query, results: wantsCompact(args) ? hits.map(compactHit) : hits }, null, 2));
   }
   if (name === "recall_semantic") {
     const query = stringArg(args, "query");
-    return textResult(JSON.stringify({ query, results: store.semanticSearch(query, 20) }, null, 2));
+    const hits = store.semanticSearch(query, numberArg(args, "limit", 20));
+    return textResult(JSON.stringify({ query, results: wantsCompact(args) ? hits.map(compactSemanticHit) : hits }, null, 2));
   }
   if (name === "recall_compile") {
     const task = stringArg(args, "task");
@@ -210,11 +215,17 @@ function callTool(name: string, args: Record<string, unknown>, store: SQLiteReca
       rings: stringArrayArg(args, "rings"),
       limit: typeof args.limit === "number" ? args.limit : 50
     };
-    return textResult(JSON.stringify({ filter, results: store.subgraph(filter) }, null, 2));
+    const subResults = store.subgraph(filter);
+    return textResult(JSON.stringify({ filter, results: wantsCompact(args) ? subResults.map(compactNode) : subResults }, null, 2));
   }
   if (name === "recall_write") {
-    const proposal = recordArg(args, "proposal");
-    return textResult(JSON.stringify(admitWriteProposal(proposal, store), null, 2));
+    const thin = (args as Record<string, unknown>).write;
+    const proposal =
+      thin && typeof thin === "object"
+        ? buildProposal(thin as unknown as BuildProposalInput)
+        : recordArg(args, "proposal");
+    const result = admitWriteProposal(proposal, store);
+    return textResult(JSON.stringify(wantsCompact(args) ? compactReceipt(result) : result, null, 2));
   }
   if (name === "recall_workflow_allocate") {
     const candidates = objectArrayArg(args, "candidates") as unknown as WorkCandidateInput[];
@@ -361,14 +372,22 @@ function tools(): unknown[] {
       identity: { type: "string" },
       limit: { type: "number" }
     }),
-    tool("recall_cell", "Inspect one addressable memory cell and summarize all connected data.", {
-      idOrAddress: { type: "string" }
+    tool("recall_cell", "Inspect one addressable memory cell and summarize all connected data. Compact by default (envelope + excerpt + relation counts); pass full:true for the full node and connected-cell bodies.", {
+      idOrAddress: { type: "string" },
+      compact: { type: "boolean" },
+      full: { type: "boolean" }
     }),
-    tool("recall_search", "Lexical search over Recall graph nodes.", {
-      query: { type: "string" }
+    tool("recall_search", "Lexical search over Recall graph nodes. Returns compact hits (id, title, kind, effectiveConfidence, excerpt) by default; pass full:true for full bodies.", {
+      query: { type: "string" },
+      limit: { type: "number" },
+      compact: { type: "boolean" },
+      full: { type: "boolean" }
     }),
-    tool("recall_semantic", "Semantic search over Recall graph nodes.", {
-      query: { type: "string" }
+    tool("recall_semantic", "Semantic search over Recall graph nodes. Returns compact hits with score by default; pass full:true for full bodies.", {
+      query: { type: "string" },
+      limit: { type: "number" },
+      compact: { type: "boolean" },
+      full: { type: "boolean" }
     }),
     tool("recall_compile", "Compile a compact context packet for an LLM task.", {
       task: { type: "string" },
@@ -386,10 +405,15 @@ function tools(): unknown[] {
       topics: { type: "array", items: { type: "string" } },
       entities: { type: "array", items: { type: "string" } },
       identities: { type: "array", items: { type: "string" } },
-      rings: { type: "array", items: { type: "string" } }
+      rings: { type: "array", items: { type: "string" } },
+      compact: { type: "boolean" },
+      full: { type: "boolean" }
     }),
-    tool("recall_write", "Persist a durable fact/decision/observation to Recall (your memory) through admission. This is where durable memory lives — do not keep durable facts in scratch files. CORRECTIONS: if this write changes or invalidates an existing memory, set proposal.evidence.contradicts to the prior cell id(s) so Recall supersedes the old value (demotes + flags it) instead of leaving two competing cells. Find the prior id with recall_search first.", {
-      proposal: { type: "object" }
+    tool("recall_write", "Persist a durable fact/decision/observation to Recall (your memory) through admission. This is where durable memory lives; do not keep durable facts in scratch files. Two input forms: pass a full recall.write.v1 `proposal` (advanced), or the thin `write` form { kind, title, body, confidence, topics, contradicts?, dependsOn?, supports?, sourceFiles?, project?, sensitivity? } and Recall scaffolds the rest. The admission firewall (calibration attenuation, supersession, secret rejection) applies to both. CORRECTIONS: if this write changes or invalidates an existing memory, set contradicts to the prior cell id(s) so Recall supersedes the old value (demotes + flags it) instead of leaving two competing cells. Find the prior id with recall_search first.", {
+      proposal: { type: "object" },
+      write: { type: "object" },
+      compact: { type: "boolean" },
+      full: { type: "boolean" }
     }),
     tool("recall_workflow_allocate", "Score and select workflow candidates using the integrated attention allocator.", {
       candidates: { type: "array", items: { type: "object" } },
@@ -467,6 +491,12 @@ function tool(name: string, description: string, properties: Record<string, unkn
       additionalProperties: false
     }
   };
+}
+
+// Read tools return compact (id/title/kind/excerpt) by default to fit a token
+// budget; pass compact:false or full:true for the raw full-body payload.
+function wantsCompact(args: Record<string, unknown>): boolean {
+  return args.compact !== false && args.full !== true;
 }
 
 function textResult(text: string): unknown {

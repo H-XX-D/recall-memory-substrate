@@ -63,10 +63,17 @@ The generated block uses the `recall-mcp` stdio server:
 ## Core Tools
 
 - `recall_status`: inspect graph counts.
-- `recall_write`: submit a strict memory proposal.
-- `recall_search`: lexical search over graph nodes.
-- `recall_semantic`: semantic search over graph nodes.
-- `recall_subgraph`: compose a subgraph from tags and facets.
+- `recall_write`: submit a memory proposal. Pass a full `proposal`, or the thin
+  `write` form (`kind`, `title`, `body`, `confidence`, `topics`, plus optional
+  `contradicts`/`dependsOn`/`supports`/`sourceFiles`/`project`/`sensitivity`) and
+  Recall scaffolds the nine-block proposal. The admission firewall (attenuation,
+  supersession, secret rejection) runs identically for both.
+- `recall_search`: lexical search over graph nodes. Compact by default; pass
+  `full: true` for full bodies.
+- `recall_semantic`: semantic search over graph nodes. Compact by default; pass
+  `full: true` for full bodies.
+- `recall_subgraph`: compose a subgraph from tags and facets. Compact by default;
+  pass `full: true` for full bodies.
 - `recall_compile`: return an ID-first task-specific context packet.
 - `recall_beliefs`: inspect belief pressure, stale cells, and contradiction
   pressure.

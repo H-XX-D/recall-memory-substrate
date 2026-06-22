@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Thin disciplined writes on MCP.** `recall_write` now accepts a thin `write`
+  form (`{ kind, title, body, confidence, topics, contradicts?, dependsOn?,
+  supports?, sourceFiles?, project?, sensitivity? }`) alongside the full
+  `proposal`. A new core builder (`src/core/proposal-builder.ts`,
+  `buildProposal()`) scaffolds the nine-block `recall.write.v1` proposal (tag
+  families, entity extraction, confidence-to-source_quality, timestamps, policy
+  defaults). The admission firewall is unchanged, so calibration attenuation and
+  supersession still apply; only the client-supplied syntax is thinner.
+- **Compact-by-default MCP reads.** `recall_search`, `recall_semantic`,
+  `recall_subgraph`, `recall_cell`, and the `recall_write` receipt return compact
+  projections by default (id, title, kind, effectiveConfidence, excerpt, relation
+  counts) so responses fit a token budget; pass `full: true` (or `compact: false`)
+  for the raw payload. Core read functions stay full-fidelity, so the CLI and
+  context compiler are unaffected (`src/mcp/compact.ts`).
+
 - **Codex slash prompt installed by sync** (`recall codex sync`): the Codex
   integration now also writes the documented custom prompt file at
   `~/.codex/prompts/recall.md`, so Recall can be invoked from Codex's slash menu

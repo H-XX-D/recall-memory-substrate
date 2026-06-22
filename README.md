@@ -277,8 +277,8 @@ instructions. The agent's loop becomes: compile, work, write back.
 | Tool | Purpose |
 |---|---|
 | `recall_compile` | Compile a compact context packet for a task. Start here |
-| `recall_write` | Submit a strict, evidence-aware memory proposal |
-| `recall_search` / `recall_semantic` | Retrieve graph evidence by exact or semantic match |
+| `recall_write` | Submit a memory proposal: a full evidence-aware proposal, or the thin `write` form (kind, title, body, confidence, topics) that Recall scaffolds. The admission firewall applies either way |
+| `recall_search` / `recall_semantic` | Retrieve graph evidence by exact or semantic match. Compact by default (id, title, kind, excerpt); pass `full: true` for full bodies |
 | `recall_subgraph` | Compose subgraphs from structured tags |
 | `recall_daemon_run_once` | Run one outside-the-LLM maintenance pass |
 
