@@ -107,6 +107,20 @@ function routeStore(defaultStore: SQLiteRecallStore, args: Record<string, unknow
   return routed;
 }
 
+// Close and forget every per-call routed store, releasing its SQLite handle.
+// Useful for graceful shutdown, and required by tests on Windows, where a file
+// cannot be deleted while a handle to it is still open.
+export function closeRoutedStores(): void {
+  for (const store of routedStores.values()) {
+    try {
+      store.close();
+    } catch {
+      // already closed
+    }
+  }
+  routedStores.clear();
+}
+
 function callTool(name: string, args: Record<string, unknown>, store: SQLiteRecallStore): unknown {
   if (name === "recall_status") {
     return textResult(JSON.stringify({ stats: store.stats() }, null, 2));

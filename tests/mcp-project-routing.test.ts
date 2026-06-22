@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SQLiteRecallStore } from "../src/core/store.js";
-import { handleMcpRequest } from "../src/mcp/server.js";
+import { closeRoutedStores, handleMcpRequest } from "../src/mcp/server.js";
 import { tempDbPath } from "./helpers.js";
 
 function call(store: SQLiteRecallStore, name: string, args: unknown): any {
@@ -66,6 +66,7 @@ test("MCP per-call project routing writes and reads the routed DB, not the defau
     assert.match(bad.__error.message ?? String(bad.__error), /unknown project/);
   } finally {
     main.close();
+    closeRoutedStores();
     if (prevGlobal === undefined) delete process.env.RECALL_GLOBAL_DB;
     else process.env.RECALL_GLOBAL_DB = prevGlobal;
     registry.cleanup();
