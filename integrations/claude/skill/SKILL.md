@@ -262,7 +262,7 @@ proposal = build_proposal(
     depends_on=["25e553cc-..."],              # bare IDs auto-normalized to recall://cell/<id>
     contradicts=["8702b4bc-..."],
     source_files=["spec/foo.md#section-3"],
-    project="Substrate-V2",
+    project="my-project",
 )
 # Pass `proposal` to mcp__recall__recall_write.
 ```

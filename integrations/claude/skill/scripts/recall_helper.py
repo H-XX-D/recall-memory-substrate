@@ -30,7 +30,7 @@ Library use:
         depends_on=["abc12345-..."],  # bare IDs auto-normalized
         contradicts=[],
         source_files=["spec/foo.md#section-3"],
-        project="Substrate-V2",
+        project="default",
     )
     # Then pass `proposal` to mcp__recall__recall_write or the CLI admit path.
 
@@ -232,7 +232,7 @@ def build_proposal(
     concerns: list[str] | None = None,
     source_files: list[str] | None = None,
 
-    project: str = "Substrate-V2",
+    project: str = "default",
     subject: str | None = None,
     tenant: str | None = None,
     path: str | None = None,
@@ -298,7 +298,7 @@ def build_proposal(
     today = datetime.date.today().isoformat()
     now_iso = _isoformat_z()
 
-    tenant = tenant or f"hendrixx-{_kebab(project, 30)}"
+    tenant = tenant or f"local-{_kebab(project, 30)}"
     subject_slug = _kebab(subject or title, 80)
     summary = summary or title
     idea_tags = idea or [_kebab(title, 80)]
@@ -469,7 +469,7 @@ def _cli() -> int:
     ap.add_argument("--source-files", default="",
                     help="Comma-separated file refs (path or path#section).")
 
-    ap.add_argument("--project", default="Substrate-V2")
+    ap.add_argument("--project", default="default")
     ap.add_argument("--subject", default=None)
     ap.add_argument("--tenant", default=None)
     ap.add_argument("--path", default=None)

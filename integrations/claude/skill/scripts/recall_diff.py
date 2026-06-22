@@ -26,7 +26,7 @@ Usage:
     recall_diff.py --since 1d
 
     # Activity in one project since a specific cell was written:
-    recall_diff.py --since-cell 569d3e16 --project Substrate-V2
+    recall_diff.py --since-cell 569d3e16 --project my-project
 
     # Human-readable summary for agent context at session start:
     recall_diff.py --project my-repo --since 2h --summary
