@@ -79,7 +79,10 @@ test("MCP initialize reports package version and tools/list keeps the public con
       "recall_eval_run",
       "recall_eval_list",
       "recall_eval_show",
-      "recall_daemon_run_once"
+      "recall_daemon_run_once",
+      "recall_project_register",
+      "recall_project_list",
+      "recall_project_where"
     ]);
   } finally {
     store.close();

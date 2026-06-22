@@ -1332,6 +1332,13 @@ export class SQLiteRecallStore implements RecallStore {
         node_id TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS projects (
+        slug TEXT PRIMARY KEY,
+        root_path TEXT NOT NULL,
+        db_path TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS idx_graph_nodes_kind ON graph_nodes(kind);
       CREATE INDEX IF NOT EXISTS idx_graph_nodes_status ON graph_nodes(status);
       CREATE INDEX IF NOT EXISTS idx_graph_nodes_updated ON graph_nodes(updated_at);

@@ -60,7 +60,7 @@ function maybeFinish() {
     fail(new Error(`initialize did not include server version: ${JSON.stringify(init)}`));
   }
   const tools = list?.result?.tools;
-  if (!Array.isArray(tools) || tools.length !== 42) {
+  if (!Array.isArray(tools) || tools.length !== 45) {
     fail(new Error(`tools/list returned ${Array.isArray(tools) ? tools.length : "no"} tools`));
   }
   settled = true;

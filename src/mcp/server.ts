@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { admitWriteProposal } from "../core/admission.js";
 import { buildProposal, type BuildProposalInput } from "../core/proposal-builder.js";
 import { compactCell, compactHit, compactNode, compactReceipt, compactSemanticHit } from "./compact.js";
+import { listProjects, registerProject, resolveDbForSlug, whereProject } from "../core/routing.js";
 import { analyzeMemory, memoryHealthToProposal } from "../core/analysis.js";
 import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle, runAcpExchange } from "../core/acp.js";
 import { inspectCell } from "../core/cell-context.js";
@@ -77,7 +78,7 @@ export function handleMcpRequest(request: JsonRpcRequest, store: SQLiteRecallSto
     if (request.method === "tools/call") {
       const name = stringParam(request.params, "name");
       const args = recordParam(request.params, "arguments");
-      return ok(request, callTool(name, args, store));
+      return ok(request, callTool(name, args, routeStore(store, args)));
     }
 
     return err(request, -32601, `Unknown method: ${request.method}`);
@@ -86,9 +87,48 @@ export function handleMcpRequest(request: JsonRpcRequest, store: SQLiteRecallSto
   }
 }
 
+// Per-call project routing: a tool may carry a `project` slug to target that
+// project's DB instead of the server's launch-resolved default. An unknown slug
+// is an explicit error, never a silent fall back to global (the e62138d0 hazard).
+// Routed stores are cached for the server's lifetime.
+const routedStores = new Map<string, SQLiteRecallStore>();
+function routeStore(defaultStore: SQLiteRecallStore, args: Record<string, unknown>): SQLiteRecallStore {
+  const project = typeof args.project === "string" ? args.project.trim() : "";
+  if (!project) return defaultStore;
+  const dbPath = resolveDbForSlug(project);
+  if (!dbPath) {
+    throw new Error(`unknown project '${project}'; register it with recall_project_register first`);
+  }
+  let routed = routedStores.get(dbPath);
+  if (!routed) {
+    routed = new SQLiteRecallStore(dbPath);
+    routedStores.set(dbPath, routed);
+  }
+  return routed;
+}
+
 function callTool(name: string, args: Record<string, unknown>, store: SQLiteRecallStore): unknown {
   if (name === "recall_status") {
     return textResult(JSON.stringify({ stats: store.stats() }, null, 2));
+  }
+  if (name === "recall_project_register") {
+    const rec = registerProject(
+      {
+        root: stringArg(args, "root"),
+        slug: typeof args.slug === "string" ? args.slug : undefined,
+        description: typeof args.description === "string" ? args.description : undefined,
+        dbPath: typeof args.dbPath === "string" ? args.dbPath : undefined,
+      },
+      new Date().toISOString(),
+    );
+    return textResult(JSON.stringify(rec, null, 2));
+  }
+  if (name === "recall_project_list") {
+    return textResult(JSON.stringify({ projects: listProjects() }, null, 2));
+  }
+  if (name === "recall_project_where") {
+    const cwd = typeof args.cwd === "string" ? args.cwd : process.cwd();
+    return textResult(JSON.stringify(whereProject(cwd, process.env), null, 2));
   }
   if (name === "recall_acp_status") {
     return textResult(JSON.stringify({ mode: "agent-communication-protocol", stats: store.stats() }, null, 2));
@@ -374,23 +414,27 @@ function tools(): unknown[] {
     }),
     tool("recall_cell", "Inspect one addressable memory cell and summarize all connected data. Compact by default (envelope + excerpt + relation counts); pass full:true for the full node and connected-cell bodies.", {
       idOrAddress: { type: "string" },
+      project: { type: "string" },
       compact: { type: "boolean" },
       full: { type: "boolean" }
     }),
     tool("recall_search", "Lexical search over Recall graph nodes. Returns compact hits (id, title, kind, effectiveConfidence, excerpt) by default; pass full:true for full bodies.", {
       query: { type: "string" },
+      project: { type: "string" },
       limit: { type: "number" },
       compact: { type: "boolean" },
       full: { type: "boolean" }
     }),
     tool("recall_semantic", "Semantic search over Recall graph nodes. Returns compact hits with score by default; pass full:true for full bodies.", {
       query: { type: "string" },
+      project: { type: "string" },
       limit: { type: "number" },
       compact: { type: "boolean" },
       full: { type: "boolean" }
     }),
     tool("recall_compile", "Compile a compact context packet for an LLM task.", {
       task: { type: "string" },
+      project: { type: "string" },
       words: { type: "number" },
       inlineReferenceValues: { type: "boolean" },
       includeReferenceParameters: { type: "boolean" }
@@ -412,6 +456,7 @@ function tools(): unknown[] {
     tool("recall_write", "Persist a durable fact/decision/observation to Recall (your memory) through admission. This is where durable memory lives; do not keep durable facts in scratch files. Two input forms: pass a full recall.write.v1 `proposal` (advanced), or the thin `write` form { kind, title, body, confidence, topics, contradicts?, dependsOn?, supports?, sourceFiles?, project?, sensitivity? } and Recall scaffolds the rest. The admission firewall (calibration attenuation, supersession, secret rejection) applies to both. CORRECTIONS: if this write changes or invalidates an existing memory, set contradicts to the prior cell id(s) so Recall supersedes the old value (demotes + flags it) instead of leaving two competing cells. Find the prior id with recall_search first.", {
       proposal: { type: "object" },
       write: { type: "object" },
+      project: { type: "string" },
       compact: { type: "boolean" },
       full: { type: "boolean" }
     }),
@@ -477,6 +522,16 @@ function tools(): unknown[] {
     }),
     tool("recall_daemon_run_once", "Run one daemon maintenance pass outside the LLM.", {
       derive: { type: "boolean" }
+    }),
+    tool("recall_project_register", "Register a project in the routing registry so its slug maps to a dedicated DB. Pass root (project root path); optional slug (defaults from the dir name), description, and dbPath (defaults to ~/.recall/db/<slug>.sqlite3). After registering, any loop tool can pass project:<slug> to read/write that project's memory.", {
+      root: { type: "string" },
+      slug: { type: "string" },
+      description: { type: "string" },
+      dbPath: { type: "string" }
+    }),
+    tool("recall_project_list", "List registered projects (slug, root, db path).", {}),
+    tool("recall_project_where", "Resolve which DB a cwd routes to and why (RECALL_DB override, a registered project root, or the global fallback).", {
+      cwd: { type: "string" }
     })
   ];
 }

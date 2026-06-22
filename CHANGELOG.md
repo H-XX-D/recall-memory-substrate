@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-call project routing on MCP.** The `projects` registry the launch-time
+  router queried previously had no creator, so routing always fell back to
+  global. A new `src/core/routing.ts` adds `resolveDbForCwd` / `resolveDbForSlug`
+  and registry CRUD (with a `RECALL_GLOBAL_DB` override), and `store.ts` now
+  migrates the `projects` table. The MCP loop tools accept an optional
+  `project: <slug>` to target that project's DB (stores cached per path); an
+  unknown slug is an explicit error, never a silent global fallback. New tools
+  `recall_project_register`, `recall_project_list`, `recall_project_where` (tool
+  count 42 to 45).
 - **Thin disciplined writes on MCP.** `recall_write` now accepts a thin `write`
   form (`{ kind, title, body, confidence, topics, contradicts?, dependsOn?,
   supports?, sourceFiles?, project?, sensitivity? }`) alongside the full
