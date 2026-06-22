@@ -80,4 +80,24 @@ describe("trend scaffold (the agent-fillable interactive)", () => {
       temp.cleanup();
     }
   });
+
+  it("numeric options include a path fallback in the spec template", () => {
+    const temp = tempDbPath();
+    const store = new SQLiteRecallStore(temp.path);
+    try {
+      const scaffold = buildTrendScaffold(store, {
+        objective: "lockout updates per second",
+        measure: "numeric",
+        path: "#data.metrics.updates_per_s"
+      });
+      const params = scaffold.specTemplate.params as Record<string, unknown>;
+      assert.equal(params.measure, "numeric");
+      assert.equal(params.path, "data.metrics.updates_per_s");
+      assert.match(scaffold.directive, /#path/);
+      assert.doesNotThrow(() => validateProgramSpec(scaffold.specTemplate));
+    } finally {
+      store.close?.();
+      temp.cleanup();
+    }
+  });
 });

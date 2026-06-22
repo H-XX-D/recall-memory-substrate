@@ -81,6 +81,8 @@ interface ParsedArgs {
   root?: string;
   file?: string;
   globalDb?: string;
+  measure?: string;
+  path?: string;
 }
 
 function main(): void {
@@ -451,7 +453,11 @@ function main(): void {
 
     if (command === "trend") {
       const objective = args.query ?? args.command.slice(1).join(" ");
-      const scaffold = buildTrendScaffold(store, { objective });
+      const scaffold = buildTrendScaffold(store, {
+        objective,
+        measure: trendScaffoldMeasure(args.measure),
+        path: args.path
+      });
       console.log(JSON.stringify(scaffold, null, 2));
       return;
     }
@@ -679,6 +685,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   let root: string | undefined;
   let file: string | undefined;
   let globalDb: string | undefined;
+  let measure: string | undefined;
+  let path: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -773,6 +781,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       file = requireValue(argv, ++index, "--file");
     } else if (arg === "--global-db") {
       globalDb = requireValue(argv, ++index, "--global-db");
+    } else if (arg === "--measure") {
+      measure = requireValue(argv, ++index, "--measure");
+    } else if (arg === "--path") {
+      path = requireValue(argv, ++index, "--path");
     } else {
       command.push(arg);
     }
@@ -835,7 +847,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     apply,
     root,
     file,
-    globalDb
+    globalDb,
+    measure,
+    path
   };
 }
 
@@ -979,6 +993,16 @@ function optionalNumber(value: unknown, key: string, index?: number): number | u
   return value;
 }
 
+function trendScaffoldMeasure(value: string | undefined): "effective_confidence" | "member_count" | "numeric" | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "effective_confidence" || value === "member_count" || value === "numeric") {
+    return value;
+  }
+  fail("--measure for recall trend must be effective_confidence, member_count, or numeric");
+}
+
 function optionalStringArray(value: unknown, key: string, index?: number): string[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -1054,8 +1078,9 @@ Commands:
   recall hyperedge show <hyperedge-id> [--db path]
   recall hyperedge list [--limit 20] [--db path]
   recall program add <hyperedge-id> --json program.json [--db path]
-      program.json = { "schemaVersion": "recall.program.v1", "operation": "score|watch|drift|quorum|trend", "params": { "delta": 0.1, "concernTarget": "<cell-id>", "k": 2, "minEff": 0.7, "window": 8, "streak": 3, "measure": "effective_confidence|member_count" } }
-  recall trend "<objective>" [--query q]   scaffold a trend program (direction, slope, acceleration over a series) for the agent to fill and attach
+      program.json = { "schemaVersion": "recall.program.v1", "operation": "score|watch|drift|quorum|trend", "params": { "delta": 0.1, "concernTarget": "<cell-id>", "k": 2, "minEff": 0.7, "window": 8, "streak": 3, "measure": "effective_confidence|member_count|numeric", "path": "data.metrics.updates_per_s" } }
+  recall trend "<objective>" [--query q] [--measure effective_confidence|member_count|numeric] [--path data.metrics.value]
+      scaffold a trend program (direction, slope, acceleration over a series) for the agent to fill and attach
   recall program list [--limit 20] [--db path]
   recall program show <program-id> [--db path]
   recall program run <program-id> [--derive] [--db path]

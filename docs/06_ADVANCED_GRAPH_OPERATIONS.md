@@ -55,7 +55,11 @@ arbitrary JavaScript. The deterministic operations are:
   or a slope past `params.delta`. Where `watch` asks whether a value moved,
   `trend` asks which way it has been moving and how fast, so a bundle whose
   effective confidence is quietly eroding over many runs trips before it ever
-  crosses a hard threshold.
+  crosses a hard threshold. `params.measure` can be `effective_confidence`,
+  `member_count`, or `numeric`. Numeric trends read typed number fields from a
+  member target path such as `recall://cell/...#data.metrics.updates_per_s`, or
+  from `params.path` when a member has no path. A custom `params.measure` string
+  is also accepted as a numeric path shorthand.
 
 `--derive` converts operation output into a strict witness proposal and
 admits it through the normal write path, producing a rollbackable

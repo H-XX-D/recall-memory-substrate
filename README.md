@@ -455,7 +455,13 @@ A few more operations round out the set:
   streak or a slope past `delta`. Where `watch` asks whether a value moved,
   `trend` asks which way it has been moving and how fast, so a belief whose
   conviction is quietly eroding over many runs trips before it ever crosses a
-  hard threshold.
+  hard threshold. In addition to `effective_confidence` and `member_count`,
+  `trend` can track a typed numeric field with `params.measure="numeric"`.
+  Select the metric with member references like `recall://cell/...#data.metrics.updates_per_s`,
+  or set `params.path` as the fallback path for members that do not carry their
+  own target path. As shorthand, a custom `params.measure` string is treated as
+  a numeric path, so `measure="data.metrics.updates_per_s"` is equivalent to
+  `measure="numeric"` plus `path="data.metrics.updates_per_s"`.
 - `drift` is watch with attribution. A tripped run names which member
   moved (`topMover`, plus a ranked `movers` list), so you can see what
   caused a gate to fall.

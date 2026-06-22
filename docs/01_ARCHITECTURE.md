@@ -152,7 +152,8 @@ The current implementation supports multi-party graph relations and a sandboxed
 bundle's effective confidence moves past a delta), `drift` (watch with member
 attribution), `quorum` (k-of-m sign-off as a graph object), and `trend`
 (finite-difference calculus over a program's run history: direction, slope, and
-acceleration). It does not execute arbitrary user code. See
+acceleration; over confidence, member count, or declared numeric fields). It
+does not execute arbitrary user code. See
 [`06_ADVANCED_GRAPH_OPERATIONS.md`](06_ADVANCED_GRAPH_OPERATIONS.md).
 
 Program, DAG, eval, and daemon outputs can be closed back into graph memory with

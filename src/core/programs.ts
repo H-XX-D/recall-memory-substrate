@@ -379,8 +379,9 @@ function executeQuorum(
 }
 
 // Trend: discrete calculus over the run-history series. Each run appends the
-// bundle's current value (mean effective confidence, or member count) to a
-// sliding window carried in the output, then reads off finite differences:
+// bundle's current value (mean effective confidence, member count, or a numeric
+// field selected by a member/param path) to a sliding window carried in the
+// output, then reads off finite differences:
 // direction (sign of the overall slope), slope (the first difference, a
 // discrete rate), and acceleration (late slope minus early slope, a discrete
 // second difference). These are finite differences, not continuous calculus —
@@ -404,11 +405,17 @@ function executeTrend(
   const streakThreshold = typeof spec.params?.streak === "number" && spec.params.streak >= 1
     ? Math.floor(spec.params.streak)
     : 3;
-  const measure = spec.params?.measure === "member_count" ? "member_count" : "effective_confidence";
+  const selectedMeasure = trendMeasure(spec.params);
+  const { measure, measureKind, path } = selectedMeasure;
 
   let current: number;
-  if (measure === "member_count") {
+  if (measureKind === "member_count") {
     current = members.length;
+  } else if (measureKind === "numeric") {
+    const sampled = numericTrendValues(hyperedge, members, path);
+    current = sampled.values.length === 0
+      ? 0
+      : round(sampled.values.reduce((sum, value) => sum + value, 0) / sampled.values.length);
   } else {
     const liveValues = members
       .map((node) => effective?.get(node.id) ?? confidenceValue(node))
@@ -484,6 +491,13 @@ function executeTrend(
     streakThreshold,
     tripped
   };
+  if (measureKind === "numeric") {
+    const sampled = numericTrendValues(hyperedge, members, path);
+    output.path = path;
+    output.numericPaths = sampled.paths;
+    output.numericValueCount = sampled.values.length;
+    output.numericValues = sampled.entries;
+  }
   if (tripped) {
     const word = direction === "ascending" ? "rising" : direction === "descending" ? "falling" : "moving";
     output.witness = {
@@ -497,6 +511,74 @@ function executeTrend(
     };
   }
   return output;
+}
+
+function trendMeasure(params: Record<string, unknown> | undefined): {
+  measure: string;
+  measureKind: "effective_confidence" | "member_count" | "numeric";
+  path: string | null;
+} {
+  const raw = params?.measure;
+  if (raw === "member_count") {
+    return { measure: "member_count", measureKind: "member_count", path: null };
+  }
+  if (raw === "numeric") {
+    return { measure: "numeric", measureKind: "numeric", path: pathParam(params) };
+  }
+  if (typeof raw === "string" && raw !== "effective_confidence") {
+    const path = cleanPath(raw);
+    return { measure: raw, measureKind: "numeric", path };
+  }
+  return { measure: "effective_confidence", measureKind: "effective_confidence", path: null };
+}
+
+function pathParam(params: Record<string, unknown> | undefined): string | null {
+  const path = typeof params?.path === "string" ? cleanPath(params.path) : null;
+  if (path) {
+    return path;
+  }
+  return typeof params?.targetPath === "string" ? cleanPath(params.targetPath) : null;
+}
+
+function numericTrendValues(
+  hyperedge: Hyperedge,
+  members: RecallNode[],
+  fallbackPath: string | null
+): { values: number[]; entries: Record<string, unknown>[]; paths: string[] } {
+  const byId = new Map(members.map((node) => [node.id, node]));
+  const entries: Record<string, unknown>[] = [];
+  const paths = new Set<string>();
+  for (const member of hyperedge.members) {
+    const node = byId.get(member.nodeId);
+    if (!node) {
+      continue;
+    }
+    const memberPath = typeof member.metadata?.targetPath === "string"
+      ? cleanPath(member.metadata.targetPath)
+      : null;
+    const path = memberPath ?? fallbackPath;
+    if (!path) {
+      continue;
+    }
+    const value = numberAtNodePath(node, path);
+    if (value === null) {
+      continue;
+    }
+    paths.add(path);
+    entries.push({
+      nodeId: node.id,
+      role: member.role,
+      reference: node.cellAddress,
+      title: node.title,
+      path,
+      value: round(value)
+    });
+  }
+  return {
+    values: entries.map((entry) => entry.value as number),
+    entries,
+    paths: [...paths].sort()
+  };
 }
 
 function memberReferences(hyperedge: Hyperedge, members: RecallNode[]): Record<string, unknown>[] {
@@ -533,6 +615,64 @@ function concernValue(node: RecallNode): number | null {
 function numberAt(record: Record<string, unknown>, key: string): number | null {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function numberAtPath(record: Record<string, unknown>, path: string): number | null {
+  const value = valueAtPath(record, path);
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function numberAtNodePath(node: RecallNode, path: string): number | null {
+  return numberAtPath(nodeRecord(node), path) ?? numberAtPath(node.data, path);
+}
+
+function valueAtPath(record: Record<string, unknown>, path: string): unknown {
+  let current: unknown = record;
+  for (const part of path.split(".")) {
+    if (part.length === 0) {
+      return undefined;
+    }
+    if (Array.isArray(current) && /^\d+$/.test(part)) {
+      current = current[Number(part)];
+    } else if (isRecord(current)) {
+      current = current[part];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+}
+
+function nodeRecord(node: RecallNode): Record<string, unknown> {
+  return {
+    id: node.id,
+    cellAddress: node.cellAddress,
+    kind: node.kind,
+    title: node.title,
+    body: node.body,
+    summary: node.summary,
+    content: {
+      title: node.title,
+      body: node.body,
+      summary: node.summary
+    },
+    scope: node.scope,
+    tags: node.tags,
+    data: node.data,
+    intent: node.data.intent,
+    evidence: node.data.evidence,
+    confidence: node.data.confidence,
+    policy: node.data.policy,
+    provenance: node.provenance,
+    createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
+    status: node.status
+  };
+}
+
+function cleanPath(path: string): string | null {
+  const trimmed = path.trim().replace(/^#/, "");
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function round(value: number): number {

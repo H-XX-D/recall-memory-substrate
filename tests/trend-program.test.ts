@@ -34,8 +34,31 @@ function bundle(ids: string[]): Hyperedge {
   } as unknown as Hyperedge;
 }
 
+function numericBundle(paths: Record<string, string | null>): Hyperedge {
+  return {
+    id: "edge-1",
+    kind: "evidence-bundle",
+    title: "Numeric trend bundle",
+    members: Object.entries(paths).map(([id, path], ordinal) => ({
+      nodeId: id,
+      role: "metric",
+      ordinal,
+      metadata: path ? { targetPath: path } : {}
+    }))
+  } as unknown as Hyperedge;
+}
+
 function nodes(ids: string[]): RecallNode[] {
   return ids.map((id) => ({ id, cellAddress: `recall://cell/${id}`, title: id })) as unknown as RecallNode[];
+}
+
+function metricNodes(metrics: Record<string, Record<string, unknown>>): RecallNode[] {
+  return Object.entries(metrics).map(([id, data]) => ({
+    id,
+    cellAddress: `recall://cell/${id}`,
+    title: id,
+    data
+  })) as unknown as RecallNode[];
 }
 
 // Run trend once with members whose live values come from `eff`, and an
@@ -112,6 +135,46 @@ describe("trend program (discrete calculus over the series)", () => {
   it("measure 'member_count' tracks the number of members, not their confidence", () => {
     const out = runTrend({ measure: "member_count" }, ["a", "b", "c"], { a: 0.1, b: 0.1, c: 0.1 }, null);
     assert.equal(out.current, 3);
+  });
+
+  it("measure 'numeric' tracks a member targetPath value", () => {
+    const result = executeHyperedgeProgram({
+      program: program({ measure: "numeric" }),
+      hyperedge: numericBundle({ m1: "data.metrics.updates_per_s" }),
+      members: metricNodes({ m1: { metrics: { updates_per_s: 4_890_000_000 } } }),
+      previousRun: null,
+      now: NOW
+    });
+    assert.equal(result.output.current, 4_890_000_000);
+    assert.deepEqual(result.output.series, [4_890_000_000]);
+    assert.equal(result.output.numericValueCount, 1);
+    assert.deepEqual(result.output.numericPaths, ["data.metrics.updates_per_s"]);
+    assert.deepEqual(result.output.numericValues, [
+      {
+        nodeId: "m1",
+        role: "metric",
+        reference: "recall://cell/m1",
+        title: "m1",
+        path: "data.metrics.updates_per_s",
+        value: 4_890_000_000
+      }
+    ]);
+  });
+
+  it("measure 'numeric' falls back to params.path when a member has no targetPath", () => {
+    const result = executeHyperedgeProgram({
+      program: program({ measure: "numeric", path: "data.metrics.kernel_ms" }),
+      hyperedge: numericBundle({ m1: null, m2: null }),
+      members: metricNodes({
+        m1: { metrics: { kernel_ms: 100 } },
+        m2: { metrics: { kernel_ms: 200 } }
+      }),
+      previousRun: null,
+      now: NOW
+    });
+    assert.equal(result.output.current, 150);
+    assert.equal(result.output.numericValueCount, 2);
+    assert.deepEqual(result.output.numericPaths, ["data.metrics.kernel_ms"]);
   });
 
   it("trips on a steep slope even when the streak is short", () => {
