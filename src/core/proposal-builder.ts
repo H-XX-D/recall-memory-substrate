@@ -134,7 +134,7 @@ export function buildProposal(input: BuildProposalInput): WriteProposal {
   if (!VERIFICATIONS.has(verification)) throw new Error(`invalid verification: ${verification}`);
   if (!SENSITIVITIES.has(sensitivity)) throw new Error(`invalid sensitivity: ${sensitivity}`);
 
-  const project = input.project ?? "Substrate-V2";
+  const project = input.project ?? "default";
   const actorId = input.actorId ?? "claude-code";
   const now = input.now ?? new Date();
   const summary = input.summary ?? title;
@@ -156,7 +156,7 @@ export function buildProposal(input: BuildProposalInput): WriteProposal {
 
   const uncertainty = input.uncertainty ?? round3((1 - confidence) * 0.7);
   const concern = input.concern ?? round3((1 - confidence) * 0.3);
-  const tenant = input.tenant ?? `hendrixx-${kebab(project, 30)}`;
+  const tenant = input.tenant ?? `local-${kebab(project, 30)}`;
 
   const proposal: WriteProposal = {
     schema_version: "recall.write.v1",
