@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Contradiction rollback now fully retracts.** Health-report contradictions
+  were sourced from `node.data.evidence.contradicts` (the cell payload), while a
+  `contradicts` edge is also a graph relation. Rolling back the relation reversed
+  the effective-confidence demotion but the payload copy still drove the health
+  overlay, so `recall compile` kept showing a retracted conflict. Contradictions
+  are now sourced from the relation table, the single source of truth that
+  rollback mutates.
+
 ### Added
 
 - **Thin disciplined writes on MCP.** `recall_write` now accepts a thin `write`

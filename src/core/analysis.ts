@@ -1,6 +1,6 @@
 import { calibrationFromNodes, type ActorCalibration } from "./calibration.js";
 import { cellReferenceTarget } from "./references.js";
-import { WRITE_SCHEMA_VERSION, type ProposalScope, type RecallNode, type StoreStats, type WriteProposal } from "./types.js";
+import { WRITE_SCHEMA_VERSION, type ProposalScope, type RecallNode, type RecallRelation, type StoreStats, type WriteProposal } from "./types.js";
 import type { RecallStore } from "./store.js";
 
 export interface BeliefPressure {
@@ -106,7 +106,10 @@ export function analyzeMemory(store: RecallStore, now = new Date()): MemoryHealt
   const stale = nodes
     .flatMap((node) => staleFindings(node, now))
     .sort((a, b) => b.severity - a.severity);
-  const contradictions = contradictionFindings(nodes, byId)
+  const contradictionRelations = store
+    .listRelations(undefined, "both", 5000)
+    .filter((relation) => relation.kind === "contradicts" || relation.kind === "concerns");
+  const contradictions = contradictionFindings(contradictionRelations, byId)
     .sort((a, b) => b.severity - a.severity);
   const danglingEvidence = buildDanglingEvidence(store.unresolvableTrustEdges?.() ?? []);
 
@@ -336,38 +339,38 @@ function staleFindings(node: RecallNode, now: Date): StaleMemoryFinding[] {
   return findings;
 }
 
-function contradictionFindings(nodes: RecallNode[], byId: Map<string, RecallNode>): ContradictionFinding[] {
+// Source contradictions from the relation table, not the cell payload. A
+// contradicts edge is materialized both as a graph relation and (historically)
+// inside node.data.evidence.contradicts; reading the payload meant a relation
+// rollback left the effective-confidence demotion reversed but this finding
+// still firing, so compile kept showing a retracted conflict. Relations are the
+// single source of truth that rollback actually mutates.
+function contradictionFindings(
+  relations: RecallRelation[],
+  byId: Map<string, RecallNode>
+): ContradictionFinding[] {
   const findings: ContradictionFinding[] = [];
-  for (const node of nodes) {
-    const evidence = evidenceRecord(node);
-    for (const targetRef of evidence.contradicts) {
-      const targetId = cellReferenceTarget(targetRef);
-      const target = byId.get(targetId);
-      if (target) {
-        findings.push({
-          sourceId: node.id,
-          targetId,
-          sourceTitle: node.title,
-          targetTitle: target.title,
-          severity: round(probability(Math.max(confidenceValue(node), confidenceNumber(node, "concern", 0.5)))),
-          relation: "contradicts"
-        });
-      }
+  for (const relation of relations) {
+    if (relation.kind !== "contradicts" && relation.kind !== "concerns") {
+      continue;
     }
-    for (const targetRef of evidence.concerns) {
-      const targetId = cellReferenceTarget(targetRef);
-      const target = byId.get(targetId);
-      if (target) {
-        findings.push({
-          sourceId: node.id,
-          targetId,
-          sourceTitle: node.title,
-          targetTitle: target.title,
-          severity: round(probability(confidenceNumber(node, "concern", 0.4))),
-          relation: "concerns"
-        });
-      }
+    const source = byId.get(relation.sourceId);
+    const target = byId.get(relation.targetId);
+    if (!source || !target) {
+      continue;
     }
+    const severity =
+      relation.kind === "contradicts"
+        ? round(probability(Math.max(confidenceValue(source), confidenceNumber(source, "concern", 0.5))))
+        : round(probability(confidenceNumber(source, "concern", 0.4)));
+    findings.push({
+      sourceId: relation.sourceId,
+      targetId: relation.targetId,
+      sourceTitle: source.title,
+      targetTitle: target.title,
+      severity,
+      relation: relation.kind as "contradicts" | "concerns"
+    });
   }
   return findings;
 }
