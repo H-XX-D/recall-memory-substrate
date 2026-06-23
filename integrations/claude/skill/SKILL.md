@@ -140,7 +140,11 @@ auto-memory off.
    specific cells only when exact content is needed.
 2. **Do the work.**
 3. **Write durable memory.** Whenever a durable observation,
-   decision, risk, task, or witness arises, write it back. Do not ask permission
+   decision, risk, task, or witness arises, write it back, choosing the kind that
+   fits so it enriches the typed state: belief for a claim that can later be
+   confirmed, contradicted, or superseded; task for an open action; objective for
+   a goal; risk for a hazard worth tracking; observation, decision, or reflection
+   otherwise. Do not ask permission
    for routine memory; this is the intended automatic-memory behavior. **If the
    new memory corrects, updates, or invalidates something already stored, do not
    add an unlinked cell or edit in place: supersede it (see "Corrections

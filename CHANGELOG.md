@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed-write kind guidance across the agent surfaces.** The session-start hook
+  directive and the `recall_write` tool description now instruct the agent to
+  classify a durable write by `kind` (belief for a claim that can be confirmed,
+  contradicted, or superseded; task for an open action; objective for a goal;
+  risk for a hazard; observation, decision, or reflection otherwise) instead of
+  defaulting everything to a flat note. This feeds the `active_beliefs`, `risks`,
+  and `tasks` packet sections that `context-compiler.ts` already routes by kind,
+  so the typed state space fills as work happens.
+
 - **Per-call project routing on MCP.** The `projects` registry the launch-time
   router queried previously had no creator, so routing always fell back to
   global. A new `src/core/routing.ts` adds `resolveDbForCwd` / `resolveDbForSlug`
