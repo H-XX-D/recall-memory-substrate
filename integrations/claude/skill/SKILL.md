@@ -33,7 +33,8 @@ findings back as they arise.
 
 Recall now stores cells in per-project SQLite databases. The wrapper picks
 which DB to use by walking up from the current working directory through a
-registry of project roots; first match wins, fallback to global.
+registry of project roots; first match wins, fallback to the home local
+(writes) and the cross-local read-union (reads).
 
 **Register a project once:**
 
@@ -57,14 +58,13 @@ recall project where                      # which DB this cwd resolves to + why
 4. Fallback → the home local `~/.recall/db/home.sqlite3` (writes), and the
    cross-local read-union for reads
 
-**Federated reads** (project + global in one call):
-
-```bash
-recall --include-global compile "topic"   # also works for search/semantic/subgraph
-```
-
-Returns `{"federated": true, "project": {...}, "global": {...}}`. Only works
-for read verbs; writes always go to exactly one DB.
+**Federated reads are automatic at home scope.** Outside any registered
+project, the read verbs (`compile`, `search`, `semantic`, `subgraph`, `cell`)
+fan out over the home read-union: the home local first, then every registered
+project local, each cell graph-prefixed by its source graph (e.g.
+`acme-api:1a2b3c`). Inside a registered project, reads hit that local only.
+Writes always go to exactly one DB: the project local inside a project, or the
+home local outside one.
 
 **Removing:** `recall project remove <slug> [--delete-db]`
 
