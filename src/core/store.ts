@@ -1333,9 +1333,9 @@ export class SQLiteRecallStore implements RecallStore {
         created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS projects (
-        slug TEXT PRIMARY KEY,
-        root_path TEXT NOT NULL,
-        db_path TEXT NOT NULL,
+        root_path TEXT PRIMARY KEY,
+        slug TEXT NOT NULL,
+        db_path TEXT NOT NULL UNIQUE,
         description TEXT,
         created_at TEXT NOT NULL
       );
