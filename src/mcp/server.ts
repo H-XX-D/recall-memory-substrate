@@ -1,11 +1,12 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 import { createInterface } from "node:readline";
-import { dirname, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { resolve } from "node:path";
 import { admitWriteProposal } from "../core/admission.js";
 import { buildProposal, type BuildProposalInput } from "../core/proposal-builder.js";
 import { compactCell, compactHit, compactNode, compactReceipt, compactSemanticHit } from "./compact.js";
-import { homeDbPath, listProjects, registerProject, resolveDbForSlug, whereProject } from "../core/routing.js";
+import { ensureHomeLocal, homeDbPath, listProjects, openHomeReadUnion, registerProject, resolveDbForCwd, resolveDbForSlug, whereProject } from "../core/routing.js";
+import type { FederatedReadStore } from "../core/federated-store.js";
+import type { RecallStore } from "../core/store.js";
 import { analyzeMemory, memoryHealthToProposal } from "../core/analysis.js";
 import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle, runAcpExchange } from "../core/acp.js";
 import { inspectCell } from "../core/cell-context.js";
@@ -45,9 +46,29 @@ export interface JsonRpcResponse {
   };
 }
 
-export function handleMcpRequest(request: JsonRpcRequestWithId, store: SQLiteRecallStore): JsonRpcResponse;
-export function handleMcpRequest(request: JsonRpcRequest, store: SQLiteRecallStore): JsonRpcResponse | undefined;
-export function handleMcpRequest(request: JsonRpcRequest, store: SQLiteRecallStore): JsonRpcResponse | undefined {
+// Options that let a caller (the real stdio server, or a test) describe the
+// launch-resolved scope. `homeScope` is true when the default store is the home
+// local (no RECALL_DB, cwd not inside a registered project); only then do
+// read-only tools without an explicit `project` arg fan out over the read-union.
+export interface McpRequestOptions {
+  homeScope?: boolean;
+}
+
+export function handleMcpRequest(
+  request: JsonRpcRequestWithId,
+  store: SQLiteRecallStore,
+  options?: McpRequestOptions,
+): JsonRpcResponse;
+export function handleMcpRequest(
+  request: JsonRpcRequest,
+  store: SQLiteRecallStore,
+  options?: McpRequestOptions,
+): JsonRpcResponse | undefined;
+export function handleMcpRequest(
+  request: JsonRpcRequest,
+  store: SQLiteRecallStore,
+  options: McpRequestOptions = {},
+): JsonRpcResponse | undefined {
   if (!hasResponseId(request)) {
     return undefined;
   }
@@ -77,6 +98,20 @@ export function handleMcpRequest(request: JsonRpcRequest, store: SQLiteRecallSto
     if (request.method === "tools/call") {
       const name = stringParam(request.params, "name");
       const args = recordParam(request.params, "arguments");
+      // Home-scope read-union (model-A): when the launch resolved to the home
+      // local, the tool is read-only, and the caller did not pin a project, an
+      // agent reading at home scope must see the union over every local, not
+      // just the home local. Build the union per read request and close it after
+      // so the agent-facing path matches `recall search` from the shell.
+      const explicitProject = typeof args.project === "string" && args.project.trim() !== "";
+      if (options.homeScope && !explicitProject && isReadOnlyTool(name)) {
+        const union = openHomeReadUnion();
+        try {
+          return ok(request, callTool(name, args, union));
+        } finally {
+          union.close();
+        }
+      }
       return ok(request, callTool(name, args, routeStore(store, args)));
     }
 
@@ -84,6 +119,46 @@ export function handleMcpRequest(request: JsonRpcRequest, store: SQLiteRecallSto
   } catch (error) {
     return err(request, -32000, error instanceof Error ? error.message : String(error));
   }
+}
+
+// Read-only tools that are safe to serve from the home read-union at home
+// scope. Everything not listed here is treated as a write/mutation tool (or a
+// registry op) and always runs against a single store, never the union. The
+// derive-on-demand tools (recall_maintenance, recall_tick, recall_dag_analyze,
+// recall_eval_run, recall_program_run, recall_workflow_allocate) are mutators by
+// nature and are deliberately excluded.
+const READ_ONLY_TOOLS = new Set<string>([
+  "recall_status",
+  "recall_storage",
+  "recall_beliefs",
+  "recall_trust",
+  "recall_search",
+  "recall_semantic",
+  "recall_compile",
+  "recall_subgraph",
+  "recall_cell",
+  "recall_page",
+  "recall_acp_status",
+  "recall_acp_list",
+  "recall_acp_show",
+  "recall_hyperedge_show",
+  "recall_hyperedge_list",
+  "recall_program_show",
+  "recall_program_list",
+  "recall_program_runs",
+  "recall_program_run_show",
+  "recall_dag_show",
+  "recall_dag_list",
+  "recall_eval_list",
+  "recall_eval_show",
+  "recall_operate_list",
+  "recall_operate_show",
+  "recall_project_list",
+  "recall_project_where",
+]);
+
+function isReadOnlyTool(name: string): boolean {
+  return READ_ONLY_TOOLS.has(name);
 }
 
 // Per-call project routing: a tool may carry a `project` slug to target that
@@ -120,7 +195,7 @@ export function closeRoutedStores(): void {
   routedStores.clear();
 }
 
-function callTool(name: string, args: Record<string, unknown>, store: SQLiteRecallStore): unknown {
+function callTool(name: string, args: Record<string, unknown>, store: RecallStore): unknown {
   if (name === "recall_status") {
     return textResult(JSON.stringify({ stats: store.stats() }, null, 2));
   }
@@ -749,47 +824,30 @@ function stringArrayArg(args: Record<string, unknown>, key: string): string[] | 
 }
 
 /**
- * Resolve which SQLite DB this server instance targets. Mirrors the CLI
- * wrapper's precedence so MCP and CLI agree on routing:
+ * Resolve which SQLite DB this server instance targets, sharing the CLI's one
+ * routing implementation (resolveDbForCwd) so MCP and CLI agree:
  *   1. explicit RECALL_DB env       -> honored verbatim (escape hatch / migrations)
  *   2. cwd registry walk            -> deepest registered project root wins
- *   3. home fallback
+ *   3. home fallback                -> the home local
  * The server has no per-call cwd, so the walk runs once at launch against
  * process.cwd(), correct for the common one-Claude-session-per-project case.
+ * `scope` is "home" only when no RECALL_DB is set and the cwd is not inside a
+ * registered project; that is the one case where read tools fan out over the
+ * read-union (see handleMcpRequest).
  */
-function resolveDbPath(): string {
-  const explicit = process.env.RECALL_DB;
-  if (explicit && explicit.trim() !== "") {
-    return explicit;
-  }
-  const globalDb = homeDbPath();
-  try {
-    const registry = new DatabaseSync(globalDb, { readOnly: true });
-    const rows = registry
-      .prepare("SELECT root_path, db_path FROM projects")
-      .all() as Array<{ root_path: string; db_path: string }>;
-    registry.close();
-    const byRoot = new Map(rows.map((r) => [resolve(r.root_path), r.db_path]));
-    let dir = resolve(process.cwd());
-    for (;;) {
-      const hit = byRoot.get(dir);
-      if (hit) {
-        return hit;
-      }
-      const parent = dirname(dir);
-      if (parent === dir) {
-        break;
-      }
-      dir = parent;
-    }
-  } catch {
-    // registry missing / unreadable (fresh install) -> global fallback
-  }
-  return globalDb;
+function resolveLaunchRouting(): { dbPath: string; homeScope: boolean } {
+  const dbPath = resolveDbForCwd(process.cwd());
+  const explicit = (process.env.RECALL_DB ?? "").trim() !== "";
+  const homeScope = !explicit && resolve(dbPath) === resolve(homeDbPath());
+  return { dbPath, homeScope };
 }
 
 export function startStdioServer(): void {
-  const dbPath = resolveDbPath();
+  const { dbPath, homeScope } = resolveLaunchRouting();
+  // At home scope the default store IS the home local. Run the first-run
+  // global.sqlite3 -> home.sqlite3 migration before opening it so a pre-model-A
+  // user's memory is carried forward. Idempotent; no-op once home exists.
+  if (homeScope) ensureHomeLocal();
   const store = new SQLiteRecallStore(dbPath);
   const reader = createInterface({ input: process.stdin });
   const idleTimeoutMs = readMsEnv("RECALL_MCP_IDLE_EXIT_MS", 30 * 60 * 1000);
@@ -812,7 +870,7 @@ export function startStdioServer(): void {
     idle.touch();
     try {
       const request = JSON.parse(line) as JsonRpcRequest;
-      const response = handleMcpRequest(request, store);
+      const response = handleMcpRequest(request, store, { homeScope });
       if (response !== undefined) {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       }

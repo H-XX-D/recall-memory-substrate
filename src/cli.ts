@@ -27,12 +27,13 @@ import { claudeIntegrationStatus, setClaudeAutoMemory } from "./core/claude-inte
 import { globalDbPath, runClaudeSync } from "./core/claude-sync.js";
 import { codexIntegrationStatus, syncCodexIntegration } from "./core/codex-integration.js";
 import {
+  ensureHomeLocal,
   localGraphPaths,
+  openHomeReadUnion,
   registerProject,
   resolveCwdRouting,
   resolveDbForCwd,
 } from "./core/routing.js";
-import { FederatedReadStore } from "./core/federated-store.js";
 import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput, type RecallStore } from "./core/store.js";
 import { storageStats } from "./core/storage-stats.js";
 import { renderTui } from "./core/tui.js";
@@ -191,15 +192,23 @@ function main(): void {
     return;
   }
 
+  // At home scope the writable default IS the home local (args.db ===
+  // homeDbPath). Run the first-run global.sqlite3 -> home.sqlite3 migration
+  // BEFORE opening it, so a pre-model-A user's memory is carried forward instead
+  // of a fresh empty home.sqlite3 being created. Idempotent and a no-op once the
+  // home local exists, so it is safe on every invocation.
+  const homeScope = !args.dbExplicit && resolveCwdRouting(process.cwd()).scope === "home";
+  if (homeScope) ensureHomeLocal();
   const store = new SQLiteRecallStore(args.db);
   // Read commands run over the central model: outside any project (home scope)
   // they read the federated union over every local; inside a project, or when a
   // db is pinned explicitly, they read that single local. withReadStore opens
-  // the right store, runs the body, and always closes a federated store it
-  // built (the single `store` is closed by the outer finally).
+  // the right store via the shared home read-union resolver (openHomeReadUnion,
+  // also used by the MCP server), runs the body, and always closes a federated
+  // store it built (the single `store` is closed by the outer finally).
   const withReadStore = (run: (read: RecallStore) => void): void => {
-    if (!args.dbExplicit && resolveCwdRouting(process.cwd()).scope === "home") {
-      const federated = new FederatedReadStore(localGraphPaths());
+    if (homeScope) {
+      const federated = openHomeReadUnion();
       try {
         run(federated);
       } finally {
@@ -444,7 +453,18 @@ function main(): void {
       const idOrAddress = subcommand === "show"
         ? requireCommandValue(args.command, 2, "cell id or address")
         : requireCommandValue(args.command, 1, "cell id or address");
-      console.log(JSON.stringify(inspectCell(store, idOrAddress), null, 2));
+      // Route through the same home read-union the other read commands use, so a
+      // graph-prefixed id like `acme:UUID` (which home search/compile emit)
+      // resolves via FederatedReadStore.getNode/getNodeByAddress. A not-found is
+      // a clean JSON error with a nonzero exit, never an uncaught stack trace.
+      withReadStore((read) => {
+        try {
+          console.log(JSON.stringify(inspectCell(read, idOrAddress), null, 2));
+        } catch (error) {
+          console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error), idOrAddress }, null, 2));
+          process.exitCode = 1;
+        }
+      });
       return;
     }
 
