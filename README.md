@@ -331,9 +331,12 @@ sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so Recall is the durable memory layer
 instead of Claude Code's built-in note memory (keep native auto-memory, and skip
 the import below, with `RECALL_KEEP_AUTOMEMORY=1`; revert with `recall claude
 enable-auto-memory`). In the same step, `claude sync` lifts whatever auto-memory
-you already have into the global graph (`~/.recall/db/global.sqlite3`), so the
+you already have into the home local (`~/.recall/db/home.sqlite3`), so the
 notes you saved before adopting Recall are not orphaned when the agent stops
-reading them. It reads your `~/.claude/projects/<slug>/memory/*.md` files into
+reading them. (Outside any project this home local is both the writable default
+and the first member of the cross-local read-union; a pre-model-A
+`global.sqlite3` is copied forward to `home.sqlite3` on first run and kept as a
+backup.) It reads your `~/.claude/projects/<slug>/memory/*.md` files into
 Recall as calibrated cells without deleting them, is idempotent per file content,
 and supersedes a changed file's prior version via a `contradicts` edge. To run
 that import on its own (for example to preview it first), use `recall import

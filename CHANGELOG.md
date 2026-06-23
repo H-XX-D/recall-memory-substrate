@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`global.sqlite3` is now read as the home local (`home.sqlite3`).** Model-A
+  drops the separate writable "global" store: outside any project the home local
+  is the writable default and the first member of a cross-local read-union, and
+  `globalDbPath()` aliases `homeDbPath()`. On first run a pre-model-A
+  `~/.recall/db/global.sqlite3` is auto-migrated by copying it forward to
+  `home.sqlite3` (the original is left on disk as a backup), so existing memory,
+  including the `projects` registry table, is carried onto the new read path
+  instead of being stranded behind an empty `home.sqlite3`. The migration is
+  idempotent and runs at every home-local open site in both the CLI and the MCP
+  server, so it happens exactly once regardless of which entry point runs first.
+- **MCP read tools fan out over the home read-union at home scope.** Outside any
+  project and with no explicit `project` arg, the agent-facing read tools
+  (`recall_search`, `recall_semantic`, `recall_compile`, `recall_subgraph`,
+  `recall_cell`, `recall_beliefs`, `recall_trust`, `recall_status`,
+  `recall_storage`, and the other read-only tools) now serve the same
+  cross-local union the CLI does, so an agent at home scope sees cross-project
+  cells instead of zero. Write and mutation tools, and any explicit-project
+  call, still use a single store. The CLI and MCP now share one routing
+  implementation (`resolveDbForCwd` / `openHomeReadUnion` in `routing.ts`).
+- **Project registry is keyed on the resolved project root path.** The `projects`
+  table primary key moved from `slug` to `root_path` (with `db_path` UNIQUE), so
+  two roots that share a directory basename (e.g. `teamA/api` and `teamB/api`)
+  no longer slugify onto the same DB and read each other's private cells.
+  Registering a different root with a colliding basename now gets a distinct
+  `db_path` (the slug gets a short hash of the root appended); re-registering the
+  same root is idempotent and never re-points an existing root's DB. A legacy
+  slug-keyed table is rebuilt onto the new schema in place.
+
 ### Fixed
 
 - **Contradiction rollback now fully retracts.** Health-report contradictions

@@ -16,11 +16,17 @@ findings back as they arise.
 ## Setup (already done on this machine)
 
 - DB directory: `~/.recall/db/`
-  - `global.sqlite3`: projects registry + cross-cutting/shared cells
+  - `home.sqlite3`: the home local. Outside any project it is the writable
+    default and holds the projects registry plus cross-cutting/shared cells. It
+    replaces the old `global.sqlite3`; an existing `global.sqlite3` is copied
+    forward to `home.sqlite3` on first run and kept as an on-disk backup.
   - `<slug>.sqlite3`: one per registered project (auto-created by `recall project init`)
-- Back-compat: `~/.recall/recall.sqlite3` symlinks to `db/global.sqlite3` (old hardcoded paths keep working)
+- Model-A: locals are the single source of truth. There is no separate writable
+  "global" store; outside any project, reads fan out as a read-union over every
+  local (home first, then each project local) and writes land in the home local.
 - CLI wrapper at `~/.recall/bin/recall` shadows the real binary on PATH and routes by CWD
-- MCP server `recall` is registered (user scope), pinned to the legacy path → resolves via symlink to `db/global.sqlite3`
+- MCP server `recall` is registered (user scope); outside any project it reads the
+  same home read-union the CLI does, so an agent at home scope sees cross-project cells
 - Real binary still at `/opt/homebrew/bin/recall` (the wrapper calls it via absolute path)
 
 ## Project-based DB routing (CWD auto-routing)
@@ -48,7 +54,8 @@ recall project where                      # which DB this cwd resolves to + why
 1. Explicit `--db <path>` → pass through, no routing
 2. `--project <slug>` → look up that project's DB
 3. Walk cwd upward against registry → deepest registered root wins
-4. Fallback → `~/.recall/db/global.sqlite3`
+4. Fallback → the home local `~/.recall/db/home.sqlite3` (writes), and the
+   cross-local read-union for reads
 
 **Federated reads** (project + global in one call):
 
@@ -69,12 +76,13 @@ If you do not see `mcp__recall__*` tools in your session, the server was
 registered after the session began: tell the user to restart Claude Code to
 enable them, and use the CLI path meanwhile.
 
-**MCP limitation, important:** the MCP server is a long-running process
-pinned to one DB (the global one via the back-compat symlink). It has no
-per-call CWD context, so CWD-based project routing does not apply to MCP
-tool calls; they all hit global. For project-scoped writes use the CLI
-path; reserve MCP for cross-cutting personal memory or when you don't care
-which DB lands the cell.
+**MCP routing, important:** the MCP server is a long-running process with no
+per-call CWD context, so CWD-based project routing does not apply to its tool
+calls. Outside any project (home scope) the read tools (search, semantic,
+compile, subgraph, cell, etc.) fan out over the home read-union, so an agent
+sees cross-project cells; writes still land in the single home local. To target
+one project explicitly, pass `project: <slug>` to a tool, or use the CLI path
+for CWD-routed project writes.
 
 **CLI path:** the `recall` command (the wrapper). Always works, no restart
 needed. The wrapper auto-routes based on cwd, so you can usually omit `--db`.
@@ -566,9 +574,9 @@ is yes for a specific section.
 
 ## Common mistakes
 
-- Forgetting that MCP tools always hit the global DB; they cannot use CWD routing because the server has no per-call cwd. Use the CLI wrapper for project-scoped writes.
+- Forgetting that MCP tools cannot use CWD routing because the server has no per-call cwd. At home scope MCP reads fan out over the home read-union, but MCP writes land in the home local; use the CLI wrapper (or pass `project: <slug>`) for project-scoped writes.
 - Bypassing the wrapper by calling `/opt/homebrew/bin/recall` directly → loses CWD routing. Always use bare `recall` (resolves to `~/.recall/bin/recall` via PATH).
-- Forgetting to `recall project init` a new workspace → writes land in global instead of a dedicated project DB. Run `recall project where` if unsure.
+- Forgetting to `recall project init` a new workspace → writes land in the home local instead of a dedicated project DB. Run `recall project where` if unsure.
 - Omitting a required tag family (`topics`/`entities`/`rings`/`lifecycle`/`quality`) → proposal rejected.
 - Assuming `mcp__recall__*` tools exist → check first; fall back to CLI if absent.
 - Dumping prose blobs instead of structured records → defeats the schema.
