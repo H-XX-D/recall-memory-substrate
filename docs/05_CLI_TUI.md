@@ -6,10 +6,15 @@
 recall init
 recall version
 recall status
+recall where
 recall storage
 recall export
 recall import --json recall-export.json [--force]
 recall import auto-memory [--root path] [--project name] [--apply] [--db path]
+recall import mem0 --file mem0-export.json [--apply]
+recall import zep --file zep-export.json [--apply]
+recall import local --project name [--tags a,b] [--apply]
+recall trust [--db path]
 recall calibration [--db path]
 recall claude [sync|status|enable-auto-memory|disable-auto-memory]
 recall codex [sync|status]
@@ -37,6 +42,8 @@ recall semantic "query"
 recall semantic reindex
 recall compile "task" --words 900
 recall compile "task" --words 900 --inline-refs --reference-parameters
+recall incept "open objective"
+recall trend "open objective" [--measure numeric] [--path data.metrics.x]
 recall subgraph --category memory --type witness --subject compiler --project Recall --idea context-packet --timestamp 2026-05-21
 recall subgraph --topic compiler --identity agent:codex --ring runtime
 recall rollback list
@@ -48,10 +55,22 @@ recall secrets status
 recall secrets list
 recall secrets save --title "name" --confirm-secret-save --password-stdin --value-stdin
 recall secrets get <id> --password-stdin
+recall hyperedge add --json hyperedge.json
+recall hyperedge show <hyperedge-id>
+recall hyperedge list
+recall program add <hyperedge-id> --json program.json
+recall program show <program-id>
+recall program list
+recall program run <program-id> [--derive]
+recall program runs [--limit 20]
+recall program show-run <program-run-id>
 recall dag add --json overlay.json
+recall dag show <overlay-id>
 recall dag analyze <overlay-id> [--derive]
 recall dag list
 recall eval run [--derive]
+recall eval list
+recall eval show <eval-id>
 recall mcp config
 recall tui
 recall daemon status

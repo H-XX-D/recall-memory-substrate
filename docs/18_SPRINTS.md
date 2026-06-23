@@ -388,7 +388,7 @@ dependency order. Write outcome cells. Check in at sprint completion."
 
 ```bash
 # See the sprint outcomes
-recall search "Sprint completion: refactor-parser" --db ~/.recall/recall.sqlite3
+recall search "Sprint completion: refactor-parser" --db ~/.recall/db/home.sqlite3
 
 # Review the work
 recall cell show <sprint-completion-cell-id>
@@ -402,7 +402,7 @@ User reviews, decides whether to merge the changes, plans the next sprint.
 sprint state.
 
 ```bash
-alias sprint-status='recall search "sprint" --db ~/.recall/recall.sqlite3 | head -20'
+alias sprint-status='recall search "sprint" --db ~/.recall/db/home.sqlite3 | head -20'
 ```
 
 **Quick task addition mid-sprint**: if you realize a sprint needs an

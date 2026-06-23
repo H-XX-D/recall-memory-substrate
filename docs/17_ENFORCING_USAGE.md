@@ -175,7 +175,7 @@ Both hook templates honor environment variables for fine-tuning:
 
 | Variable | Effect |
 |---|---|
-| `RECALL_DB` | Override database path (default `~/.recall/recall.sqlite3`) |
+| `RECALL_DB` | Override database path (default is the routed local `~/.recall/db/home.sqlite3`, or a registered project's `~/.recall/db/<slug>.sqlite3`) |
 | `RECALL_HOOK_DISABLE` | Disable the inject-context hook entirely |
 | `RECALL_HOOK_MAX_HITS` | Max cells mentioned in injection (default 3) |
 | `RECALL_HOOK_VERBOSE` | Debug output to stderr |
@@ -270,12 +270,10 @@ mutations affect another's working set. Long-horizon research where
 recommended for casual personal use; the friction-to-payoff ratio
 inverts when you're the only writer and reader.
 
-## Combined effect: hooks at every reinforcement point
-
 ## Diagnosing usage in practice
 
-**Verify the hooks themselves** with the included test suite (10 checks
-across both hooks, exit code 0 if all pass):
+**Verify the hooks themselves** with the included test suite (27 tests covering
+the hooks and their Python toolkit, exit code 0 if all pass):
 
 ```bash
 python3 python/hooks/test_hooks.py
@@ -314,7 +312,7 @@ For lower-level inspection, query the graph directly:
 python3 python/scripts/recall_diff.py --since 1h --summary
 
 # Total writes today:
-sqlite3 ~/.recall/recall.sqlite3 \
+sqlite3 ~/.recall/db/home.sqlite3 \
   "SELECT COUNT(*) FROM graph_nodes WHERE created_at >= date('now')"
 ```
 

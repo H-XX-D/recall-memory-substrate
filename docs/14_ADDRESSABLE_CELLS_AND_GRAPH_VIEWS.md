@@ -72,6 +72,7 @@ The result should produce a normal witness:
 
 The current implementation returns analysis JSON with:
 
+- `overlayId`
 - `isDag`
 - `topologicalOrder`
 - `cycles`

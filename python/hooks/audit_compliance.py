@@ -52,7 +52,22 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+def _resolve_default_db() -> str:
+    """Default to the model-A home local, honoring RECALL_DB / RECALL_GLOBAL_DB /
+    RECALL_HOME the way recall_helper and routing.ts do. The pre-model-A
+    single-file ~/.recall/recall.sqlite3 is stale: absent on a fresh install, a
+    frozen pre-migration backup (or a symlink to it) on a migrated one."""
+    explicit = os.environ.get("RECALL_DB", "").strip()
+    if explicit:
+        return explicit
+    override = os.environ.get("RECALL_GLOBAL_DB", "").strip()
+    if override:
+        return override
+    home = os.environ.get("RECALL_HOME", "").strip() or os.path.expanduser("~/.recall")
+    return os.path.join(home, "db", "home.sqlite3")
+
+
+DEFAULT_DB = _resolve_default_db()
 
 
 def parse_since(s: str) -> datetime:
@@ -70,7 +85,7 @@ def audit(db_path: str, since: datetime) -> dict:
     if not Path(db_path).exists():
         return {"error": f"DB not found: {db_path}", "exit_code": 2}
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
     conn.row_factory = sqlite3.Row
 
     since_iso = since.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -152,7 +167,7 @@ def audit(db_path: str, since: datetime) -> dict:
     # 4. Supersedure use — count edges of supersede-type kinds
     try:
         edge_rows = conn.execute(
-            "SELECT kind, COUNT(*) as n FROM graph_edges "
+            "SELECT kind, COUNT(*) as n FROM graph_relations "
             "WHERE created_at >= ? GROUP BY kind",
             (since_iso,),
         ).fetchall()

@@ -91,14 +91,14 @@ def _severity_bucket(sev: float | None) -> str:
 def _trim_contradiction(c: dict) -> dict:
     return {
         "severity": c.get("severity"),
-        "source": c.get("sourceTitle") or c.get("source", "")[:100],
-        "target": c.get("targetTitle") or c.get("target", "")[:100],
+        "source": c.get("sourceTitle") or (c.get("source") or "")[:100],
+        "target": c.get("targetTitle") or (c.get("target") or "")[:100],
     }
 
 
 def _trim_stale(s: dict) -> dict:
     return {
-        "id": s.get("id") or s.get("nodeId", "")[:8],
+        "id": s.get("id") or (s.get("nodeId") or "")[:8],
         "severity": s.get("severity"),
         "title": (s.get("title") or s.get("reason", ""))[:120],
     }

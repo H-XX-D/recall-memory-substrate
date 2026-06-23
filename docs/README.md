@@ -38,7 +38,7 @@ and quick examples, start with the top-level [`../README.md`](../README.md).
 | [`12_SECRETS_SIDE_GRAPH.md`](12_SECRETS_SIDE_GRAPH.md) | Encrypted secrets storage outside the primary graph; explicit save confirmation |
 | [`13_DAEMON_MCP_SEMANTIC_SUBGRAPHS.md`](13_DAEMON_MCP_SEMANTIC_SUBGRAPHS.md) | Background daemon, MCP server, semantic search backend, subgraph composition |
 | [`07_EVALS.md`](07_EVALS.md) | Eval suites, eval-result cells, persistence |
-| [`09_WORKFLOW_ENGINE.md`](09_WORKFLOW_ENGINE.md) | Workflow-engine design spec; cell kinds are implemented, CLI commands planned for v0.2+ |
+| [`09_WORKFLOW_ENGINE.md`](09_WORKFLOW_ENGINE.md) | Workflow-engine design and the implemented `recall workflow allocate` command |
 | [`18_SPRINTS.md`](18_SPRINTS.md) | Multi-session AI work pattern: sprints as structured task graphs the AI executes autonomously across sessions and across providers |
 | [`19_PUBLIC_BENCHMARK.md`](19_PUBLIC_BENCHMARK.md) | Reproducible public benchmark (`npm run bench:public`) over the main operational surfaces |
 
@@ -106,7 +106,7 @@ contributing requires.
 
 The CLI commands documented across these files map to actual implementations
 in [`../src/cli.ts`](../src/cli.ts). The current implemented surface (as of
-Recall 0.3.x) is:
+Recall 0.4.0) is:
 
 | Command | Subcommands | Documented in |
 |---|---|---|
@@ -170,6 +170,13 @@ enforcement is producing better outcomes over time. See
 ## Where things changed recently
 
 For changes since the last release, see [`../CHANGELOG.md`](../CHANGELOG.md).
+The headline changes since 0.3.0 (landing in 0.4.0): the **model-A home
+read-union** (outside any project, the read verbs fan out automatically over the
+home local and every registered project local, in both the CLI and the MCP
+server; see [`01_ARCHITECTURE.md`](01_ARCHITECTURE.md)), **per-call project
+routing** on MCP (`recall_project_register` / `list` / `where`, plus an optional
+`project` arg on the loop tools, taking the tool count from 42 to 45), and
+**thin disciplined writes with compact-by-default reads** on MCP.
 The headline changes in 0.3.0: the **Claude Code three-mode hook** installed by
 `recall claude sync` (the SessionStart directive, the UserPromptSubmit push with
 a danger-proportional dig, and the Stop dig backstop that blocks a turn from

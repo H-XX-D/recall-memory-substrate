@@ -113,7 +113,7 @@ Install Recall, initialize a local DB, and generate MCP config:
 ```bash
 npm install -g github:H-XX-D/recall-memory-substrate
 recall init
-recall mcp config --db .recall/recall.sqlite3
+recall mcp config
 ```
 
 Add the generated MCP block to the LLM desktop app or agent runtime that

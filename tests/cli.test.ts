@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { describe, it } from "node:test";
 import { makeProposal, tempDbPath, writeJsonFixture } from "./helpers.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const CLI = ["--disable-warning=ExperimentalWarning", "dist/src/cli.js"];
 
@@ -36,6 +39,40 @@ describe("cli", () => {
       assert.match(compiled, /expansion_handles:/);
     } finally {
       json.cleanup();
+      temp.cleanup();
+    }
+  });
+
+  it("admit fails with a clean non-zero exit on a missing, empty, or invalid --json file", () => {
+    const temp = tempDbPath();
+    const dir = mkdtempSync(join(tmpdir(), "recall-badjson-"));
+    const emptyFile = join(dir, "empty.json");
+    const invalidFile = join(dir, "invalid.json");
+    writeFileSync(emptyFile, "");
+    writeFileSync(invalidFile, "{ not valid json ");
+    try {
+      for (const bad of ["/no/such/recall-proposal.json", emptyFile, invalidFile]) {
+        let threw = false;
+        try {
+          execFileSync(process.execPath, [...CLI, "admit", "--json", bad, "--db", temp.path], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"]
+          });
+        } catch (err) {
+          threw = true;
+          const e = err as { status?: number; stderr?: string };
+          assert.notEqual(e.status, 0, `admit --json ${bad} should exit non-zero`);
+          // a clean one-line error, never a raw Node stacktrace
+          assert.doesNotMatch(
+            String(e.stderr ?? ""),
+            /at Object\.|at Module\.|node:internal/,
+            `admit --json ${bad} leaked a stacktrace`
+          );
+        }
+        assert.ok(threw, `admit --json ${bad} should fail`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
       temp.cleanup();
     }
   });

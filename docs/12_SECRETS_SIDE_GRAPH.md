@@ -70,16 +70,18 @@ printf 'password\n' | recall secrets get <secret-id> --password-stdin
 
 ## Isolation
 
-Default primary graph:
+Default primary graph (outside any project; a registered project's local lives
+at `~/.recall/db/<slug>.sqlite3`):
 
 ```text
-.recall/recall.sqlite3
+~/.recall/db/home.sqlite3
 ```
 
-Default encrypted side graph:
+Default encrypted side graph (under the Recall home dir; override with
+`--secrets-db`):
 
 ```text
-.recall/secrets.sqlite3
+~/.recall/db/secrets.sqlite3
 ```
 
 The `.recall/` directory is ignored by git.

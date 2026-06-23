@@ -35,6 +35,14 @@ export function homeDbPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(recallHomeDir(env), "db", "home.sqlite3");
 }
 
+// The default secrets side graph, routed through model A like the home local:
+// a single central store under the Recall home dir, the same regardless of cwd,
+// so `secrets list` never silently misses secrets saved from another directory.
+// Override with --secrets-db. RECALL_HOME relocates it (used by tests).
+export function homeSecretsPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(recallHomeDir(env), "db", "secrets.sqlite3");
+}
+
 // Back-compat alias. The registry used to live in a separate "global.sqlite3";
 // it now lives in the home local. RECALL_GLOBAL_DB is still honored as an
 // explicit override so existing callers and tests can point the registry at a
@@ -369,6 +377,24 @@ export function ensureHomeLocal(env: NodeJS.ProcessEnv = process.env): void {
   if (existsSync(home)) return; // home local already present -> nothing to do
   const legacyGlobal = join(dbDir, "global.sqlite3");
   if (!existsSync(legacyGlobal)) return; // nothing to migrate from
+  // Checkpoint any uncheckpointed WAL pages into the main file before copying.
+  // If a pre-model-A process last exited uncleanly (crash, kill, power loss)
+  // with a hot global.sqlite3-wal, a bare copy of the main file alone would
+  // strand that memory behind an effectively empty home.sqlite3.
+  // wal_checkpoint(TRUNCATE) folds those pages in (and is a no-op on a non-WAL
+  // or already-checkpointed file), leaving the copy self-contained. Best-effort:
+  // a checkpoint failure must never block the migration, so fall through to a
+  // plain copy.
+  try {
+    const source = new DatabaseSync(legacyGlobal);
+    try {
+      source.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+    } finally {
+      source.close();
+    }
+  } catch {
+    // fall through to a plain copy
+  }
   copyFileSync(legacyGlobal, home);
   process.stderr.write(
     "Recall: migrated existing global.sqlite3 to home.sqlite3 (original kept as backup).\n",

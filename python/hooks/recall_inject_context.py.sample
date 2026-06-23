@@ -66,7 +66,7 @@ hook is silent).
 CONFIGURATION.
 
 Environment variables:
-- RECALL_DB: path to Recall database (default: ~/.recall/recall.sqlite3)
+- RECALL_DB: path to Recall database (default: ~/.recall/db/home.sqlite3)
 - RECALL_HOOK_MAX_HITS: max cells to mention in injection (default 3)
 - RECALL_HOOK_DISABLE: set to any non-empty value to disable injection
 - RECALL_HOOK_VERBOSE: set to any non-empty value to include more detail
@@ -89,7 +89,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+def _resolve_default_db() -> str:
+    """Default to the model-A home local, honoring RECALL_DB / RECALL_GLOBAL_DB /
+    RECALL_HOME the way recall_helper and routing.ts do. The pre-model-A
+    single-file ~/.recall/recall.sqlite3 is stale: absent on a fresh install, a
+    frozen pre-migration backup (or a symlink to it) on a migrated one."""
+    explicit = os.environ.get("RECALL_DB", "").strip()
+    if explicit:
+        return explicit
+    override = os.environ.get("RECALL_GLOBAL_DB", "").strip()
+    if override:
+        return override
+    home = os.environ.get("RECALL_HOME", "").strip() or os.path.expanduser("~/.recall")
+    return os.path.join(home, "db", "home.sqlite3")
+
+
+DEFAULT_DB = _resolve_default_db()
 MAX_HITS = int(os.environ.get("RECALL_HOOK_MAX_HITS", "3"))
 DISABLED = bool(os.environ.get("RECALL_HOOK_DISABLE", ""))
 VERBOSE = bool(os.environ.get("RECALL_HOOK_VERBOSE", ""))
@@ -159,7 +174,13 @@ def _graph_stats() -> dict | None:
     if not Path(DEFAULT_DB).exists():
         return None
     try:
-        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro", uri=True)
+        # immutable=1 (not just mode=ro): the TS core creates DBs in WAL
+        # journal mode. A plain read-only open needs to create the -shm
+        # sidecar that WAL requires, which fails on a freshly-written DB
+        # that has no live -wal/-shm files ("unable to open database file").
+        # immutable=1 reads the main file directly and bypasses WAL/shm —
+        # correct here because this is a pure read-only probe.
+        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro&immutable=1", uri=True)
         cells = conn.execute("SELECT COUNT(*) FROM graph_nodes WHERE status = 'active'").fetchone()[0]
         # Simple recency probe
         recent = conn.execute(

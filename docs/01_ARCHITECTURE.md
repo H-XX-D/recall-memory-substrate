@@ -53,9 +53,12 @@ resolution to later sessions instead of leaving two competing rows.
 
 Storage is per-project. The CLI wrapper routes each call to a SQLite database by
 walking up from the current directory through a registry of project roots (first
-match wins), falling back to a shared global database. Reads can federate the
-project and global databases with `--include-global`; writes always land in
-exactly one database.
+match wins), falling back to the home local outside any project. Writes always
+land in exactly one database: the routed local. Reads behave by scope. Outside
+any project, the read verbs (compile, search, semantic, subgraph) fan out
+automatically over the home read-union, querying the home local first and then
+each registered project local. Inside a project, pass `--project <slug>` or rely
+on CWD routing to read a single store.
 
 Primary node classes:
 

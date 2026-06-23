@@ -47,7 +47,7 @@ checkout and rebuilds. It is also the upgrade path for this option.
 git clone https://github.com/H-XX-D/recall-memory-substrate.git
 cd recall-memory-substrate
 npm install
-npm test             # verify the checkout: 162 unit/integration tests
+npm test             # verify the checkout: 264 unit/integration tests
 npm run install:local   # build + npm link → global `recall` / `recall-mcp`
 ```
 
@@ -57,18 +57,19 @@ Or equivalently: `./scripts/install-local.sh`.
 
 ```bash
 recall version    # confirms the installed package version
-recall init       # creates ./.recall/recall.sqlite3 in the current directory
+recall init       # registers cwd as a project; its local graph is ~/.recall/db/<slug>.sqlite3
 recall status     # prints store health, counts, and config
 ```
 
-`recall init` creates the local graph database wherever you run it. One
-`.recall/` per project is the intended pattern. Runtime databases and logs
-are git-ignored by default.
+`recall init` registers the current directory as a project and creates its
+local graph under the Recall home directory (`~/.recall/db/<slug>.sqlite3`). One
+registered project per local graph is the intended pattern. Runtime databases
+and logs are git-ignored by default.
 
 From a source checkout you can also run the full verification suite:
 
 ```bash
-npm test          # 162 unit/integration tests
+npm test          # 264 unit/integration tests
 npm run e2e       # 94 end-to-end checks
 npm run smoke     # init + status on a throwaway db
 npm run smoke:mcp # stdio MCP initialize + tools/list smoke
@@ -131,13 +132,13 @@ start a Recall-oriented turn.
 ## Other MCP clients (manual setup)
 
 ```bash
-recall mcp config --db .recall/recall.sqlite3   # prints an MCP config block
+recall mcp config   # prints an MCP config block for the routed local (pass --db <path> to pin one)
 ```
 
 Paste the block into any MCP-capable client (Claude Code, desktop apps,
-agent runtimes). The server is stdio JSON-RPC and exposes 42 tools:
-compile, write, search, subgraphs, hyperedges, programs, DAGs, evals, ACP
-coordination, calibration, and more. It exits on its own after 30 idle
+agent runtimes). The server is stdio JSON-RPC and exposes 45 tools:
+compile, write, search, subgraphs, project routing, hyperedges, programs, DAGs,
+evals, ACP coordination, calibration, and more. It exits on its own after 30 idle
 minutes (`RECALL_MCP_IDLE_EXIT_MS` to tune, `0` to disable); clients respawn
 it on demand.
 
@@ -226,8 +227,9 @@ scripts suppress it with `--disable-warning=ExperimentalWarning`.
 
 **Wrong database**: database routing has a clear precedence: an explicit
 `--db <path>` flag wins, otherwise the `RECALL_DB` environment variable is
-used if set, otherwise Recall falls back to `./.recall/recall.sqlite3`
-relative to where you run it. `RECALL_DB` is the same variable the MCP
+used if set, otherwise Recall resolves the central model: the deepest registered
+project ancestor of the current directory, or the home local
+(`~/.recall/db/home.sqlite3`) outside any project. `RECALL_DB` is the same variable the MCP
 server reads, so setting it once points the CLI, agents, and helper
 scripts at one shared store. `recall status` shows which database you're
 talking to.

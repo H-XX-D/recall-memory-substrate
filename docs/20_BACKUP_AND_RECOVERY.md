@@ -7,8 +7,8 @@ archive for machine or project moves.
 ## What To Back Up
 
 ```text
-.recall/recall.sqlite3      # primary graph
-.recall/secrets.sqlite3     # encrypted secrets side graph, if used
+~/.recall/db/home.sqlite3   # primary graph (home local; per-project ~/.recall/db/<slug>.sqlite3)
+~/.recall/db/secrets.sqlite3 # encrypted secrets side graph, if used
 ```
 
 Runtime files are git-ignored by default. Keep backups outside the repository
@@ -17,7 +17,7 @@ unless the graph is intentionally public.
 ## Portable Graph Export
 
 ```bash
-recall export --db .recall/recall.sqlite3 > recall-export.json
+recall export --db ~/.recall/db/home.sqlite3 > recall-export.json
 ```
 
 The archive uses `recall.export.v1` and contains the durable graph tables:
@@ -37,7 +37,7 @@ Import refuses to write into a non-empty database by default. To replace the
 target database's graph rows, pass `--force`:
 
 ```bash
-recall import --json recall-export.json --db .recall/recall.sqlite3 --force
+recall import --json recall-export.json --db ~/.recall/db/home.sqlite3 --force
 ```
 
 Use `--force` only after making a file-level copy of the current database.
@@ -67,8 +67,8 @@ then copy the SQLite files and WAL sidecars:
 
 ```bash
 mkdir -p ~/recall-backups/my-project
-cp .recall/recall.sqlite3* ~/recall-backups/my-project/
-cp .recall/secrets.sqlite3* ~/recall-backups/my-project/ 2>/dev/null || true
+cp ~/.recall/db/home.sqlite3* ~/recall-backups/my-project/
+cp ~/.recall/db/secrets.sqlite3* ~/recall-backups/my-project/ 2>/dev/null || true
 ```
 
 The JSON export is better for portability. A file copy is better for exact

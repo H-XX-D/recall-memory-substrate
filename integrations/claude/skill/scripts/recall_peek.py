@@ -62,7 +62,7 @@ APPROX_CHARS_PER_TOKEN = 4  # rough heuristic for token-budget mode
 
 def _open_db(db: str) -> sqlite3.Connection:
     """Open the Recall DB read-only."""
-    uri = f"file:{db}?mode=ro"
+    uri = f"file:{db}?mode=ro&immutable=1"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
     return conn

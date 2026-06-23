@@ -80,7 +80,7 @@ missing or non-active nodes.
 
 Declared graph operations are sandboxed `recall.program.v1` specs attached to
 graph relationships. Their implemented operations include `score`,
-`emit_witness`, `tag_projection`, `watch`, `drift`, and `quorum`. Reflex
+`emit_witness`, `tag_projection`, `watch`, `drift`, `quorum`, and `trend`. Reflex
 operations (`watch`, `drift`) derive only when tripped (an untripped run
 produces no proposal), and a trip configured with `concernTarget` derives a
 witness carrying a `concerns` reference against that cell, attributed
@@ -131,7 +131,8 @@ rather than requiring the model to rediscover the inconsistency from scratch.
 
 ## Eval Results
 
-The eval harness measures search, semantic search, compile, and subgraph cases.
+The eval harness measures search, semantic search, compile, subgraph, and
+invariant cases.
 Eval runs are runtime outputs, but durable eval conclusions still follow the
 proposal path:
 
@@ -221,7 +222,7 @@ are rejected by the primary graph firewall. Secret payloads may be stored only
 through the explicit encrypted side graph command:
 
 ```bash
-recall secrets save --confirm-secret-save --password-stdin --value-stdin
+recall secrets save --title "name" --confirm-secret-save --password-stdin --value-stdin
 ```
 
 The secrets side graph is user-directed. It is not populated by program runs,

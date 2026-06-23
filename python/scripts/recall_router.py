@@ -137,9 +137,13 @@ def route(query: str) -> RouteDecision:
                 "hour": "h", "hr": "h", "h": "h",
                 "day": "d", "d": "d",
                 "week": "w", "w": "w",
-                "month": "w",  # approximate as weeks; diff doesn't support months
             }
-            since = f"{n}{unit_map.get(unit, 'd')}"
+            if unit == "month":
+                # diff has no month unit; approximate 1 month as ~4 weeks so
+                # "3 months" widens to ~12w instead of collapsing to 3w.
+                since = f"{int(n) * 4}w"
+            else:
+                since = f"{n}{unit_map.get(unit, 'd')}"
             return RouteDecision(
                 tool="diff",
                 arg=since,

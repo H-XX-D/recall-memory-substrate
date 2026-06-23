@@ -51,7 +51,7 @@ USAGE.
 
 CONFIGURATION.
 
-  RECALL_DB          — DB path (default: ~/.recall/recall.sqlite3)
+  RECALL_DB          — DB path (default: ~/.recall/db/home.sqlite3)
   RECALL_EMBED_MODEL — sentence-transformers model (default: all-mpnet-base-v2)
   RECALL_EMBED_CACHE — cache vectors path (default: ~/.recall/.embeddings_real.npy)
   RECALL_EMBED_KEYS  — cache keys path (default: ~/.recall/.embeddings_real_keys.json)
@@ -76,7 +76,22 @@ import sys
 import time
 from pathlib import Path
 
-DB_PATH = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+def _resolve_default_db() -> str:
+    """Default to the model-A home local, honoring RECALL_DB / RECALL_GLOBAL_DB /
+    RECALL_HOME the way recall_helper and routing.ts do. The pre-model-A
+    single-file ~/.recall/recall.sqlite3 is stale: absent on a fresh install, a
+    frozen pre-migration backup (or a symlink to it) on a migrated one."""
+    explicit = os.environ.get("RECALL_DB", "").strip()
+    if explicit:
+        return explicit
+    override = os.environ.get("RECALL_GLOBAL_DB", "").strip()
+    if override:
+        return override
+    home = os.environ.get("RECALL_HOME", "").strip() or os.path.expanduser("~/.recall")
+    return os.path.join(home, "db", "home.sqlite3")
+
+
+DB_PATH = _resolve_default_db()
 MODEL_NAME = os.environ.get("RECALL_EMBED_MODEL", "all-mpnet-base-v2")
 CACHE_VEC_PATH = os.environ.get(
     "RECALL_EMBED_CACHE", os.path.expanduser("~/.recall/.embeddings_real.npy"))
@@ -169,7 +184,7 @@ def _conn(readonly: bool = False) -> sqlite3.Connection:
         print(f"{R}ERROR{X}: DB not found at {DB_PATH}", file=sys.stderr)
         sys.exit(2)
     if readonly:
-        return sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        return sqlite3.connect(f"file:{DB_PATH}?immutable=1", uri=True)
     return sqlite3.connect(DB_PATH)
 
 

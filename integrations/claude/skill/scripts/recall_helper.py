@@ -88,13 +88,44 @@ RING_DEFAULTS = ("runtime",)  # llm-integration.md: safe default for ordinary me
 # Stable agent identifier — do not invent per-write per the operating contract.
 DEFAULT_ACTOR_ID = "claude-code"
 
+def _recall_home_dir() -> str:
+    """Recall home dir, mirroring routing.ts `recallHomeDir`: RECALL_HOME
+    relocates the whole central model, otherwise `~/.recall`.
+    """
+    import os
+
+    override = os.environ.get("RECALL_HOME", "").strip()
+    return override if override else os.path.expanduser("~/.recall")
+
+
+def _registry_db_path() -> str:
+    """Local that holds the `projects` registry, mirroring routing.ts
+    `globalDbPath`: RECALL_GLOBAL_DB overrides, otherwise the home local
+    `<home>/db/home.sqlite3`.
+
+    Under model A the registry lives in the home local. The pre-model-A
+    `global.sqlite3` no longer holds it: it is absent on a fresh install and
+    only a frozen pre-migration backup on a migrated one, so reading it here
+    would silently route off a missing or stale registry.
+    """
+    import os
+
+    override = os.environ.get("RECALL_GLOBAL_DB", "").strip()
+    if override:
+        return override
+    return os.path.join(_recall_home_dir(), "db", "home.sqlite3")
+
+
 def _resolve_default_db() -> str:
     """Pick the DB the way the CLI wrapper does, so helper scripts route like
-    everything else: explicit RECALL_DB -> cwd registry walk -> global.
+    everything else: explicit RECALL_DB -> cwd registry walk -> home local.
 
     Runs at import time against the script's cwd, which (for an agent working
     inside a project) is the project root — so peek/health-peek default to the
-    project DB instead of always hitting global.
+    project DB instead of always hitting the home local.
+
+    The registry is read from the home local (home.sqlite3) and RECALL_HOME /
+    RECALL_GLOBAL_DB are honored the same way routing.ts resolves them.
     """
     import os
     import sqlite3
@@ -102,9 +133,9 @@ def _resolve_default_db() -> str:
     explicit = os.environ.get("RECALL_DB")
     if explicit and explicit.strip():
         return explicit
-    global_db = os.path.expanduser("~/.recall/db/global.sqlite3")
+    registry_db = _registry_db_path()
     try:
-        conn = sqlite3.connect(f"file:{global_db}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{registry_db}?mode=ro&immutable=1", uri=True)
         rows = conn.execute("SELECT root_path, db_path FROM projects").fetchall()
         conn.close()
         by_root = {os.path.realpath(os.path.expanduser(r[0])): r[1] for r in rows}
@@ -118,7 +149,7 @@ def _resolve_default_db() -> str:
             cur = parent
     except Exception:
         pass
-    return global_db
+    return registry_db
 
 
 DEFAULT_DB = _resolve_default_db()

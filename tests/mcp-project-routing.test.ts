@@ -64,6 +64,12 @@ test("MCP per-call project routing writes and reads the routed DB, not the defau
     });
     assert.ok(bad.__error, "expected an error for an unknown project slug");
     assert.match(bad.__error.message ?? String(bad.__error), /unknown project/);
+
+    // parity: the same unknown slug on a READ tool is also an explicit error,
+    // never a silent fallback to the default store.
+    const badRead = call(main, "recall_search", { project: "does-not-exist", query: "zebra marker" });
+    assert.ok(badRead.__error, "expected an error for an unknown project slug on a read tool");
+    assert.match(badRead.__error.message ?? String(badRead.__error), /unknown project/);
   } finally {
     main.close();
     closeRoutedStores();

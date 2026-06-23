@@ -42,10 +42,13 @@ active memory rather than passive notes.
 After installing Recall globally, generate the local MCP configuration:
 
 ```bash
-recall mcp config --db .recall/recall.sqlite3
+recall mcp config
 ```
 
-The generated block uses the `recall-mcp` stdio server:
+The generated block uses the `recall-mcp` stdio server, with `RECALL_DB` set to
+the resolved local DB as an absolute path under `~/.recall/db/` (the home local
+outside any project, or a registered project's `<slug>.sqlite3`). Pass
+`recall mcp config --db <path>` to pin a specific store instead:
 
 ```json
 {
@@ -53,7 +56,7 @@ The generated block uses the `recall-mcp` stdio server:
     "recall": {
       "command": "recall-mcp",
       "env": {
-        "RECALL_DB": ".recall/recall.sqlite3"
+        "RECALL_DB": "/home/you/.recall/db/home.sqlite3"
       }
     }
   }

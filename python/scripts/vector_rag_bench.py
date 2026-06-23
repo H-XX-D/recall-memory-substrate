@@ -41,6 +41,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -118,7 +119,7 @@ class Cell:
 
 def load_corpus(db: str) -> list[Cell]:
     """Load all cells from Recall DB as the RAG corpus."""
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, title, body, kind FROM graph_nodes WHERE status = 'active'"
@@ -142,6 +143,12 @@ def load_or_build_embeddings(
     """Load cached embeddings or compute + cache them. Returns (N, D) matrix."""
     cache_meta = EMBEDDING_CACHE.with_suffix(".meta.json")
     cell_ids = [c.id for c in cells]
+    # Hash the embedded text, not just the id set: a cell can be edited in place
+    # (same id, new body) and the cache must invalidate, or the benchmark scores
+    # stale vectors. Mirrors the content-hash cache in recall_semantic_real.py.
+    content_hash = hashlib.sha256(
+        "\x00".join(c.text for c in cells).encode("utf-8")
+    ).hexdigest()
 
     # Check cache validity
     if not force_rebuild and EMBEDDING_CACHE.exists() and cache_meta.exists():
@@ -149,7 +156,8 @@ def load_or_build_embeddings(
             meta = json.loads(cache_meta.read_text())
             if (meta.get("model") == model_name and
                     meta.get("cell_count") == len(cells) and
-                    meta.get("cell_ids") == cell_ids):
+                    meta.get("cell_ids") == cell_ids and
+                    meta.get("content_hash") == content_hash):
                 data = np.load(EMBEDDING_CACHE)
                 print(f"  loaded cached embeddings: {data['embeddings'].shape}",
                       file=sys.stderr)
@@ -181,6 +189,7 @@ def load_or_build_embeddings(
         "model": model_name,
         "cell_count": len(cells),
         "cell_ids": cell_ids,
+        "content_hash": content_hash,
     }))
     print(f"    cached to {EMBEDDING_CACHE}", file=sys.stderr)
     return embeddings

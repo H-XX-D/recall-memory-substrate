@@ -68,88 +68,65 @@ class BenchmarkQuery:
     operator_arg: str | None = None  # cell-id for peek, time-string for diff
 
 
-# Realistic scenarios on the current graph state.
-# Expectations refreshed 2026-06-09 against the live graph (post FTS5+BM25
-# retrieval rebuild). Each expected_substring was verified to come from a
-# cell that answers the scenario question TODAY; substrings never appear in
-# the query text itself (compile/router echo the query, which would
-# self-match) and never in tool error messages (peek --match echoes its
-# term even on zero results).
+# Generic benchmark scenarios covering the typical query taxonomy.
+# These work against any Recall graph; expected_substring values are
+# either tool-specific output markers (always present regardless of
+# graph content) or None (relevance depends on what's in your graph).
+#
+# To benchmark against your own graph content, edit this list to use
+# queries and expected substrings specific to your project, or pass
+# --scenarios <name1,name2,...> to filter.
 SCENARIOS: list[BenchmarkQuery] = [
     BenchmarkQuery(
-        name="lookup_l7_gravity",
-        # Refreshed 2026-06-09: the L7 Noether-translation closure cell no
-        # longer exists (peek --match "L7" = 0 cells). Current gravity-sector
-        # lookup target: the unified Cosserat L[u] rewrite cell (fcf04a6d).
-        description="Find the cell about the unified Cosserat L[u] gravity Lagrangian rewrite",
-        query_text="Cosserat rewrite unified Lagrangian gravity",
-        expected_substring="couple-stress",
+        name="lookup_specific_term",
+        description="Single-term lookup (compile dispatch)",
+        query_text="validate_user function",
+        expected_substring=None,  # graph-content-dependent
         operator_pattern="compile",
     ),
     BenchmarkQuery(
-        name="lookup_recent_artifact",
-        # Refreshed 2026-06-09: the v1.4 CI ingestion cell is gone
-        # (peek --match "v1.4" / "test-supports" = 0 cells). Current most
-        # recent artifact: the FTS5+BM25 retrieval rebuild decision (c6b69d8e).
-        description="Find the FTS5+BM25 retrieval rebuild artifact cell",
-        query_text="FTS5 BM25 retrieval rebuild",
-        expected_substring="porter unicode61",
+        name="lookup_recent_decision",
+        description="Lookup recent architectural decision (compile dispatch)",
+        query_text="recent architectural decision",
+        expected_substring=None,
         operator_pattern="compile",
     ),
     BenchmarkQuery(
-        name="synthesis_gravity_state",
-        # Refreshed 2026-06-09: "axiom-lock" matches 0 cells. The current
-        # state-of-gravity answer is the ONE-MEDIUM unification audit
-        # (cac7b4e0: disclination->curvature CONFIRMED, sigma separate).
-        description="Synthesize the current state of substrate gravity",
-        query_text="substrate gravity unification current state",
-        expected_substring="disclination",
+        name="synthesis_open_topic",
+        description="Open-ended synthesis (compile dispatch)",
+        query_text="current state of the system",
+        expected_substring=None,
         operator_pattern="compile",
     ),
     BenchmarkQuery(
-        name="synthesis_extension_roadmap",
-        # Refreshed 2026-06-09: the recall-for-code roadmap cells are gone
-        # (peek --match "roadmap" = 0 cells). The current project-status
-        # synthesis target is the Recall round-3 cell (74d76acd: HTTP
-        # embedding backends + per-actor calibration report).
-        description="What's the status of the latest Recall improvement round?",
-        query_text="Recall improvement round embeddings calibration status",
-        expected_substring="per-actor calibration",
+        name="synthesis_roadmap",
+        description="Roadmap/status synthesis (compile dispatch)",
+        query_text="project roadmap status",
+        expected_substring=None,
         operator_pattern="compile",
     ),
     BenchmarkQuery(
         name="diff_recent_activity",
-        description="What changed in the last 4 hours?",
-        query_text="recent activity changes graph",
-        expected_substring="new cells",
+        description="What changed in the last 4 hours? (diff dispatch)",
+        query_text="recent activity changes",
+        expected_substring="new cells",  # diff output marker, always present
         operator_pattern="diff",
         operator_arg="4h",
     ),
     BenchmarkQuery(
         name="health_contradictions",
-        # Refreshed 2026-06-09: the graph now has 0 contradictions, so the
-        # health report no longer contains the word "contradictions"; its
-        # answer line is "No urgent belief, stale-memory, or contradiction
-        # pressure detected." The naive arm structurally cannot answer this
-        # (live health is computed, not stored in any cell).
-        description="Show me contradiction load",
+        description="Show graph contradiction load (health dispatch)",
         query_text="contradictions memory health",
-        expected_substring="contradiction pressure",
+        expected_substring="contradictions",  # health-peek output marker
         operator_pattern="health",
     ),
     BenchmarkQuery(
         name="code_function_lookup",
-        # Refreshed 2026-06-09: no cell mentions build_proposal anymore, and
-        # the old expectation was a FALSE POSITIVE — peek --match echoes its
-        # term ("# 0 cells matching 'build_proposal'"), so the substring
-        # matched the error message. New target: the lexical_score ranking
-        # expression (cell c30e7b40); the substring comes from that cell's
-        # title, not from the match-term echo.
-        description="Tell me about the lexical_score ranking expression",
-        query_text="lexical_score ranking store search",
-        expected_substring="field-weighted",
+        description="Symbol lookup by name (peek-match dispatch)",
+        query_text="validate_user function",
+        expected_substring=None,
         operator_pattern="peek_match",
-        operator_arg="lexical_score",
+        operator_arg="validate_user",
     ),
 ]
 
@@ -418,47 +395,41 @@ def format_report(results: list[ScenarioResult]) -> str:
     # Discussion / honest caveats
     lines.append("## Discussion")
     lines.append("")
-    lines.append("**Headline**: operator-style retrieval uses ~32× fewer bytes for the")
-    lines.append("same task suite. Cost savings compound when an agent's task spans")
-    lines.append("multiple probes per turn (which it usually does).")
+    lines.append("**Headline**: operator-style retrieval delivers fewer bytes than naive")
+    lines.append("retrieval for the same task suite, with cost savings compounding when")
+    lines.append("an agent's task spans multiple probes per turn (which it usually does).")
+    lines.append("Specific reduction magnitudes depend on graph state and query mix.")
     lines.append("")
-    lines.append("**Expectations refreshed 2026-06-09**: expected substrings were")
-    lines.append("re-verified against the live graph after the FTS5+BM25 retrieval")
-    lines.append("rebuild (each substring read from a cell that answers the scenario")
-    lines.append("question today; none appear in query echoes or tool error messages).")
-    lines.append("Remaining naive misses are structural, not ranking bugs:")
-    lines.append("")
-    lines.append("- `diff_recent_activity`: 'what changed in the last 4h' requires a")
-    lines.append("  computed temporal delta. `recall search` returns stored cell bodies;")
-    lines.append("  no stored body contains the diff summary, so the naive arm cannot")
-    lines.append("  answer a temporal question by construction.")
-    lines.append("- `health_contradictions`: live contradiction load is computed graph")
-    lines.append("  state (currently zero pressure). Stored cells that merely discuss")
-    lines.append("  past contradictions are not the current answer, so the naive arm")
-    lines.append("  cannot honestly hit this either.")
+    lines.append("**Relevance interpretation**: substring relevance is a cheap proxy")
+    lines.append("(does the response contain a known expected substring?). When the")
+    lines.append("operator side misses on a compile-dispatched query but naive lexical")
+    lines.append("retrieval hits, the typical cause is `recall compile`'s lexical")
+    lines.append("ranking surfacing a different cell than expected — the substring")
+    lines.append("usually exists in the graph but isn't in compile's top expansion")
+    lines.append("window. Use `recall_router.py` (which dispatches to peek-match for")
+    lines.append("known-identifier queries, diff for temporal queries, health for")
+    lines.append("contradiction triage, compile only for genuine synthesis) to mitigate.")
     lines.append("")
     lines.append("**Caveats**:")
     lines.append("")
     lines.append("- Relevance check is substring match, a cheap proxy. Real accuracy")
     lines.append("  comparison requires human-graded relevance or LLM judge.")
     lines.append("- Naive (`recall search`) is a lexical proxy for vector RAG retrieval.")
-    lines.append("  Embedding-based vector RAG would have similar cost profile (returns")
-    lines.append("  full chunks for matched query) with different retrieval quality details.")
-    lines.append("- Single-run measurement; for production benchmarking use 10+ runs to")
-    lines.append("  characterize variance.")
-    lines.append("- Three of the seven operator-tool dispatches (`diff`, `health`,")
-    lines.append("  `peek_match`) hit 100% relevance, suggesting that when the operator")
-    lines.append("  tool matches the question shape, the operator side wins decisively")
-    lines.append("  on both bytes AND relevance. The relevance gap concentrates on the")
-    lines.append("  compile-based scenarios.")
+    lines.append("  For a real embedding-based vector RAG comparison, use")
+    lines.append("  `vector_rag_bench.py` (requires sentence-transformers + numpy).")
+    lines.append("- Single-run measurement; for production benchmarking use 10+ runs")
+    lines.append("  to characterize variance.")
+    lines.append("- Operator-tool dispatches matched to question shape (e.g., `diff` for")
+    lines.append("  temporal queries, `peek_match` for identifier lookups) typically hit")
+    lines.append("  100% relevance with the largest byte reductions. Relevance gaps tend")
+    lines.append("  to concentrate on compile-dispatched synthesis queries where")
+    lines.append("  lexical ranking varies.")
     lines.append("")
     lines.append("**Implication for production use**: agents should pick the right tool")
     lines.append("for the question shape. Compile is best for synthesis tasks; peek-match")
     lines.append("for known-symbol lookups; diff for temporal queries; health-peek for")
-    lines.append("contradiction triage. The benchmark validates each tool when used")
-    lines.append("appropriately. A meta-router that picks the right operator tool per")
-    lines.append("query would close the relevance gap by routing compile-unfriendly")
-    lines.append("queries to peek-match.")
+    lines.append("contradiction triage. The `recall_router.py` meta-router does this")
+    lines.append("dispatch automatically based on query pattern detection.")
     return "\n".join(lines)
 
 

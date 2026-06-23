@@ -155,46 +155,74 @@ Recall exposes a lightweight stdio MCP-compatible server:
 recall-mcp
 ```
 
-Tools:
+Tools (45 total):
 
+Core read and write:
+- `recall_compile`
+- `recall_search`
+- `recall_semantic`
+- `recall_subgraph`
+- `recall_cell`
+- `recall_write`
+- `recall_page`
+
+Status and health:
 - `recall_status`
 - `recall_storage`
 - `recall_compact`
 - `recall_beliefs`
-- `recall_maintenance`
 - `recall_trust`
+- `recall_maintenance`
 - `recall_tick`
+
+Project routing:
+- `recall_project_register`
+- `recall_project_list`
+- `recall_project_where`
+
+Hyperedges and programs:
+- `recall_hyperedge_add`
+- `recall_hyperedge_show`
+- `recall_hyperedge_list`
+- `recall_program_add`
+- `recall_program_show`
+- `recall_program_list`
+- `recall_program_run`
+- `recall_program_runs`
+- `recall_program_run_show`
+
+DAG overlays:
+- `recall_dag_add`
+- `recall_dag_show`
+- `recall_dag_list`
+- `recall_dag_analyze`
+
+Evals:
+- `recall_eval_run`
+- `recall_eval_list`
+- `recall_eval_show`
+
+Workflow and operators:
+- `recall_workflow_allocate`
+- `recall_operate_once`
+- `recall_operate_list`
+- `recall_operate_show`
+- `recall_blind_lock`
+- `recall_daemon_run_once`
+
+ACP agent coordination:
 - `recall_acp_status`
 - `recall_acp_send`
 - `recall_acp_list`
 - `recall_acp_show`
 - `recall_acp_process`
 - `recall_acp_exchange`
-- `recall_operate_once`
-- `recall_operate_list`
-- `recall_operate_show`
-- `recall_page`
-- `recall_cell`
-- `recall_search`
-- `recall_semantic`
-- `recall_compile`
-- `recall_subgraph`
-- `recall_write`
-- `recall_workflow_allocate`
-- `recall_blind_lock`
-- advanced graph operation tools
-- `recall_dag_add`
-- `recall_dag_show`
-- `recall_dag_list`
-- `recall_dag_analyze`
-- `recall_eval_run`
-- `recall_eval_list`
-- `recall_eval_show`
-- `recall_daemon_run_once`
 
-Advanced graph operations, `recall_dag_analyze`, `recall_eval_run`, and
-`recall_daemon_run_once` accept `derive: true` to close runtime output back
-into admitted graph cells.
+The mutating tools `recall_maintenance`, `recall_tick`, `recall_dag_analyze`,
+`recall_eval_run`, `recall_program_run`, and `recall_workflow_allocate` accept
+`derive: true` to close runtime output back into admitted graph cells. At home
+scope (outside any project, with no explicit `project` arg) the read tools serve
+the home read-union; writes and explicit-project calls use a single store.
 
 MCP clients should keep references compact. Evidence arrays, multi-party
 relation members, and DAG overlay nodes can use cell IDs,

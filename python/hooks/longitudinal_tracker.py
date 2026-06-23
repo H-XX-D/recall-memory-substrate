@@ -66,7 +66,22 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+def _resolve_default_db() -> str:
+    """Default to the model-A home local, honoring RECALL_DB / RECALL_GLOBAL_DB /
+    RECALL_HOME the way recall_helper and routing.ts do. The pre-model-A
+    single-file ~/.recall/recall.sqlite3 is stale: absent on a fresh install, a
+    frozen pre-migration backup (or a symlink to it) on a migrated one."""
+    explicit = os.environ.get("RECALL_DB", "").strip()
+    if explicit:
+        return explicit
+    override = os.environ.get("RECALL_GLOBAL_DB", "").strip()
+    if override:
+        return override
+    home = os.environ.get("RECALL_HOME", "").strip() or os.path.expanduser("~/.recall")
+    return os.path.join(home, "db", "home.sqlite3")
+
+
+DEFAULT_DB = _resolve_default_db()
 SNAPSHOT_LOG = os.environ.get(
     "RECALL_LONGITUDINAL_LOG",
     os.path.expanduser("~/.recall/longitudinal_snapshots.jsonl"),
@@ -294,8 +309,8 @@ def measure_continuity(conn: sqlite3.Connection, window_seconds: int) -> dict:
     for cid, ts in rows:
         edges = conn.execute(
             "SELECT created_at FROM graph_relations "
-            "WHERE target_id LIKE ? AND created_at > ?",
-            (f"%{cid}%", ts),
+            "WHERE target_id = ? AND created_at > ?",
+            (cid, ts),
         ).fetchall()
         if edges:
             referenced += 1
@@ -311,7 +326,7 @@ def take_snapshot(window_seconds: int = 7 * 86400) -> dict:
     """Compute all metrics, return a snapshot dict."""
     if not Path(DEFAULT_DB).exists():
         return {"error": f"DB not found: {DEFAULT_DB}"}
-    conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{DEFAULT_DB}?immutable=1", uri=True)
     snap = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "window_seconds": window_seconds,

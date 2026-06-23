@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { admitWriteProposal } from "./core/admission.js";
 import { analyzeMemory, memoryHealthToProposal } from "./core/analysis.js";
@@ -28,6 +28,7 @@ import { globalDbPath, runClaudeSync } from "./core/claude-sync.js";
 import { codexIntegrationStatus, syncCodexIntegration } from "./core/codex-integration.js";
 import {
   ensureHomeLocal,
+  homeSecretsPath,
   localGraphPaths,
   openHomeReadUnion,
   registerProject,
@@ -753,7 +754,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   // the home local, and inside a project hits that project's local.
   let db = resolveDbForCwd(process.cwd());
   let dbExplicit = (process.env.RECALL_DB?.trim() ?? "") !== "";
-  let secretsDb = ".recall/secrets.sqlite3";
+  let secretsDb = homeSecretsPath();
   let jsonPath: string | undefined;
   let words = 900;
   let query: string | undefined;
@@ -970,15 +971,37 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function handleSecrets(args: ParsedArgs): void {
   const [, subcommand, id] = args.command;
+  const secretsDbPath = resolve(args.secretsDb);
+  // Read verbs must not auto-create a decoy secrets DB. On a missing store,
+  // report the resolved absolute path instead of silently returning empty.
+  if (subcommand !== "save" && !existsSync(secretsDbPath)) {
+    if (subcommand === "get") {
+      fail(`No secrets DB at ${secretsDbPath}`);
+    }
+    console.log(
+      JSON.stringify(
+        {
+          db: secretsDbPath,
+          exists: false,
+          note: `no secrets DB at ${secretsDbPath}`,
+          stats: { secretNodes: 0, secretRelations: 0 },
+          secrets: [],
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   const secrets = new SecretGraphStore(args.secretsDb);
   try {
     if (!subcommand || subcommand === "status") {
-      console.log(JSON.stringify({ db: args.secretsDb, stats: secrets.stats() }, null, 2));
+      console.log(JSON.stringify({ db: secretsDbPath, stats: secrets.stats() }, null, 2));
       return;
     }
 
     if (subcommand === "list") {
-      console.log(JSON.stringify({ db: args.secretsDb, secrets: secrets.list() }, null, 2));
+      console.log(JSON.stringify({ db: secretsDbPath, secrets: secrets.list() }, null, 2));
       return;
     }
 
@@ -1000,7 +1023,7 @@ function handleSecrets(args: ParsedArgs): void {
         tags: args.tags,
         scope: args.scope
       });
-      console.log(JSON.stringify({ saved: true, secret: node }, null, 2));
+      console.log(JSON.stringify({ saved: true, db: secretsDbPath, secret: node }, null, 2));
       return;
     }
 

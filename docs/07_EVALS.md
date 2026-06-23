@@ -55,6 +55,7 @@ Supported case kinds:
 - `semantic`
 - `compile`
 - `subgraph`
+- `invariant`
 
 ## Baselines
 

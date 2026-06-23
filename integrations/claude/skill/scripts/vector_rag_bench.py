@@ -41,6 +41,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -77,28 +78,31 @@ class Scenario:
     expected_substring: str | None
 
 
+# Generic scenarios mirroring recall_bench.py SCENARIOS so the two
+# benchmarks can be directly compared. expected_substring is None for
+# scenarios where relevance depends on user graph content.
 SCENARIOS: list[Scenario] = [
-    Scenario("lookup_l7_gravity",
-             "Find the cell about L7 Noether-translation gravity closure",
-             "L7 Noether translation gravity", "Noether"),
-    Scenario("lookup_recent_artifact",
-             "Find the v1.4 CI ingestion artifact cell",
-             "v1.4 CI test ingestion", "test-supports"),
-    Scenario("synthesis_gravity_state",
-             "Synthesize the current state of substrate gravity",
-             "substrate gravity current state closure", "axiom-lock"),
-    Scenario("synthesis_extension_roadmap",
-             "What's the v1.x code extension roadmap status?",
-             "recall-for-code extension roadmap status", "shipped"),
+    Scenario("lookup_specific_term",
+             "Single-term lookup",
+             "validate_user function", None),
+    Scenario("lookup_recent_decision",
+             "Lookup recent architectural decision",
+             "recent architectural decision", None),
+    Scenario("synthesis_open_topic",
+             "Open-ended synthesis query",
+             "current state of the system", None),
+    Scenario("synthesis_roadmap",
+             "Roadmap/status synthesis",
+             "project roadmap status", None),
     Scenario("diff_recent_activity",
              "What changed in the last 4 hours?",
-             "recent activity changes graph", "new cells"),
+             "recent activity changes", "new cells"),
     Scenario("health_contradictions",
-             "Show me contradiction load",
+             "Show graph contradiction load",
              "contradictions memory health", "contradictions"),
     Scenario("code_function_lookup",
-             "Tell me about the build_proposal function",
-             "build_proposal function helper", "build_proposal"),
+             "Symbol lookup by name",
+             "validate_user function", None),
 ]
 
 
@@ -115,7 +119,7 @@ class Cell:
 
 def load_corpus(db: str) -> list[Cell]:
     """Load all cells from Recall DB as the RAG corpus."""
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, title, body, kind FROM graph_nodes WHERE status = 'active'"
@@ -139,6 +143,12 @@ def load_or_build_embeddings(
     """Load cached embeddings or compute + cache them. Returns (N, D) matrix."""
     cache_meta = EMBEDDING_CACHE.with_suffix(".meta.json")
     cell_ids = [c.id for c in cells]
+    # Hash the embedded text, not just the id set: a cell can be edited in place
+    # (same id, new body) and the cache must invalidate, or the benchmark scores
+    # stale vectors. Mirrors the content-hash cache in recall_semantic_real.py.
+    content_hash = hashlib.sha256(
+        "\x00".join(c.text for c in cells).encode("utf-8")
+    ).hexdigest()
 
     # Check cache validity
     if not force_rebuild and EMBEDDING_CACHE.exists() and cache_meta.exists():
@@ -146,7 +156,8 @@ def load_or_build_embeddings(
             meta = json.loads(cache_meta.read_text())
             if (meta.get("model") == model_name and
                     meta.get("cell_count") == len(cells) and
-                    meta.get("cell_ids") == cell_ids):
+                    meta.get("cell_ids") == cell_ids and
+                    meta.get("content_hash") == content_hash):
                 data = np.load(EMBEDDING_CACHE)
                 print(f"  loaded cached embeddings: {data['embeddings'].shape}",
                       file=sys.stderr)
@@ -178,6 +189,7 @@ def load_or_build_embeddings(
         "model": model_name,
         "cell_count": len(cells),
         "cell_ids": cell_ids,
+        "content_hash": content_hash,
     }))
     print(f"    cached to {EMBEDDING_CACHE}", file=sys.stderr)
     return embeddings

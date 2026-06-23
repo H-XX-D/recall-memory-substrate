@@ -732,6 +732,17 @@ def main() -> int:
     TEST_DB = args.db or tempfile.mktemp(suffix=".sqlite3", prefix="recall-test-")
     print(f"Test DB: {TEST_DB}")
 
+    # Safety: this suite issues destructive init/admit writes. tempfile.mktemp
+    # lands in $TMPDIR, but an explicit --db (or a CLI --db-handling regression)
+    # could point writes at the real Recall home and mutate live memory. Refuse
+    # to run if the resolved DB is inside ~/.recall.
+    _real_home = os.path.realpath(os.path.expanduser("~/.recall"))
+    _resolved = os.path.realpath(TEST_DB)
+    if _resolved == _real_home or _resolved.startswith(_real_home + os.sep):
+        print(f"REFUSING to run: TEST_DB {TEST_DB} is inside the real Recall home "
+              f"{_real_home}; pass a --db outside ~/.recall.", file=sys.stderr)
+        return 2
+
     init_db()
 
     suite = Suite()

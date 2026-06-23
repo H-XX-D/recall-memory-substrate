@@ -60,7 +60,7 @@ The reminder is:
 
 CONFIGURATION.
 
-- RECALL_DB: path to Recall database (default: ~/.recall/recall.sqlite3)
+- RECALL_DB: path to Recall database (default: ~/.recall/db/home.sqlite3)
 - RECALL_WRITEBACK_DISABLE: set to non-empty to disable the reminder
 - RECALL_WRITEBACK_FORCE: set to non-empty to always emit the reminder
   (useful for training the agent in early sessions)
@@ -77,7 +77,22 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+def _resolve_default_db() -> str:
+    """Default to the model-A home local, honoring RECALL_DB / RECALL_GLOBAL_DB /
+    RECALL_HOME the way recall_helper and routing.ts do. The pre-model-A
+    single-file ~/.recall/recall.sqlite3 is stale: absent on a fresh install, a
+    frozen pre-migration backup (or a symlink to it) on a migrated one."""
+    explicit = os.environ.get("RECALL_DB", "").strip()
+    if explicit:
+        return explicit
+    override = os.environ.get("RECALL_GLOBAL_DB", "").strip()
+    if override:
+        return override
+    home = os.environ.get("RECALL_HOME", "").strip() or os.path.expanduser("~/.recall")
+    return os.path.join(home, "db", "home.sqlite3")
+
+
+DEFAULT_DB = _resolve_default_db()
 DISABLED = bool(os.environ.get("RECALL_WRITEBACK_DISABLE", ""))
 FORCE = bool(os.environ.get("RECALL_WRITEBACK_FORCE", ""))
 VERBOSE = bool(os.environ.get("RECALL_WRITEBACK_VERBOSE", ""))
@@ -130,7 +145,7 @@ def _recently_wrote_to_recall(window_seconds: int = 300) -> bool:
     if not Path(DEFAULT_DB).exists():
         return False
     try:
-        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro&immutable=1", uri=True)
         # graph_nodes.created_at is ISO-8601; compare to threshold
         cutoff_epoch = int(time.time()) - window_seconds
         cutoff_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff_epoch))

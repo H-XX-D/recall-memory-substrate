@@ -57,6 +57,6 @@ The user should not have to become the memory clerk.
 Secrets are never automatic. They require explicit user-directed save:
 
 ```bash
-recall secrets save --confirm-secret-save --password-stdin --value-stdin
+recall secrets save --title "name" --confirm-secret-save --password-stdin --value-stdin
 ```
 

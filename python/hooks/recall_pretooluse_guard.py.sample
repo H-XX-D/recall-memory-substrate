@@ -71,7 +71,7 @@ Grep / etc., which keeps overhead low.
 
 CONFIGURATION.
 
-  RECALL_DB              — path to DB (default: ~/.recall/recall.sqlite3)
+  RECALL_DB              — path to DB (default: ~/.recall/db/home.sqlite3)
   RECALL_GUARD_BYPASS    — set to non-empty to disable guarding entirely
   RECALL_GUARD_WINDOW    — seconds to look back for rationale (default 1800)
   RECALL_GUARD_ALLOWLIST — comma-separated path prefixes that are always
@@ -110,7 +110,22 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_DB = os.environ.get("RECALL_DB", os.path.expanduser("~/.recall/recall.sqlite3"))
+def _resolve_default_db() -> str:
+    """Default to the model-A home local, honoring RECALL_DB / RECALL_GLOBAL_DB /
+    RECALL_HOME the way recall_helper and routing.ts do. The pre-model-A
+    single-file ~/.recall/recall.sqlite3 is stale: absent on a fresh install, a
+    frozen pre-migration backup (or a symlink to it) on a migrated one."""
+    explicit = os.environ.get("RECALL_DB", "").strip()
+    if explicit:
+        return explicit
+    override = os.environ.get("RECALL_GLOBAL_DB", "").strip()
+    if override:
+        return override
+    home = os.environ.get("RECALL_HOME", "").strip() or os.path.expanduser("~/.recall")
+    return os.path.join(home, "db", "home.sqlite3")
+
+
+DEFAULT_DB = _resolve_default_db()
 BYPASS = bool(os.environ.get("RECALL_GUARD_BYPASS", ""))
 DRY_RUN = bool(os.environ.get("RECALL_GUARD_DRY_RUN", ""))
 WINDOW_SECONDS = int(os.environ.get("RECALL_GUARD_WINDOW", "1800"))
@@ -213,7 +228,7 @@ def _is_allowlisted(path: str) -> bool:
     if not path:
         return False
     for prefix in ALLOWLIST:
-        if prefix and (path.startswith(prefix) or f"/{prefix}/" in path or path.endswith(prefix)):
+        if prefix and (path.startswith(prefix) or f"/{prefix}/" in path):
             return True
     return False
 
@@ -221,7 +236,13 @@ def _is_allowlisted(path: str) -> bool:
 def _is_destructive_bash(cmd: str) -> bool:
     if not cmd:
         return False
-    if READ_ONLY_BASH.match(cmd.strip()):
+    # A leading read-only command does NOT make a compound command safe:
+    # `cat x; rm -rf y` chains a destructive command after a benign one, so
+    # only short-circuit on the read-only allowlist when there is no command
+    # separator (; && || |) that could introduce a second command.
+    stripped = cmd.strip()
+    has_chain = re.search(r";|&&|\|\|?|\n", stripped)
+    if not has_chain and READ_ONLY_BASH.match(stripped):
         return False
     return any(p.search(cmd) for p in DESTRUCTIVE_BASH_PATTERNS)
 
@@ -234,7 +255,13 @@ def _find_rationale(target_hint: str) -> dict | None:
     if not Path(DEFAULT_DB).exists():
         return {"_cold_start": True}
     try:
-        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro", uri=True)
+        # immutable=1 (not just mode=ro): the TS core creates DBs in WAL
+        # journal mode. A plain read-only open needs to create the -shm
+        # sidecar that WAL requires, which fails on a freshly-written DB
+        # that has no live -wal/-shm files ("unable to open database file").
+        # immutable=1 reads the main file directly and bypasses WAL/shm —
+        # correct here because this is a pure read-only rationale lookup.
+        conn = sqlite3.connect(f"file:{DEFAULT_DB}?mode=ro&immutable=1", uri=True)
         cutoff_epoch = int(time.time()) - WINDOW_SECONDS
         cutoff_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff_epoch))
         kinds_clause = ",".join("?" * len(RATIONALE_KINDS))
