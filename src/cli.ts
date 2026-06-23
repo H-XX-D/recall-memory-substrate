@@ -26,7 +26,14 @@ import { installLaunchAgent, launchAgentStatus, renderLaunchAgentPlist, uninstal
 import { claudeIntegrationStatus, setClaudeAutoMemory } from "./core/claude-integration.js";
 import { globalDbPath, runClaudeSync } from "./core/claude-sync.js";
 import { codexIntegrationStatus, syncCodexIntegration } from "./core/codex-integration.js";
-import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput } from "./core/store.js";
+import {
+  localGraphPaths,
+  registerProject,
+  resolveCwdRouting,
+  resolveDbForCwd,
+} from "./core/routing.js";
+import { FederatedReadStore } from "./core/federated-store.js";
+import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput, type RecallStore } from "./core/store.js";
 import { storageStats } from "./core/storage-stats.js";
 import { renderTui } from "./core/tui.js";
 import { RECALL_PACKAGE_NAME, RECALL_VERSION } from "./core/version.js";
@@ -36,6 +43,9 @@ import type { AcpRequest, HyperedgeProgramSpec, OperatorRun } from "./core/types
 interface ParsedArgs {
   command: string[];
   db: string;
+  /** True when the db was pinned explicitly (--db flag or RECALL_DB), so the
+   * central-model routing (project/home union) is bypassed for that store. */
+  dbExplicit: boolean;
   secretsDb: string;
   jsonPath?: string;
   words: number;
@@ -182,14 +192,86 @@ function main(): void {
   }
 
   const store = new SQLiteRecallStore(args.db);
+  // Read commands run over the central model: outside any project (home scope)
+  // they read the federated union over every local; inside a project, or when a
+  // db is pinned explicitly, they read that single local. withReadStore opens
+  // the right store, runs the body, and always closes a federated store it
+  // built (the single `store` is closed by the outer finally).
+  const withReadStore = (run: (read: RecallStore) => void): void => {
+    if (!args.dbExplicit && resolveCwdRouting(process.cwd()).scope === "home") {
+      const federated = new FederatedReadStore(localGraphPaths());
+      try {
+        run(federated);
+      } finally {
+        federated.close();
+      }
+      return;
+    }
+    run(store);
+  };
   try {
     if (command === "init") {
-      console.log(JSON.stringify({ status: "initialized", db: args.db, stats: store.stats() }, null, 2));
+      // Register cwd as a project in the central registry and create/open its
+      // local. Idempotent: re-running in an already-registered dir updates the
+      // record and reports it. An explicit --db/RECALL_DB becomes the local's
+      // db_path so power users can place the local where they want.
+      const record = registerProject(
+        {
+          root: process.cwd(),
+          dbPath: args.dbExplicit ? args.db : undefined,
+        },
+        new Date().toISOString(),
+      );
+      const projectStore = new SQLiteRecallStore(record.db_path);
+      try {
+        console.log(
+          JSON.stringify(
+            {
+              status: "initialized",
+              scope: "project",
+              slug: record.slug,
+              root: record.root_path,
+              db: record.db_path,
+              stats: projectStore.stats(),
+            },
+            null,
+            2,
+          ),
+        );
+      } finally {
+        projectStore.close();
+      }
       return;
     }
 
     if (command === "status") {
-      console.log(JSON.stringify({ name: RECALL_PACKAGE_NAME, version: RECALL_VERSION, db: args.db, stats: store.stats() }, null, 2));
+      const routing = resolveCwdRouting(process.cwd());
+      const status: Record<string, unknown> = {
+        name: RECALL_PACKAGE_NAME,
+        version: RECALL_VERSION,
+        db: args.db,
+        scope: routing.scope,
+        stats: store.stats(),
+      };
+      if (routing.scope === "project" && routing.slug) status.slug = routing.slug;
+      if (routing.scope === "home") status.unionMembers = localGraphPaths().length;
+      console.log(JSON.stringify(status, null, 2));
+      return;
+    }
+
+    if (command === "where") {
+      const routing = resolveCwdRouting(process.cwd());
+      const out: Record<string, unknown> = {
+        scope: routing.scope,
+        db: routing.dbPath,
+      };
+      if (routing.slug) out.slug = routing.slug;
+      if (routing.scope === "home") {
+        const members = localGraphPaths();
+        out.unionMembers = members.length;
+        out.locals = members.map((m) => m.graph);
+      }
+      console.log(JSON.stringify(out, null, 2));
       return;
     }
 
@@ -392,8 +474,10 @@ function main(): void {
 
     if (command === "search") {
       const query = args.query ?? args.command.slice(1).join(" ");
-      const results = store.search(query, 20);
-      console.log(JSON.stringify({ query, results }, null, 2));
+      withReadStore((read) => {
+        const results = read.search(query, 20);
+        console.log(JSON.stringify({ query, results }, null, 2));
+      });
       return;
     }
 
@@ -404,38 +488,44 @@ function main(): void {
 
     if (command === "semantic") {
       const query = args.query ?? args.command.slice(1).join(" ");
-      const results = store.semanticSearch(query, 20);
-      console.log(JSON.stringify({ query, results }, null, 2));
+      withReadStore((read) => {
+        const results = read.semanticSearch(query, 20);
+        console.log(JSON.stringify({ query, results }, null, 2));
+      });
       return;
     }
 
     if (command === "subgraph") {
-      const results = store.subgraph({
-        category: args.category,
-        type: args.type,
-        subject: args.subject,
-        project: args.project,
-        idea: args.idea,
-        timestamp: args.timestamp,
-        topics: args.topics,
-        entities: args.entities,
-        identities: args.identities,
-        rings: args.rings,
-        limit: 50
+      withReadStore((read) => {
+        const results = read.subgraph({
+          category: args.category,
+          type: args.type,
+          subject: args.subject,
+          project: args.project,
+          idea: args.idea,
+          timestamp: args.timestamp,
+          topics: args.topics,
+          entities: args.entities,
+          identities: args.identities,
+          rings: args.rings,
+          limit: 50
+        });
+        console.log(JSON.stringify({ filter: subgraphFilterForOutput(args), results }, null, 2));
       });
-      console.log(JSON.stringify({ filter: subgraphFilterForOutput(args), results }, null, 2));
       return;
     }
 
     if (command === "compile") {
       const task = args.query ?? args.command.slice(1).join(" ");
-      const packet = compileContext(store, {
-        task,
-        budgetWords: args.words,
-        inlineReferenceValues: args.inlineReferenceValues,
-        includeReferenceParameters: args.includeReferenceParameters
+      withReadStore((read) => {
+        const packet = compileContext(read, {
+          task,
+          budgetWords: args.words,
+          inlineReferenceValues: args.inlineReferenceValues,
+          includeReferenceParameters: args.includeReferenceParameters
+        });
+        console.log(formatContextPacket(packet));
       });
-      console.log(formatContextPacket(packet));
       return;
     }
 
@@ -636,10 +726,13 @@ function main(): void {
 function parseArgs(argv: string[]): ParsedArgs {
   const command: string[] = [];
   // Precedence: explicit --db flag (set in the loop below) > RECALL_DB env
-  // > local default. RECALL_DB is the same escape hatch the MCP server reads,
-  // so a shared store set once in the environment routes both paths alike.
-  const envDb = process.env.RECALL_DB?.trim();
-  let db = envDb ? envDb : ".recall/recall.sqlite3";
+  // > central model resolution. resolveDbForCwd joins the central model: it
+  // honors RECALL_DB (the same escape hatch the MCP server reads), then walks
+  // the registry for the deepest registered project ancestor of cwd, then
+  // falls back to the home local. So a bare `recall` outside any project hits
+  // the home local, and inside a project hits that project's local.
+  let db = resolveDbForCwd(process.cwd());
+  let dbExplicit = (process.env.RECALL_DB?.trim() ?? "") !== "";
   let secretsDb = ".recall/secrets.sqlite3";
   let jsonPath: string | undefined;
   let words = 900;
@@ -692,6 +785,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     const arg = argv[index];
     if (arg === "--db") {
       db = requireValue(argv, ++index, "--db");
+      dbExplicit = true;
     } else if (arg === "--secrets-db") {
       secretsDb = requireValue(argv, ++index, "--secrets-db");
     } else if (arg === "--json") {
@@ -803,6 +897,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   return {
     command,
     db,
+    dbExplicit,
     secretsDb,
     jsonPath,
     words,
@@ -1033,7 +1128,8 @@ function printHelp(): void {
   console.log(`Recall CLI
 
 Commands:
-  recall init [--db path]
+  recall init [--db path]                                        register cwd as a project and create its local
+  recall where                                                   show routing scope (project/home/explicit) and, for home, the union locals
   recall version
   recall status [--db path]
   recall storage [--db path]

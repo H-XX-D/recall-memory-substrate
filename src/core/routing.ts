@@ -1,17 +1,45 @@
 // Project routing: resolve which sqlite DB a request hits, and a writable
 // registry of project roots. Extracted from the MCP server's launch-time
 // resolveDbPath so both the server (per request) and the CLI can share it.
-// Reads are read-only and tolerate a missing registry (fresh install ->
-// global fallback); writes ensure the table exists first.
+// Reads are read-only and tolerate a missing registry (fresh install -> home
+// fallback); writes ensure the table exists first.
+//
+// Model-A central model: locals are the single source of truth and live under
+// the Recall home dir's db/ folder. The registry table lives in the home local
+// (globalDbPath now resolves to homeDbPath unless RECALL_GLOBAL_DB overrides
+// it). "global" is not a writable store; outside any project, reads fan out as
+// a read-union over the locals (see localGraphPaths / FederatedReadStore) while
+// writes land in the home local. Inside a registered project, reads and writes
+// go to that project's local only.
 
+import { mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+// Recall home dir. RECALL_HOME relocates the entire central model (registry +
+// every local) under one root, which is exactly what manual testing needs to
+// avoid touching the real user graphs.
+export function recallHomeDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.RECALL_HOME?.trim();
+  return override && override !== "" ? override : join(homedir(), ".recall");
+}
+
+// The default "home" local. Outside any project this is both the writable store
+// and the first member of the federated read union. It replaces the old
+// "global" graph: the registry now lives here too (see globalDbPath below).
+export function homeDbPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(recallHomeDir(env), "db", "home.sqlite3");
+}
+
+// Back-compat alias. The registry used to live in a separate "global.sqlite3";
+// it now lives in the home local. RECALL_GLOBAL_DB is still honored as an
+// explicit override so existing callers and tests can point the registry at a
+// scratch file.
 export function globalDbPath(): string {
   const override = process.env.RECALL_GLOBAL_DB;
   if (override && override.trim() !== "") return override;
-  return join(homedir(), ".recall", "db", "global.sqlite3");
+  return homeDbPath();
 }
 
 export interface ProjectRecord {
@@ -97,6 +125,9 @@ export function registerProject(
   const root = resolve(input.root);
   const slug = slugify(input.slug ?? root.split("/").pop() ?? "project");
   const dbPath = input.dbPath ?? join(dirname(globalDb), `${slug}.sqlite3`);
+  // The registry lives in the home local; on a fresh RECALL_HOME the db/ dir
+  // does not exist yet and SQLite will not create it, so ensure it first.
+  mkdirSync(dirname(globalDb), { recursive: true });
   const db = new DatabaseSync(globalDb);
   db.exec(PROJECTS_DDL);
   db.prepare(
@@ -149,4 +180,57 @@ export function whereProject(
     dir = parent;
   }
   return { db: globalDb, reason: "no project match (global)" };
+}
+
+// Model-A scoped routing for a cwd. Three outcomes:
+//   - "explicit": RECALL_DB is set, so a single store is used verbatim (escape
+//     hatch for migrations and one-off scripts). It is neither the union nor a
+//     registered project; the caller just opens that one db.
+//   - "project": cwd is inside (or below) a registered project root, so reads
+//     and writes go to that project's local only, never the union.
+//   - "home": no project match, so writes land in the home local and reads fan
+//     out over the union (built separately from localGraphPaths).
+export function resolveCwdRouting(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { scope: "project" | "home" | "explicit"; dbPath: string; slug?: string } {
+  const explicit = env.RECALL_DB?.trim();
+  if (explicit && explicit !== "") {
+    return { scope: "explicit", dbPath: explicit };
+  }
+  const registry = globalDbPath();
+  const projects = listProjects(registry);
+  const byRoot = new Map(projects.map((p) => [resolve(p.root_path), p]));
+  let dir = resolve(cwd);
+  for (;;) {
+    const hit = byRoot.get(dir);
+    if (hit) return { scope: "project", dbPath: hit.db_path, slug: hit.slug };
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return { scope: "home", dbPath: homeDbPath(env) };
+}
+
+// The members of the home read union: the home local first, then every
+// registered project local. De-duped by resolved path so a project whose
+// db_path happens to coincide with the home local is not opened twice.
+export function localGraphPaths(
+  env: NodeJS.ProcessEnv = process.env,
+): Array<{ graph: string; path: string }> {
+  const members: Array<{ graph: string; path: string }> = [
+    { graph: "home", path: homeDbPath(env) },
+  ];
+  for (const project of listProjects(globalDbPath())) {
+    members.push({ graph: project.slug, path: project.db_path });
+  }
+  const seen = new Set<string>();
+  const deduped: Array<{ graph: string; path: string }> = [];
+  for (const member of members) {
+    const key = resolve(member.path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(member);
+  }
+  return deduped;
 }

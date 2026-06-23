@@ -1,9 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  homeDbPath,
   listProjects,
+  localGraphPaths,
+  recallHomeDir,
   registerProject,
   removeProject,
+  resolveCwdRouting,
   resolveDbForCwd,
   resolveDbForSlug,
   whereProject,
@@ -61,4 +68,63 @@ test("missing registry yields global fallback and never throws", () => {
   );
   assert.equal(resolveDbForSlug("x", "/tmp/nonexistent-recall-global-xyz.sqlite3"), null);
   assert.deepEqual(listProjects("/tmp/nonexistent-recall-global-xyz.sqlite3"), []);
+});
+
+test("homeDbPath honors RECALL_HOME and defaults under .recall", () => {
+  const home = mkdtempSync(join(tmpdir(), "recall-home-"));
+  assert.equal(homeDbPath({ RECALL_HOME: home } as NodeJS.ProcessEnv), join(home, "db", "home.sqlite3"));
+  assert.equal(recallHomeDir({ RECALL_HOME: home } as NodeJS.ProcessEnv), home);
+  // Default (no RECALL_HOME): under ~/.recall/db/home.sqlite3.
+  assert.match(homeDbPath({} as NodeJS.ProcessEnv), /[\\/]\.recall[\\/]db[\\/]home\.sqlite3$/);
+});
+
+test("resolveCwdRouting: explicit RECALL_DB, project under a registered root, home otherwise", () => {
+  const home = mkdtempSync(join(tmpdir(), "recall-home-"));
+  // Point both the home local and the registry at this scratch home.
+  const env = { RECALL_HOME: home } as NodeJS.ProcessEnv;
+  const prevHome = process.env.RECALL_HOME;
+  const prevGlobal = process.env.RECALL_GLOBAL_DB;
+  // The registry resolves through globalDbPath() which reads the live process
+  // env, so set it on the process for the duration of this test.
+  process.env.RECALL_HOME = home;
+  delete process.env.RECALL_GLOBAL_DB;
+  try {
+    const projectRoot = mkdtempSync(join(tmpdir(), "recall-proj-"));
+    registerProject({ slug: "acme", root: projectRoot }, "2026-06-23T00:00:00Z");
+
+    // explicit RECALL_DB wins, labeled "explicit".
+    const explicit = resolveCwdRouting(projectRoot, {
+      RECALL_HOME: home,
+      RECALL_DB: "/custom/pin.sqlite3",
+    } as NodeJS.ProcessEnv);
+    assert.equal(explicit.scope, "explicit");
+    assert.equal(explicit.dbPath, "/custom/pin.sqlite3");
+
+    // cwd under the registered root -> project scope, that project's local.
+    const inProject = resolveCwdRouting(join(projectRoot, "sub", "dir"), env);
+    assert.equal(inProject.scope, "project");
+    assert.equal(inProject.slug, "acme");
+    assert.equal(inProject.dbPath, join(home, "db", "acme.sqlite3"));
+
+    // unrelated cwd -> home scope, the home local.
+    const outside = resolveCwdRouting("/tmp/unrelated-elsewhere", env);
+    assert.equal(outside.scope, "home");
+    assert.equal(outside.dbPath, join(home, "db", "home.sqlite3"));
+
+    // localGraphPaths: home first, then registered locals.
+    const locals = localGraphPaths(env);
+    assert.equal(locals[0]!.graph, "home");
+    assert.equal(locals[0]!.path, join(home, "db", "home.sqlite3"));
+    assert.ok(
+      locals.some((m) => m.graph === "acme" && m.path === join(home, "db", "acme.sqlite3")),
+      `expected acme local in ${JSON.stringify(locals)}`,
+    );
+
+    removeProject("acme");
+  } finally {
+    if (prevHome === undefined) delete process.env.RECALL_HOME;
+    else process.env.RECALL_HOME = prevHome;
+    if (prevGlobal === undefined) delete process.env.RECALL_GLOBAL_DB;
+    else process.env.RECALL_GLOBAL_DB = prevGlobal;
+  }
 });

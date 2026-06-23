@@ -1,24 +1,28 @@
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { importAutoMemory, type ImportSummary } from "./auto-memory-adapter.js";
 import {
   syncClaudeIntegration,
   type ClaudeIntegrationOptions,
   type ClaudeIntegrationResult,
 } from "./claude-integration.js";
+import { homeDbPath } from "./routing.js";
 import { SQLiteRecallStore } from "./store.js";
 
 // `recall claude sync` does two things now: it wires the integration (hook, skill,
 // MCP, and turning OFF Claude Code's native auto-memory) AND it lifts whatever
-// auto-memory the user has already accumulated into the GLOBAL graph, so the
+// auto-memory the user has already accumulated into the HOME local, so the
 // facts they saved before adopting Recall are not stranded in files the agent
 // will no longer read. The import is non-destructive: importAutoMemory only reads
 // the .md files, never deletes them.
 
-/** Canonical global graph path, the same one the MCP server resolves to. */
+/**
+ * Canonical home-local path, the same one the MCP server and CLI resolve to
+ * outside any project. Kept named `globalDbPath` for the existing call sites;
+ * model-A renamed the "global" graph to the "home" local (see routing.ts).
+ */
 export function globalDbPath(): string {
-  return join(homedir(), ".recall", "db", "global.sqlite3");
+  return homeDbPath();
 }
 
 export interface ImportToGlobalResult {
@@ -27,9 +31,9 @@ export interface ImportToGlobalResult {
 }
 
 /**
- * Import existing Claude Code auto-memory files into the GLOBAL graph (apply).
+ * Import existing Claude Code auto-memory files into the HOME local (apply).
  * Read-only over the source .md files, idempotent per file content. Ensures the
- * global db's parent directory exists first so a fresh machine does not fail.
+ * home local's parent directory exists first so a fresh machine does not fail.
  */
 export function importAutoMemoryToGlobal(
   opts: { globalDbPath?: string; autoMemoryRoot?: string } = {},

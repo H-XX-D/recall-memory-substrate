@@ -1,12 +1,11 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 import { createInterface } from "node:readline";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { admitWriteProposal } from "../core/admission.js";
 import { buildProposal, type BuildProposalInput } from "../core/proposal-builder.js";
 import { compactCell, compactHit, compactNode, compactReceipt, compactSemanticHit } from "./compact.js";
-import { listProjects, registerProject, resolveDbForSlug, whereProject } from "../core/routing.js";
+import { homeDbPath, listProjects, registerProject, resolveDbForSlug, whereProject } from "../core/routing.js";
 import { analyzeMemory, memoryHealthToProposal } from "../core/analysis.js";
 import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle, runAcpExchange } from "../core/acp.js";
 import { inspectCell } from "../core/cell-context.js";
@@ -754,16 +753,16 @@ function stringArrayArg(args: Record<string, unknown>, key: string): string[] | 
  * wrapper's precedence so MCP and CLI agree on routing:
  *   1. explicit RECALL_DB env       -> honored verbatim (escape hatch / migrations)
  *   2. cwd registry walk            -> deepest registered project root wins
- *   3. global fallback
+ *   3. home fallback
  * The server has no per-call cwd, so the walk runs once at launch against
- * process.cwd() — correct for the common one-Claude-session-per-project case.
+ * process.cwd(), correct for the common one-Claude-session-per-project case.
  */
 function resolveDbPath(): string {
   const explicit = process.env.RECALL_DB;
   if (explicit && explicit.trim() !== "") {
     return explicit;
   }
-  const globalDb = join(homedir(), ".recall", "db", "global.sqlite3");
+  const globalDb = homeDbPath();
   try {
     const registry = new DatabaseSync(globalDb, { readOnly: true });
     const rows = registry

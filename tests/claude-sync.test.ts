@@ -84,8 +84,10 @@ describe("importAutoMemoryToGlobal", () => {
     }
   });
 
-  it("globalDbPath resolves under ~/.recall/db", () => {
-    assert.match(globalDbPath(), /\.recall[\\/]db[\\/]global\.sqlite3$/);
+  it("globalDbPath resolves to the home local under the recall db dir", () => {
+    // Model-A renamed the "global" graph to the "home" local; globalDbPath is a
+    // back-compat alias that now resolves to <recall home>/db/home.sqlite3.
+    assert.match(globalDbPath(), /[\\/]db[\\/]home\.sqlite3$/);
   });
 });
 
