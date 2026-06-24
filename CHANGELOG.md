@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `db_path` (the slug gets a short hash of the root appended); re-registering the
   same root is idempotent and never re-points an existing root's DB. A legacy
   slug-keyed table is rebuilt onto the new schema in place.
+- **Secrets side-graph routed through model A.** The secrets store now defaults
+  to a single central home store (`~/.recall/db/secrets.sqlite3`), the same
+  regardless of the current directory, with `--secrets-db` as the override;
+  `secrets status`, `list`, and `get` report the absolute path. Previously the
+  secrets DB resolved relative to the working directory, so a secret saved from
+  one directory was invisible from another.
 
 ### Fixed
 
@@ -46,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overlay, so `recall compile` kept showing a retracted conflict. Contradictions
   are now sourced from the relation table, the single source of truth that
   rollback mutates.
+- **A dead project registration auto-heals to the home local.** A registered
+  project whose local DB had gone missing silently stranded reads on a dead
+  store, the same empty-results footgun model A was built to kill walking back in
+  through a stale registry. The CLI now warns once on stderr and falls back to the
+  home local, while `recall init` re-creates the project store.
+- **No personal identifiers in the published package.** The bundled Claude skill
+  helper and the `buildProposal` scaffold shipped personal project and tenant
+  defaults; these are neutralized to `project=default` and
+  `tenant=local-<project>`, and the doc examples are generic. Callers that pass
+  `project`/`tenant` explicitly are unaffected.
 
 ### Added
 
@@ -57,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defaulting everything to a flat note. This feeds the `active_beliefs`, `risks`,
   and `tasks` packet sections that `context-compiler.ts` already routes by kind,
   so the typed state space fills as work happens.
+
+- **Numeric measures for trend programs.** A trend program can track any numeric
+  scalar read from member cells (a dotted `node.data` path, or a per-member
+  `metadata.targetPath`), not just `effective_confidence` / `member_count`.
+  `trendMeasure()` resolves the measure, and an unknown measure is now an explicit
+  error instead of silently falling back to `effective_confidence`.
 
 - **Per-call project routing on MCP.** The `projects` registry the launch-time
   router queried previously had no creator, so routing always fell back to
