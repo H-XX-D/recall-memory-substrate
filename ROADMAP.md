@@ -10,7 +10,7 @@ The roadmap is organized around Recall's three rings. A change is "done" only
 when it lands schema-first, tested, and through the same admission path
 everything else uses.
 
-> **Legend:** ✅ shipped in 0.2.0 · 🛠️ actively planned · 🔭 exploratory
+> **Legend:** ✅ shipped · 🛠️ actively planned · 🔭 exploratory
 
 ---
 
@@ -52,7 +52,7 @@ These don't change. They're the filter every roadmap item passes through:
 
 ## Interfaces: CLI, TUI, MCP, bridges, importers, integrations
 
-- ✅ CLI, read-only TUI, stdio MCP server (42 tools, idle self-exit)
+- ✅ CLI, read-only TUI, stdio MCP server (45 tools, idle self-exit)
 - ✅ Enforcement hook templates + compliance/longitudinal instrumentation
 - ✅ Real-embedding semantic backend via `RECALL_EMBEDDING_COMMAND`
 - 🛠️ **Publish to npm** so `npm install -g recall-memory-substrate` works

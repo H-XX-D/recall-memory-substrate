@@ -63,7 +63,7 @@ flags; SENTINEL reads only what it surfaces unprompted.
 
 24 synthetic streams (12 with one value-flip, 12 distractor-only), isolated
 store per stream. A deterministic value-flip detector links the contradictor on
-admission → the belief's effective confidence collapses (0.7 → ~0.14) → a
+admission → the belief's effective confidence collapses (0.7 → ~0.30) → a
 standing `watch` program trips on the next tick, surfacing it unprompted.
 
 | metric | result |

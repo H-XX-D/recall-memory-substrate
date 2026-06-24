@@ -12,7 +12,6 @@ the graph and give the model stable handles for deliberate expansion.
 ```json
 {
   "task": "Current user or agent objective",
-  "scope": "Recall",
   "budget_words": 900,
   "include_conflicts": true,
   "include_stale_warnings": true,
@@ -82,18 +81,16 @@ handoff.
 
 ## Ranking Signals
 
-- lexical match
-- semantic match
-- tag overlap
-- identity tag overlap
-- graph distance
-- confidence
-- uncertainty
-- concern
-- freshness
-- source quality
-- contradiction pressure
-- task dependency
+The compile ranker (`fuseCandidates`) scores each candidate on four terms:
+
+- lexical match (FTS5 bm25, normalized to the strongest hit)
+- graph degree (the cell's combined in + out relation count)
+- effective confidence (recomputed from the graph at read time, so contradicted
+  or superseded cells sink)
+- freshness (recency, 30-day half-life)
+
+Contradiction pressure is not a separate term: it acts through effective
+confidence, which collapses a challenged cell's score.
 
 ## Word Budget Rule
 

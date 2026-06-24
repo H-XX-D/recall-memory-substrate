@@ -35,26 +35,27 @@ Recall should work with sparse tags and derive fallbacks where it can.
 
 ```json
 {
-  "include": {
-    "category": ["memory"],
-    "type": ["witness"],
-    "subject": ["compiler"],
-    "project": ["Recall"],
-    "idea": ["context-packet"],
-    "timestamp": ["2026-05-21"],
-    "topic": ["compiler"],
-    "identity": ["agent:codex", "project:recall"],
-    "ring": ["runtime"]
-  },
-  "exclude": {
-    "lifecycle": ["archived"],
-    "sensitivity": ["secret"]
-  },
-  "rank_by": ["relevance", "concern", "uncertainty", "freshness"],
-  "max_nodes": 80,
-  "max_words": 900
+  "category": ["memory"],
+  "type": ["witness"],
+  "subject": ["compiler"],
+  "project": ["Recall"],
+  "idea": ["context-packet"],
+  "timestamp": ["2026-05-21"],
+  "topics": ["compiler"],
+  "entities": ["Recall"],
+  "identities": ["agent:codex", "project:recall"],
+  "rings": ["runtime"],
+  "lifecycle": ["active"],
+  "quality": ["source-grounded"],
+  "limit": 50
 }
 ```
+
+The filter is a flat object of facet arrays plus a numeric `limit` (default 50).
+Every supplied facet is AND-combined (a cell must match all of them), matching is
+include-only over active cells, and results are ordered by recency. There is no
+exclude block and no rank step; `sensitivity` and `permission` are writable tag
+families but are not queryable subgraph facets.
 
 ## Composition Principles
 

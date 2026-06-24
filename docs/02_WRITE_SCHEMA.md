@@ -68,7 +68,7 @@ All LLM writes enter Recall as `WriteProposal` records.
 
 - Reject missing schema version.
 - Reject writes with no actor, intent, scope, provenance, or confidence block.
-- Reject or redact secret-looking content.
+- Reject secret-looking content.
 - Downshift unsupported high-confidence claims.
 - Require evidence refs for tested or verified claims.
 - Require review for program writes and high-concern belief updates.

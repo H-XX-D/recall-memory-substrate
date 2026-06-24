@@ -19,7 +19,7 @@ operating prompt.
 |---|---|
 | `src/cli.ts` | CLI dispatch: every user-facing verb |
 | `src/core/` | Runtime: `store` (SQLite + FTS5), `admission` (write firewall), `evidence` (effective confidence), `programs` (score/watch/drift/quorum), `retrieval`, `context-compiler`, `daemon`, `calibration`, `acp`, `secrets`, … |
-| `src/mcp/server.ts` | Stdio MCP server (42 tools) and idle self-exit |
+| `src/mcp/server.ts` | Stdio MCP server (45 tools) and idle self-exit |
 | `tests/` | `node:test` suites, compiled to `dist/tests` and run from there |
 | `scripts/` | `e2e.mjs` (94 checks), `bench.mjs`, `public-bench.mjs`, installers |
 | `python/` | Optional Python client toolkit (stdlib-first; wraps the CLI) |
@@ -30,7 +30,7 @@ operating prompt.
 ```bash
 npm install
 npm run build     # tsc
-npm test          # 162 unit/integration tests
+npm test          # full unit + integration suite
 npm run e2e       # 94 end-to-end checks across user + agent workflows
 npm run smoke     # init + status on a throwaway db
 ```

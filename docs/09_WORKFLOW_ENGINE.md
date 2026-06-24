@@ -31,7 +31,7 @@ map
 Initial planning pressure:
 
 ```text
-pressure = impact * uncertainty * concern * dependency_weight / estimated_cost
+pressure = impact * (uncertainty + concern + novelty) * (0.5 + dependency_weight) * (0.5 + reversibility / 2) / estimated_cost
 ```
 
 This is not truth. It is attention allocation. Verified results update the graph
