@@ -312,7 +312,8 @@ export function whereProject(
 export function resolveCwdRouting(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
-): { scope: "project" | "home" | "explicit"; dbPath: string; slug?: string } {
+  opts: { healMissing?: boolean } = {},
+): { scope: "project" | "home" | "explicit"; dbPath: string; slug?: string; healed?: { slug: string; dbPath: string } } {
   const explicit = env.RECALL_DB?.trim();
   if (explicit && explicit !== "") {
     return { scope: "explicit", dbPath: explicit };
@@ -323,7 +324,15 @@ export function resolveCwdRouting(
   let dir = resolve(cwd);
   for (;;) {
     const hit = byRoot.get(dir);
-    if (hit) return { scope: "project", dbPath: hit.db_path, slug: hit.slug };
+    if (hit) {
+      // Auto-heal (opt-in): if the project's local DB is gone, fall back to the
+      // home local and flag the heal so the CLI can inform exactly once. Callers
+      // that need pure registration routing (and `init`) leave healMissing off.
+      if (opts.healMissing && !existsSync(hit.db_path)) {
+        return { scope: "home", dbPath: homeDbPath(env), healed: { slug: hit.slug, dbPath: hit.db_path } };
+      }
+      return { scope: "project", dbPath: hit.db_path, slug: hit.slug };
+    }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

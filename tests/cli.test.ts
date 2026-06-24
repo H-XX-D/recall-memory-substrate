@@ -1,21 +1,58 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import { makeProposal, tempDbPath, writeJsonFixture } from "./helpers.js";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const CLI = ["--disable-warning=ExperimentalWarning", "dist/src/cli.js"];
 
 describe("cli", () => {
+  it("auto-heals a dead project registration: warns and falls back to the home local; init re-creates", () => {
+    // Absolute CLI path: this test runs the binary from a temp project cwd, so a
+    // relative dist path would not resolve.
+    const cliAbs = ["--disable-warning=ExperimentalWarning", join(process.cwd(), "dist/src/cli.js")];
+    const recallHome = mkdtempSync(join(tmpdir(), "recall-home-"));
+    const projRoot = mkdtempSync(join(tmpdir(), "recall-proj-"));
+    const env = { ...process.env };
+    delete env.RECALL_DB;
+    delete env.RECALL_GLOBAL_DB;
+    env.RECALL_HOME = recallHome;
+    try {
+      const initOut = execFileSync(process.execPath, [...cliAbs, "init"], { cwd: projRoot, env, encoding: "utf8" });
+      const projDb = (JSON.parse(initOut) as { db: string }).db;
+      assert.ok(existsSync(projDb), "init creates the project DB");
+
+      // simulate the project DB going missing
+      rmSync(projDb, { force: true });
+
+      // a read command warns on stderr and falls back to the home local
+      const healed = spawnSync(process.execPath, [...cliAbs, "status"], { cwd: projRoot, env, encoding: "utf8" });
+      assert.equal(healed.status, 0);
+      assert.match(healed.stderr, /is missing; using the home local/);
+      assert.equal((JSON.parse(healed.stdout) as { scope: string }).scope, "home");
+
+      // `init` is exempt: it re-creates the project store instead of falling back
+      const reinit = spawnSync(process.execPath, [...cliAbs, "init"], { cwd: projRoot, env, encoding: "utf8" });
+      assert.equal(reinit.status, 0);
+      assert.doesNotMatch(reinit.stderr, /using the home local/);
+      assert.ok(existsSync(projDb), "init re-creates the project DB");
+    } finally {
+      rmSync(recallHome, { recursive: true, force: true });
+      rmSync(projRoot, { recursive: true, force: true });
+    }
+  });
+
   it("initializes, admits, reports status, and compiles context", () => {
     const temp = tempDbPath();
     const json = writeJsonFixture(makeProposal());
+    const registry = tempDbPath(); // isolate the project registry so `init` never writes to the real ~/.recall
     const archiveHolder: { cleanup?: () => void } = {};
     try {
       const init = execFileSync(process.execPath, [...CLI, "init", "--db", temp.path], {
-        encoding: "utf8"
+        encoding: "utf8",
+        env: { ...process.env, RECALL_GLOBAL_DB: registry.path }
       });
       assert.match(init, /initialized/);
 
@@ -40,6 +77,7 @@ describe("cli", () => {
     } finally {
       json.cleanup();
       temp.cleanup();
+      registry.cleanup();
     }
   });
 

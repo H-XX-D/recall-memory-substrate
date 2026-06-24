@@ -198,7 +198,18 @@ function main(): void {
   // BEFORE opening it, so a pre-model-A user's memory is carried forward instead
   // of a fresh empty home.sqlite3 being created. Idempotent and a no-op once the
   // home local exists, so it is safe on every invocation.
-  const homeScope = !args.dbExplicit && resolveCwdRouting(process.cwd()).scope === "home";
+  // Resolve cwd routing once. A registered project whose local DB has gone
+  // missing auto-heals to the home local; inform the user once. `init` is exempt
+  // (it re-creates the project store), so it opts out of healing, and the
+  // registry resolvers stay pure for every other caller.
+  const routing = resolveCwdRouting(process.cwd(), process.env, { healMissing: !args.dbExplicit && command !== "init" });
+  if (routing.healed) {
+    process.stderr.write(
+      `Recall: project '${routing.healed.slug}' is registered here but its database ${routing.healed.dbPath} is missing; using the home local instead. Run 'recall init' to re-create the project store.\n`,
+    );
+    args.db = routing.dbPath;
+  }
+  const homeScope = !args.dbExplicit && routing.scope === "home";
   if (homeScope) ensureHomeLocal();
   const store = new SQLiteRecallStore(args.db);
   // Read commands run over the central model: outside any project (home scope)
@@ -255,7 +266,7 @@ function main(): void {
     }
 
     if (command === "status") {
-      const routing = resolveCwdRouting(process.cwd());
+      const routing = resolveCwdRouting(process.cwd(), process.env, { healMissing: !args.dbExplicit });
       const status: Record<string, unknown> = {
         name: RECALL_PACKAGE_NAME,
         version: RECALL_VERSION,
@@ -270,7 +281,7 @@ function main(): void {
     }
 
     if (command === "where") {
-      const routing = resolveCwdRouting(process.cwd());
+      const routing = resolveCwdRouting(process.cwd(), process.env, { healMissing: !args.dbExplicit });
       const out: Record<string, unknown> = {
         scope: routing.scope,
         db: routing.dbPath,
