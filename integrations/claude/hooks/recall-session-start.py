@@ -87,24 +87,22 @@ def read_hook_input() -> dict:
 def _scope_label():
     """Describe the DB the cwd routes to, so the activity summary is labelled
     honestly. Returns (label, ok). Mirrors the recall wrapper's CWD routing via
-    `recall project where`. Fail-open: any error returns a neutral, non-overclaiming label."""
+    `recall where`, which prints JSON {scope, db, slug?}. Fail-open: any error
+    returns a neutral, non-overclaiming label."""
+    recall = recall_bin()
+    if not recall:
+        return "recent graph activity", False
     try:
         out = subprocess.run(
-            ["recall", "project", "where"],
+            [recall, "where"],
             capture_output=True, text=True, timeout=6,
         )
         if out.returncode != 0:
             return "recent graph activity", False
-        text = out.stdout or ""
-        # `recall project where` prints a `db:` line and a `reason:` line.
-        if "using global" in text or "no project match" in text:
-            return "graph-wide (global memory)", True
-        for line in text.splitlines():
-            if line.strip().startswith("db:"):
-                base = os.path.basename(line.split(":", 1)[1].strip())
-                slug = base[:-len(".sqlite3")] if base.endswith(".sqlite3") else base
-                if slug and slug != "global":
-                    return f"scoped to project '{slug}'", True
+        info = json.loads(out.stdout or "{}")
+        if info.get("scope") == "project":
+            slug = info.get("slug") or "project"
+            return f"scoped to project '{slug}'", True
         return "graph-wide (global memory)", True
     except Exception:
         return "recent graph activity", False
@@ -166,6 +164,64 @@ def _trim(line: str, n: int) -> str:
     return (line[: n - 1] + "…") if len(line) > n else line
 
 
+def build_mini_index(rel, conflict_lines, stale_lines, flagged_out=None) -> str:
+    """Assemble the mini-index from compile section lines (ids + titles only),
+    flagging a row only when the cell ITSELF is the superseded side of a
+    contradiction or is stale. Pure (no subprocess), so it is unit-tested."""
+    if not rel:
+        return ""
+    # ids may be bare (project scope) or graph-prefixed (home/union scope under
+    # model-A, e.g. `home:1750a919-...`). Match the 8-hex core regardless of an
+    # optional `graph:` prefix so flagging works in BOTH scopes; without this the
+    # whole flag/dig mechanism silently dies at home scope.
+    challenged_ids = set(re.findall(r"->(?:[a-z0-9_-]+:)*([0-9a-f]{8})", " ".join(conflict_lines)))
+    stale_ids = set(re.findall(r"stale:(?:[a-z0-9_-]+:)*([0-9a-f]{8})", " ".join(stale_lines)))
+    index = []
+    flagged = False
+    for ln in rel[:5]:
+        m = re.search(r"\[([a-z_]+):((?:[a-z0-9_-]+:)*[0-9a-f]{8}[0-9a-f-]*)\]\s*$", ln)
+        full_id = m.group(2) if m else ""
+        core = re.match(r"[0-9a-f]{8}", full_id.split(":")[-1]) if full_id else None
+        short = core.group(0) if core else ""
+        cid = f"{m.group(1)}:{full_id}" if m else ""  # full (possibly prefixed) id for expansion
+        body = re.sub(r"\s*\[[a-z_]+:[a-z0-9_:-]+\]\s*$", "", ln).lstrip("- ").strip()
+        tag = ""
+        if short and short in stale_ids:
+            tag, flagged = "  [STALE]", True
+            if flagged_out is not None:
+                flagged_out.append({"id": short, "title": body})
+        elif short and short in challenged_ids:
+            tag, flagged = "  [SUPERSEDED?]", True
+            if flagged_out is not None:
+                flagged_out.append({"id": short, "title": body})
+        index.append(f"- {_trim(body, 110)}" + (f"  [{cid}]" if cid else "") + tag)
+    if not index:
+        return ""
+    parts = ["[Recall mini-index for THIS prompt (ids + titles only). You now know what exists, so do not ask or assert blind:]"]
+    parts += index
+    if flagged:
+        parts.append(
+            "DIG REQUIRED: a row above is marked [SUPERSEDED?] or [STALE]; its title may be out of date. "
+            'Run recall compile "<task>" and recall cell show <id> on it BEFORE you act on it.'
+        )
+    elif conflict_lines or stale_lines:
+        bits = []
+        if conflict_lines:
+            bits.append(f"{len(conflict_lines)} challenged")
+        if stale_lines:
+            bits.append(f"{len(stale_lines)} stale/low-trust")
+        parts.append(
+            "tripwires elsewhere on this topic (" + ", ".join(bits) + "). "
+            'If you act here, run recall compile "<task>" for the conflict trace first.'
+        )
+    else:
+        parts.append(
+            "This is awareness, not a substitute. For anything load-bearing, run "
+            'recall compile "<task>" for bodies and calibration, and search / subgraph / cell show to dig.'
+        )
+    return "\n".join(parts)
+
+
 def prompt_digest(prompt: str, cwd: str, flagged_out=None) -> str:
     """Build a MINI index of cells relevant to `prompt`: ids + titles only, plus
     a count of the tripwires (challenged / stale cells) touching the topic.
@@ -197,66 +253,12 @@ def prompt_digest(prompt: str, cwd: str, flagged_out=None) -> str:
         return ""
 
     secs = _sections(out, ["relevant_memory", "conflicts", "stale_or_low_trust"])
-    rel = secs.get("relevant_memory", [])
-    if not rel:
-        return ""
-
-    # Danger sets: which cells are the SUPERSEDED side of a contradiction (the
-    # target after `->`) or are flagged stale. Used to mark a row only when the
-    # row ITSELF may not be current, so the dig call scales with real risk
-    # instead of crying wolf on every dense-graph supersession trail.
-    conflict_lines = secs.get("conflicts", [])
-    stale_lines = secs.get("stale_or_low_trust", [])
-    challenged_ids = set(re.findall(r"->([0-9a-f]{8})", " ".join(conflict_lines)))
-    stale_ids = set(re.findall(r"stale:([0-9a-f]{8})", " ".join(stale_lines)))
-
-    # ids + titles only: strip the trailing [kind:id], keep a short id, truncate
-    # the rest (title-first), and flag the row if the cell is itself stale/superseded.
-    index = []
-    flagged = False
-    for ln in rel[:5]:
-        m = re.search(r"\[([a-z_]+):([0-9a-f]{8})[0-9a-f-]*\]\s*$", ln)
-        short = m.group(2) if m else ""
-        cid = f"{m.group(1)}:{m.group(2)}" if m else ""
-        body = re.sub(r"\s*\[[a-z_]+:[0-9a-f-]+\]\s*$", "", ln).lstrip("- ").strip()
-        tag = ""
-        if short and short in stale_ids:
-            tag, flagged = "  [STALE]", True
-            if flagged_out is not None:
-                flagged_out.append({"id": short, "title": body})
-        elif short and short in challenged_ids:
-            tag, flagged = "  [SUPERSEDED?]", True
-            if flagged_out is not None:
-                flagged_out.append({"id": short, "title": body})
-        index.append(f"- {_trim(body, 110)}" + (f"  [{cid}]" if cid else "") + tag)
-    if not index:
-        return ""
-
-    parts = ["[Recall mini-index for THIS prompt (ids + titles only). You now know what exists, so do not ask or assert blind:]"]
-    parts += index
-
-    if flagged:
-        # A SHOWN row may not be current: reading its title alone is unsafe.
-        parts.append(
-            "DIG REQUIRED: a row above is marked [SUPERSEDED?] or [STALE]; its title may be out of date. "
-            'Run recall compile "<task>" and recall cell show <id> on it BEFORE you act on it.'
-        )
-    elif conflict_lines or stale_lines:
-        bits = []
-        if conflict_lines:
-            bits.append(f"{len(conflict_lines)} challenged")
-        if stale_lines:
-            bits.append(f"{len(stale_lines)} stale/low-trust")
-        parts.append(
-            "tripwires elsewhere on this topic (" + ", ".join(bits) + "). "
-            'If you act here, run recall compile "<task>" for the conflict trace first.'
-        )
-    else:
-        parts.append(
-            "This is awareness, not a substitute. For anything load-bearing, run "
-            'recall compile "<task>" for bodies and calibration, and search / subgraph / cell show to dig.'
-        )
-    return "\n".join(parts)
+    return build_mini_index(
+        secs.get("relevant_memory", []),
+        secs.get("conflicts", []),
+        secs.get("stale_or_low_trust", []),
+        flagged_out,
+    )
 
 
 # ---------------------------------------------------------------------------

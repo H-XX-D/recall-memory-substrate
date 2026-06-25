@@ -147,6 +147,28 @@ class DigBackstopTest(unittest.TestCase):
         self.assertEqual(self.h.prompt_digest("hi", "", flagged), "")
         self.assertEqual(flagged, [])
 
+    # --- mini-index flagging must handle model-A graph-prefixed ids (home/union
+    #     scope), not only bare ids (project scope) ---
+    def test_mini_index_flags_graph_prefixed_ids(self):
+        rel = ["- Cache TTL is sixty seconds [decision:home:1750a919-7592-4791-b144-d0f2280fd7c7]"]
+        conflicts = [
+            "Cache changed contradicts Cache TTL; severity=0.9 "
+            "[contradicts:home:abcd0000-1111-2222-3333-444455556666->home:1750a919-7592-4791-b144-d0f2280fd7c7]"
+        ]
+        flagged = []
+        out = self.h.build_mini_index(rel, conflicts, [], flagged)
+        self.assertIn("[SUPERSEDED?]", out)
+        self.assertIn("DIG REQUIRED", out)
+        self.assertEqual([f["id"] for f in flagged], ["1750a919"])
+
+    def test_mini_index_flags_bare_ids(self):
+        rel = ["- Cache TTL is sixty seconds [decision:1750a919-7592-4791-b144-d0f2280fd7c7]"]
+        stale = ["Cache TTL note: stale; severity=0.5 [stale:1750a919-7592-4791-b144-d0f2280fd7c7]"]
+        flagged = []
+        out = self.h.build_mini_index(rel, [], stale, flagged)
+        self.assertIn("[STALE]", out)
+        self.assertEqual([f["id"] for f in flagged], ["1750a919"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
