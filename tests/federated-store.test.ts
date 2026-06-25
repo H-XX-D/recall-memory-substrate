@@ -24,6 +24,47 @@ function seed(path: string, title: string, body: string, marker: string): string
 }
 
 describe("FederatedReadStore", () => {
+  it("getNodeByAddress scans members and is not mis-routed by a project slug matching the address scheme", () => {
+    const homeDb = tempDbPath();
+    const recallDb = tempDbPath();
+    let addr: string;
+    let bareId: string;
+    const homeStore = new SQLiteRecallStore(homeDb.path);
+    try {
+      const r = admitWriteProposal(
+        makeProposal({
+          content: { title: "Home addressable cell", body: "lives in the home local", summary: "addr" },
+          tags: { topics: ["addr"], entities: ["Recall"] },
+        }),
+        homeStore,
+      );
+      assert.equal(r.accepted, true);
+      addr = r.node!.cellAddress;
+      bareId = r.node!.id;
+    } finally {
+      homeStore.close();
+    }
+    // A registered project whose slug is exactly "recall" (the address scheme word).
+    new SQLiteRecallStore(recallDb.path).close();
+
+    const federated = new FederatedReadStore([
+      { graph: "home", path: homeDb.path },
+      { graph: "recall", path: recallDb.path },
+    ]);
+    try {
+      // decode(addr) splits on the first ":" -> graph "recall"; the old code routed
+      // to the recall member with a truncated address and returned null. The lookup
+      // must scan members with the raw address instead.
+      const node = federated.getNodeByAddress(addr);
+      assert.ok(node, "the home cell must resolve by address despite a 'recall' member");
+      assert.equal(node!.id, `home:${bareId}`);
+    } finally {
+      federated.close();
+      homeDb.cleanup();
+      recallDb.cleanup();
+    }
+  });
+
   it("unions reads across members with graph-prefixed ids and refuses writes", () => {
     const homeDb = tempDbPath();
     const projDb = tempDbPath();

@@ -12,7 +12,7 @@
 // writes land in the home local. Inside a registered project, reads and writes
 // go to that project's local only.
 
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
@@ -165,15 +165,20 @@ export function resolveDbForCwd(
   return globalDb;
 }
 
-/** Map a project slug to its db_path, or null if unknown. Read-only. */
+/**
+ * Map a project slug to its db_path, or null if unknown OR ambiguous. Read-only.
+ * New registrations keep slugs unique, but a registry written before that fix
+ * could hold two roots under one slug; rather than guess (and route a write into
+ * the wrong project's private store), an ambiguous slug returns null so the
+ * caller surfaces a clean "unknown project" instead of silent cross-contamination.
+ */
 export function resolveDbForSlug(slug: string, globalDb: string = globalDbPath()): string | null {
   try {
     const db = new DatabaseSync(globalDb, { readOnly: true });
-    const row = db.prepare("SELECT db_path FROM projects WHERE slug = ?").get(slug) as
-      | { db_path?: string }
-      | undefined;
+    const rows = db.prepare("SELECT db_path FROM projects WHERE slug = ?").all(slug) as { db_path?: string }[];
     db.close();
-    return row?.db_path ?? null;
+    const paths = [...new Set(rows.map((r) => r.db_path).filter((p): p is string => Boolean(p)))];
+    return paths.length === 1 ? paths[0]! : null;
   } catch {
     return null;
   }
@@ -201,7 +206,7 @@ export function registerProject(
   globalDb: string = globalDbPath(),
 ): ProjectRecord {
   const root = resolve(input.root);
-  const slug = slugify(input.slug ?? basename(root) ?? "project");
+  const baseSlug = slugify(input.slug ?? basename(root) ?? "project");
   // The registry lives in the home local; on a fresh RECALL_HOME the db/ dir
   // does not exist yet and SQLite will not create it, so ensure it first.
   mkdirSync(dirname(globalDb), { recursive: true });
@@ -217,6 +222,25 @@ export function registerProject(
       .get(root) as
       | { slug: string; root_path: string; db_path: string; description: string | null; created_at: string }
       | undefined;
+
+    // The slug is BOTH the MCP per-call routing key and the federated graph
+    // prefix, so it must be unique per root and must not claim the reserved
+    // 'home' graph (the union's home member). A re-register keeps its already
+    // assigned slug; a new root whose slug collides with a DIFFERENT root (or
+    // with 'home') gets a short root-hash suffix.
+    let slug: string;
+    if (existing) {
+      slug = existing.slug;
+    } else {
+      const slugCollides = (candidate: string): boolean => {
+        if (candidate === "home") return true;
+        const owner = db.prepare("SELECT root_path FROM projects WHERE slug = ?").get(candidate) as
+          | { root_path?: string }
+          | undefined;
+        return owner !== undefined && resolve(owner.root_path ?? "") !== root;
+      };
+      slug = slugCollides(baseSlug) ? `${baseSlug}-${rootHash(root)}` : baseSlug;
+    }
 
     let dbPath: string;
     let createdAt: string;
@@ -346,21 +370,32 @@ export function resolveCwdRouting(
 export function localGraphPaths(
   env: NodeJS.ProcessEnv = process.env,
 ): Array<{ graph: string; path: string }> {
-  const members: Array<{ graph: string; path: string }> = [
-    { graph: "home", path: homeDbPath(env) },
+  const members: Array<{ graph: string; path: string; root: string }> = [
+    { graph: "home", path: homeDbPath(env), root: "home" },
   ];
   for (const project of listProjects(globalDbPath())) {
-    members.push({ graph: project.slug, path: project.db_path });
+    members.push({ graph: project.slug, path: project.db_path, root: project.root_path });
   }
-  const seen = new Set<string>();
-  const deduped: Array<{ graph: string; path: string }> = [];
+  const seenPath = new Set<string>();
+  const usedGraph = new Set<string>();
+  const out: Array<{ graph: string; path: string }> = [];
   for (const member of members) {
     const key = resolve(member.path);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(member);
+    if (seenPath.has(key)) continue;
+    seenPath.add(key);
+    // The graph key is the federated id prefix and must be unique so encode()
+    // and byGraph stay bijective. New registrations keep slugs unique, but guard
+    // a legacy registry (two roots under one slug, or a project that slugified to
+    // 'home') by suffixing a root hash on any collision.
+    let graph = member.graph;
+    while (usedGraph.has(graph)) {
+      graph = `${member.graph}-${rootHash(member.root + key)}`;
+      if (usedGraph.has(graph)) graph = `${graph}-${rootHash(key)}`;
+    }
+    usedGraph.add(graph);
+    out.push({ graph, path: member.path });
   }
-  return deduped;
+  return out;
 }
 
 // First-run migration from the pre-model-A "global.sqlite3" to the home local.
@@ -378,13 +413,46 @@ export function localGraphPaths(
 // regardless of which entry point runs first. RECALL_GLOBAL_DB is intentionally
 // ignored here: the migration is about the on-disk sibling layout, not the
 // registry override used by tests.
+// Home locals confirmed openable this process, so the readability guard below
+// costs one open per process per path, not one per home-scope command.
+const verifiedHomeLocals = new Set<string>();
+
+// True if `path` opens as a SQLite db. A truncated/corrupt file (e.g. a
+// half-written first-run copy) throws on the first pragma. Best-effort: any
+// failure reads as "not openable".
+function isOpenableDb(path: string): boolean {
+  try {
+    const db = new DatabaseSync(path);
+    try {
+      db.exec("PRAGMA schema_version;");
+    } finally {
+      db.close();
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function ensureHomeLocal(env: NodeJS.ProcessEnv = process.env): void {
   const home = homeDbPath(env);
   const dbDir = dirname(home);
   // Always make sure the db directory exists so a later open does not fail.
   mkdirSync(dbDir, { recursive: true });
-  if (existsSync(home)) return; // home local already present -> nothing to do
   const legacyGlobal = join(dbDir, "global.sqlite3");
+  if (existsSync(home)) {
+    if (verifiedHomeLocals.has(home)) return;
+    // Bare existence is not proof of a sound migration: a first-run copy
+    // interrupted by a crash, kill, power loss, or a concurrent racer can leave
+    // a truncated, malformed home that strands all memory behind it. Only when
+    // the intact legacy global is still on disk to recover from do we pay to
+    // verify; if home opens, cache it and move on, otherwise fall through and
+    // re-migrate from the backup.
+    if (!existsSync(legacyGlobal) || isOpenableDb(home)) {
+      verifiedHomeLocals.add(home);
+      return;
+    }
+  }
   if (!existsSync(legacyGlobal)) return; // nothing to migrate from
   // Checkpoint any uncheckpointed WAL pages into the main file before copying.
   // If a pre-model-A process last exited uncleanly (crash, kill, power loss)
@@ -404,7 +472,24 @@ export function ensureHomeLocal(env: NodeJS.ProcessEnv = process.env): void {
   } catch {
     // fall through to a plain copy
   }
-  copyFileSync(legacyGlobal, home);
+  // Copy to a per-process temp sibling, then atomically rename into place.
+  // renameSync is atomic within a filesystem, so a crash or a concurrent racer
+  // sees either no home (migration retries) or a complete home, never a partial
+  // one that existsSync would mistake for "migrated".
+  const tmp = `${home}.${process.pid}.migrating.tmp`;
+  try {
+    copyFileSync(legacyGlobal, tmp);
+    renameSync(tmp, home);
+  } finally {
+    if (existsSync(tmp)) {
+      try {
+        rmSync(tmp);
+      } catch {
+        // best-effort cleanup of an interrupted temp copy
+      }
+    }
+  }
+  verifiedHomeLocals.add(home);
   process.stderr.write(
     "Recall: migrated existing global.sqlite3 to home.sqlite3 (original kept as backup).\n",
   );

@@ -62,6 +62,29 @@ test("registry CRUD plus cwd and slug routing", () => {
   }
 });
 
+test("registerProject keeps colliding-basename slugs unique, reserves 'home', and is stable on re-register", () => {
+  const temp = tempDbPath();
+  const g = temp.path;
+  try {
+    const a = registerProject({ root: "/work/teamA/api" }, "2026-06-25T00:00:00Z", g);
+    const b = registerProject({ root: "/work/teamB/api" }, "2026-06-25T00:00:00Z", g);
+    assert.equal(a.slug, "api");
+    assert.notEqual(b.slug, a.slug, "a colliding-basename root must get a distinct slug, not silently reuse 'api'");
+    assert.notEqual(b.db_path, a.db_path);
+    // slug routing now reaches BOTH projects deterministically (no wrong-project leak)
+    assert.equal(resolveDbForSlug(a.slug, g), a.db_path);
+    assert.equal(resolveDbForSlug(b.slug, g), b.db_path);
+    // a project directory named 'home' must not claim the reserved home graph
+    const h = registerProject({ root: "/work/home" }, "2026-06-25T00:00:00Z", g);
+    assert.notEqual(h.slug, "home");
+    // re-registering an existing root keeps its assigned slug stable
+    const a2 = registerProject({ root: "/work/teamA/api" }, "2026-06-25T01:00:00Z", g);
+    assert.equal(a2.slug, a.slug);
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("missing registry yields global fallback and never throws", () => {
   assert.doesNotThrow(() =>
     resolveDbForCwd("/tmp/anything", {}, "/tmp/nonexistent-recall-global-xyz.sqlite3"),

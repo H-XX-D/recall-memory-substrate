@@ -21,10 +21,11 @@ test("two different roots with a colliding basename get distinct db_paths (FIX 3
     const a = registerProject({ root: rootA }, "2026-06-23T00:00:00Z", g);
     const b = registerProject({ root: rootB }, "2026-06-23T00:00:01Z", g);
 
-    // Same human-facing slug, but DISTINCT db files: the second never overwrote
-    // the first.
+    // DISTINCT slugs AND distinct db files. The slug is both the MCP routing key
+    // and the federated graph prefix, so the colliding basename is disambiguated
+    // at both layers; the second never overwrote the first.
     assert.equal(a.slug, "api");
-    assert.equal(b.slug, "api");
+    assert.notEqual(b.slug, "api", "the colliding root must get a distinct slug, not silently reuse 'api'");
     assert.notEqual(a.db_path, b.db_path, "colliding basenames must map to different db_paths");
 
     // Both rows survive (the second did not overwrite the first's registry row).

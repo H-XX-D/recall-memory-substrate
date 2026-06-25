@@ -129,15 +129,33 @@ export class FederatedReadStore implements RecallStore {
   }
 
   getNodeByAddress(address: string): RecallNode | null {
-    return this.lookupByValue(address, (store, value) => store.getNodeByAddress(value));
+    return this.scanForValue(address, (store, value) => store.getNodeByAddress(value));
   }
 
   getNodeByPrefix(prefix: string): RecallNode | null {
+    // A prefix CAN be graph-prefixed (a user passing `acme:abc`), so decode-route.
     return this.lookupByValue(prefix, (store, value) => store.getNodeByPrefix(value));
   }
 
   getNodeByDerivationKey(key: string): RecallNode | null {
-    return this.lookupByValue(key, (store, value) => store.getNodeByDerivationKey(value));
+    return this.scanForValue(key, (store, value) => store.getNodeByDerivationKey(value));
+  }
+
+  // Look up an OPAQUE value (a `recall://cell/...` address, an
+  // `auto-memory:<sha>:<sha>` derivation key) that is never graph-prefixed.
+  // These contain ":" but must NOT be decoded: splitting on the first colon
+  // would mis-read a leading scheme word as a graph and, if a project's slug
+  // matched it, route to the wrong member and skip the scan. Scan every member
+  // with the raw value and re-prefix the first hit.
+  private scanForValue(
+    value: string,
+    lookup: (store: SQLiteRecallStore, value: string) => RecallNode | null,
+  ): RecallNode | null {
+    for (const member of this.members) {
+      const node = lookup(member.store, value);
+      if (node) return this.prefixNode(member.graph, node);
+    }
+    return null;
   }
 
   // Shared shape for the by-address / by-prefix / by-derivation-key lookups: if
