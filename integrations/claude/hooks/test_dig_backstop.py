@@ -40,6 +40,11 @@ def _noise():
     return json.dumps({"type": "user", "message": {"content": "hello"}})
 
 
+def _convo(text):
+    return json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "text", "text": text}]}})
+
+
 class DigBackstopTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -77,20 +82,37 @@ class DigBackstopTest(unittest.TestCase):
     def test_did_dig_failopen_on_missing_file(self):
         self.assertTrue(self.h.did_dig(os.path.join(self.tmp, "nope"), 0))
 
-    # --- stop_backstop: block only when flagged and not dug ---
-    def test_blocks_when_flagged_and_not_dug(self):
+    # --- stop_backstop: block only when flagged, not dug, AND the response
+    #     actually engaged the flagged cell ---
+    def test_blocks_when_flagged_not_dug_and_response_engages(self):
         self._write([_noise(), _noise()])
-        self.h.write_pending_dig(self._data(), ["aabbccdd"])
+        self.h.write_pending_dig(self._data(), [{"id": "aabbccdd", "title": "cache ttl is 60 seconds"}])
         self.assertTrue(os.path.exists(self.h._state_path("sess-1")))
-        self._write([_noise(), _noise(), _prose_mention()])
+        # the response propagates the flagged cell's claim: it engaged it
+        self._write([_noise(), _noise(), _convo("the cache ttl is 60 seconds, so we cache aggressively")])
         reason = self.h.stop_backstop(self._data())
         self.assertIn("DIG REQUIRED", reason)
         self.assertIn("aabbccdd", reason)
 
+    def test_allows_when_flagged_but_response_does_not_engage(self):
+        # Conversational turn: a stale cell was flagged in the index, but the
+        # response never touched it (no read, no content overlap). Must NOT block.
+        self._write([_noise(), _noise()])
+        self.h.write_pending_dig(self._data(), [{"id": "aabbccdd", "title": "cache ttl is 60 seconds"}])
+        self._write([_noise(), _noise(), _convo("ha yeah, the mascot looks like Einstein")])
+        self.assertEqual(self.h.stop_backstop(self._data()), "")
+
+    def test_engage_by_id_substring(self):
+        # If the response names the flagged id, that counts as engaging it.
+        self._write([_noise(), _noise()])
+        self.h.write_pending_dig(self._data(), [{"id": "aabbccdd", "title": "unrelated title here"}])
+        self._write([_noise(), _noise(), _convo("acting on cell aabbccdd now")])
+        self.assertIn("DIG REQUIRED", self.h.stop_backstop(self._data()))
+
     def test_single_shot_consumes_obligation(self):
         self._write([_noise(), _noise()])
-        self.h.write_pending_dig(self._data(), ["aabbccdd"])
-        self._write([_noise(), _noise(), _prose_mention()])
+        self.h.write_pending_dig(self._data(), [{"id": "aabbccdd", "title": "cache ttl is 60 seconds"}])
+        self._write([_noise(), _noise(), _convo("the cache ttl is 60 seconds")])
         self.h.stop_backstop(self._data())            # blocks and consumes
         self.assertFalse(os.path.exists(self.h._state_path("sess-1")))
         self.assertEqual(self.h.stop_backstop(self._data()), "")  # nothing left

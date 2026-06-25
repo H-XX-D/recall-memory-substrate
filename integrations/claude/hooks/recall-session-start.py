@@ -223,11 +223,11 @@ def prompt_digest(prompt: str, cwd: str, flagged_out=None) -> str:
         if short and short in stale_ids:
             tag, flagged = "  [STALE]", True
             if flagged_out is not None:
-                flagged_out.append(short)
+                flagged_out.append({"id": short, "title": body})
         elif short and short in challenged_ids:
             tag, flagged = "  [SUPERSEDED?]", True
             if flagged_out is not None:
-                flagged_out.append(short)
+                flagged_out.append({"id": short, "title": body})
         index.append(f"- {_trim(body, 110)}" + (f"  [{cid}]" if cid else "") + tag)
     if not index:
         return ""
@@ -296,18 +296,31 @@ def _transcript_len(transcript_path: str) -> int:
     return 0
 
 
-def write_pending_dig(data: dict, flagged_ids) -> None:
+def write_pending_dig(data: dict, flagged) -> None:
     """Persist (when flagged) or clear (when not) this turn's dig obligation,
-    keyed by session id. Records the transcript length at submit time so the
-    Stop hook only scans tool calls made during this turn. Fail-open."""
+    keyed by session id. Records each flagged cell's id AND title (the title is
+    what the Stop hook needs to tell whether the turn's reply engaged the cell)
+    plus the transcript length at submit time so the Stop hook only scans this
+    turn. `flagged` items may be ids (str) or {"id", "title"} dicts. Fail-open."""
     path = _state_path(data.get("session_id") or "")
     if not path:
         return
     try:
-        if flagged_ids:
+        by_id = {}
+        for item in (flagged or []):
+            if isinstance(item, dict):
+                cid = str(item.get("id") or "")
+                title = str(item.get("title") or "")
+            else:
+                cid, title = str(item), ""
+            if cid and (cid not in by_id or (not by_id[cid] and title)):
+                by_id[cid] = title
+        if by_id:
             os.makedirs(STATE_DIR, exist_ok=True)
+            ids = sorted(by_id)
             payload = {
-                "ids": sorted(set(flagged_ids)),
+                "ids": ids,
+                "titles": [by_id[i] for i in ids],
                 "from_line": _transcript_len(data.get("transcript_path", "")),
             }
             with open(path, "w", encoding="utf-8") as f:
@@ -335,6 +348,76 @@ def did_dig(transcript_path: str, from_line: int) -> bool:
     return False
 
 
+# Function words plus a few ultra-generic domain words, dropped before content
+# overlap so a flagged title and an unrelated reply do not "engage" on filler.
+_ENGAGE_STOP = {
+    "this", "that", "with", "from", "into", "your", "have", "will", "when",
+    "then", "than", "they", "them", "what", "which", "were", "been", "over",
+    "under", "about", "after", "before", "while", "here", "there", "their",
+    "would", "could", "should", "does", "done", "like", "just", "yeah", "also",
+    "very", "much", "more", "most", "some", "such", "only", "even", "still",
+    "back", "onto", "upon", "recall", "memory", "cell", "cells",
+}
+
+
+def _content_tokens(text: str) -> set:
+    import re
+    return {
+        w for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if len(w) >= 4 and w not in _ENGAGE_STOP
+    }
+
+
+def _assistant_text(transcript_path: str, from_line: int) -> str:
+    """The assistant's response text for this turn (transcript lines from the
+    submit boundary onward). Used to tell whether the reply engaged a flagged
+    cell. Fail-open: unreadable transcript returns ""."""
+    try:
+        if not transcript_path or not os.path.exists(transcript_path):
+            return ""
+        with open(transcript_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+    except Exception:
+        return ""
+    out = []
+    for raw in lines[max(0, from_line):]:
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        if obj.get("type") != "assistant":
+            continue
+        content = (obj.get("message") or {}).get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    out.append(part.get("text") or "")
+        elif isinstance(content, str):
+            out.append(content)
+    return "\n".join(out)
+
+
+def response_engages(text: str, ids, titles) -> bool:
+    """True if the turn's reply actually engaged a flagged cell: it names the
+    cell id, or it shares two-plus distinctive content words with the cell's
+    title (the signature of propagating that cell's claim). A reply that engages
+    no flagged cell did not lean on it, so it owes no dig."""
+    if not text:
+        return False
+    low = text.lower()
+    for cid in (ids or []):
+        short = str(cid).split(":")[-1]
+        if short and short in low:
+            return True
+    resp = _content_tokens(low)
+    if not resp:
+        return False
+    for title in (titles or []):
+        if len(resp & _content_tokens(title)) >= 2:
+            return True
+    return False
+
+
 def stop_backstop(data: dict) -> str:
     """Return a block reason if the turn must not end yet, else "". The
     obligation is consumed on read, so the backstop fires at most once per
@@ -356,7 +439,16 @@ def stop_backstop(data: dict) -> str:
     ids = state.get("ids") or []
     if not ids:
         return ""
-    if did_dig(data.get("transcript_path", ""), int(state.get("from_line", 0) or 0)):
+    transcript = data.get("transcript_path", "")
+    from_line = int(state.get("from_line", 0) or 0)
+    if did_dig(transcript, from_line):
+        return ""
+    # Precision gate: only hold the turn open if the reply actually engaged a
+    # flagged cell. A conversational turn that never touched it owes no dig, so
+    # the backstop fires on reliance, not merely on a stale row appearing in the
+    # index. Fail-safe: when in doubt (no titles, unreadable transcript), the
+    # id check and the empty-response path keep behavior conservative.
+    if not response_engages(_assistant_text(transcript, from_line), ids, state.get("titles") or []):
         return ""
     shown = ", ".join(ids[:5])
     return (
@@ -384,11 +476,11 @@ def main() -> int:
 
     ctx = DIRECTIVE
     if prompt_mode:
-        flagged_ids: list = []
-        digest = prompt_digest(data.get("prompt", ""), data.get("cwd", ""), flagged_ids)
+        flagged: list = []
+        digest = prompt_digest(data.get("prompt", ""), data.get("cwd", ""), flagged)
         if digest:
             ctx = digest + "\n\n" + DIRECTIVE
-        write_pending_dig(data, flagged_ids)
+        write_pending_dig(data, flagged)
     else:
         summary = recent_summary()
         if summary:
