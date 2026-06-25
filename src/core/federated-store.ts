@@ -14,6 +14,7 @@
 
 import { existsSync } from "node:fs";
 import { SQLiteRecallStore, type RecallStore, type SimilarCell, type SubgraphFilter, type HyperedgeInput, type DagOverlayInput, type OperatorRunInput, type AcpRequestInput, type DerivedProgramRunResult, type DerivedDagAnalysisResult, type DerivedEvalRunResult, type StoredEvalRun } from "./store.js";
+import { cellReferenceTarget, parseCellReference } from "./references.js";
 import type { FuseOptions, SearchHit } from "./retrieval.js";
 import type { SemanticHit } from "./semantic.js";
 import type {
@@ -54,6 +55,28 @@ function encode(graph: string, id: string): string {
   return `${graph}:${id}`;
 }
 
+// The evidence ref arrays whose bare ids must be re-prefixed under the union.
+const EVIDENCE_REF_KINDS = [
+  "supports",
+  "contradicts",
+  "concerns",
+  "depends_on",
+  "derived_from",
+  "supersedes",
+] as const;
+
+// Re-prefix one bare evidence ref to `graph`, preserving any #field suffix.
+// Idempotent: a target that already carries a ":" graph prefix is left as-is
+// (slugs and UUIDs contain no ":", so a colon means it is already prefixed),
+// which prevents `graph:graph:id` if a node is prefixed twice.
+function prefixEvidenceRef(ref: string, graph: string): string {
+  const bare = cellReferenceTarget(ref);
+  if (bare.includes(":")) return ref;
+  const field = parseCellReference(ref).path;
+  const prefixed = encode(graph, bare);
+  return field ? `${prefixed}#${field}` : prefixed;
+}
+
 function decode(prefixedId: string): { graph?: string; id: string } {
   const idx = prefixedId.indexOf(":");
   if (idx < 0) return { id: prefixedId };
@@ -79,7 +102,31 @@ export class FederatedReadStore implements RecallStore {
   // ----- prefix-aware node helpers -----
 
   private prefixNode(graph: string, node: RecallNode): RecallNode {
-    return { ...node, id: encode(graph, node.id) };
+    const id = encode(graph, node.id);
+    const evidence = node.data?.evidence;
+    if (typeof evidence !== "object" || evidence === null || Array.isArray(evidence)) {
+      return { ...node, id };
+    }
+    // Prefix the bare ids inside evidence (supports/contradicts/concerns/...)
+    // with the same graph, so id-keyed trust analysis run over the union
+    // (scoreBelief, calibration) matches them against the prefixed node ids
+    // instead of counting zero contradictions and reading a challenged belief as
+    // current. Copy (never mutate the shared member node), and only when a ref
+    // array is actually present.
+    const src = evidence as Record<string, unknown>;
+    let changed = false;
+    const next: Record<string, unknown> = { ...src };
+    for (const kind of EVIDENCE_REF_KINDS) {
+      const refs = src[kind];
+      if (Array.isArray(refs) && refs.length > 0) {
+        next[kind] = refs.map((ref) => (typeof ref === "string" ? prefixEvidenceRef(ref, graph) : ref));
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return { ...node, id };
+    }
+    return { ...node, id, data: { ...node.data, evidence: next } };
   }
 
   // Route a possibly-prefixed id to its member. When the graph is known we go

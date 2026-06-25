@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { admitWriteProposal } from "../src/core/admission.js";
+import { analyzeMemory } from "../src/core/analysis.js";
 import { FederatedReadStore } from "../src/core/federated-store.js";
+import { cellReferenceTarget } from "../src/core/references.js";
 import { SQLiteRecallStore } from "../src/core/store.js";
 import { makeProposal, tempDbPath } from "./helpers.js";
 
@@ -24,6 +26,92 @@ function seed(path: string, title: string, body: string, marker: string): string
 }
 
 describe("FederatedReadStore", () => {
+  it("prefixes the bare ids inside node.data.evidence so trust analysis matches under the union", () => {
+    const db = tempDbPath();
+    const store = new SQLiteRecallStore(db.path);
+    let beliefId: string;
+    let witnessId: string;
+    try {
+      const belief = admitWriteProposal(
+        makeProposal({
+          content: { title: "Postgres is the primary store", body: "chosen as primary", summary: "pg" },
+          tags: { topics: ["pg"], entities: ["Recall"] },
+        }),
+        store,
+      );
+      assert.equal(belief.accepted, true);
+      beliefId = belief.node!.id;
+      const witness = admitWriteProposal(
+        makeProposal({
+          content: { title: "Postgres was dropped for SQLite", body: "reversed the choice", summary: "drop" },
+          tags: { topics: ["pg"], entities: ["Recall"] },
+          evidence: { contradicts: [belief.node!.cellAddress] },
+        }),
+        store,
+      );
+      assert.equal(witness.accepted, true);
+      witnessId = witness.node!.id;
+    } finally {
+      store.close();
+    }
+    const federated = new FederatedReadStore([{ graph: "acme", path: db.path }]);
+    try {
+      const witness = federated.getNode(`acme:${witnessId}`);
+      assert.ok(witness, "the witness resolves under the union");
+      const evidence = witness!.data.evidence as { contradicts?: string[] };
+      assert.ok(evidence.contradicts && evidence.contradicts.length === 1);
+      // The bare contradicts ref must be re-prefixed to the same graph as the
+      // belief's union id, so id-keyed trust analysis (scoreBelief, calibration)
+      // matches instead of silently counting zero contradictions.
+      assert.equal(cellReferenceTarget(evidence.contradicts![0]), `acme:${beliefId}`);
+    } finally {
+      federated.close();
+      db.cleanup();
+    }
+  });
+
+  it("scores a contradicted belief under the union instead of reading it as trustworthy (end to end)", () => {
+    const db = tempDbPath();
+    const store = new SQLiteRecallStore(db.path);
+    let beliefId: string;
+    try {
+      const belief = admitWriteProposal(
+        makeProposal({
+          intent: { kind: "belief_update", operation: "create" },
+          content: { title: "Cache TTL is sixty seconds", body: "the agreed cache lifetime", summary: "ttl" },
+          tags: { type: ["belief_update"], topics: ["cache"] },
+        }),
+        store,
+      );
+      assert.equal(belief.node!.kind, "belief");
+      beliefId = belief.node!.id;
+      admitWriteProposal(
+        makeProposal({
+          content: { title: "Cache TTL was changed to ten minutes", body: "the lifetime was revised", summary: "revised" },
+          tags: { topics: ["cache"] },
+          evidence: { contradicts: [belief.node!.id] },
+          confidence: { value: 0.9, uncertainty: 0.1, concern: 0.9, source_quality: "high" },
+        }),
+        store,
+      );
+    } finally {
+      store.close();
+    }
+    const federated = new FederatedReadStore([{ graph: "acme", path: db.path }]);
+    try {
+      const report = analyzeMemory(federated);
+      const scored = report.beliefs.find((b) => b.nodeId === `acme:${beliefId}`);
+      assert.ok(scored, "the belief is scored under the union");
+      assert.ok(
+        scored!.contradiction > 0,
+        "the contradiction must be counted under the union, not silently zero (a challenged belief reading as trust)",
+      );
+    } finally {
+      federated.close();
+      db.cleanup();
+    }
+  });
+
   it("getNodeByAddress scans members and is not mis-routed by a project slug matching the address scheme", () => {
     const homeDb = tempDbPath();
     const recallDb = tempDbPath();
