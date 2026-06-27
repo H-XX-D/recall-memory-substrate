@@ -43,7 +43,7 @@ Building SENTINEL, a real benchmarking suite for this, is one of my highest prio
 
 A benchmark value only means something if there’s an aggregate baseline and a calibrated anchor. A bench that only your system can run is not a benchmark; it is a demo attributing the result to the wrong layer, blaming the store when the model just queried it badly, or crediting the system. So devising ways to avoid bias, cold start cutoffs, normalizations for balancing the different ways correlated axis report their values, scale parity, outlier skew, and correct attribution comes first, and then the leaderboard means something.
 
-Veni, vidi, vici.
+*Veni, vidi, vici.*
 
 “I came, I saw, I conquered.”
 
