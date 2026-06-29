@@ -17,11 +17,11 @@ So I treated it like a machine fault. I put my critical thinking, problem solvin
 
 MAL is HAL one layer up. Instead of abstracting hardware, it abstracts memory. It is not a literal port, not HAL's wiring copied onto a database pin for pin. It is the concept of how HAL works, the whole pattern of pins, signals, components, and a scheduler, applied to an AI's durable memory. HAL controls a machine. MAL controls the thing that kept breaking when I put AI on the bench: the state carried across each user and AI turn.
 
-**Status: this is implemented as a running AIDDE(Artificial Intelligence Driven Development Environment) prototype, not just an architecture sketch.** The screenshot shows the Recall panel operating against a persistent graph, and the code snippets later in this post show the four boundaries that matter: compiling a mini-index, expanding selected cells, writing claims through an admission gate, and running deterministic recomputation outside the model. The full source is not published here, so read this as a prototype disclosure rather than a reproducible benchmark.
+**Status: this is implemented as a running Recall prototype, not just an architecture sketch.** The screenshot shows the Recall panel operating against a persistent graph, and the code snippets later in this post show the four boundaries that matter: compiling a mini-index, expanding selected cells, writing claims through an admission gate, and running deterministic recomputation outside the model. The full source is not published here, so read this as a prototype disclosure rather than a reproducible benchmark.
 
 ![Recall running inside the local agent workspace, connected to a SQLite-backed graph](https://cloudmate-test.s3.us-east-1.amazonaws.com/res/hashnode/image/upload/v1782734570409/8de87209-f36a-4cfc-beac-3bf32f7bab35.png align="center")
 
-*Recall running inside AIDDE. The Recall panel is connected to a SQLite-backed graph, showing 1,148 cells, 1,143 relations, active memory-in-use cards, compile/search/write controls, and a 900-word compiled memory budget. This screenshot demonstrates the working interface; the snippets below show the MAL loop underneath.*
+*Recall running inside the local agent workspace. The Recall panel is connected to a SQLite-backed graph, showing 1,148 cells, 1,143 relations, active memory-in-use cards, compile/search/write controls, and a 900-word compiled memory budget. This screenshot demonstrates the working interface; the snippets below show the MAL loop underneath.*
 
 ## What it actually does, one turn at a time
 
@@ -156,6 +156,8 @@ Read the top line and the many-writers-one-reader idea becomes concrete. `conf(.
 ### What the language does not do
 
 The grammar wires ops; it does not define their math. The formulas (the effective-confidence reconciliation, the per-type currency decay, the allocation-pressure math) live inside the ops, the way a HAL component's math lives in compiled C and not in the `.hal` file. The language only connects pre-built ops to values and to the tick. The one op you can configure without code is the reflex, set with a truth-table personality rather than a formula, so even user-defined boolean logic needs no expression language. That keeps the surface small on purpose.
+
+**Status of the language.** Be clear about what runs. The graph renders to this notation today, but one direction only: graph to text. A parser and loader that read a netlist back into a wired graph are specified here and not yet written. That reader is the next piece, and its acceptance test is a round trip: render the graph, parse it, load it, render again, and require the two renders to match. The model never reads the netlist either way; it reads the compiled slice. The netlist is for human audit and for tooling such as replay, diff, and version control.
 
 ## Borrowing the next layer: components
 
@@ -346,6 +348,18 @@ function recompute(store: Store, cell: Cell, now: string): Cell {
 
 **The verifier.** A functional verifier, `npm run verify:recall-panel`, was added for the Recall panel and passes. It checks that the panel is correctly wired to the graph (the SQLite-backed store and the compile, search, and write controls), not that it clears any performance number. Read it as a wiring check, not a benchmark.
 
+## Recall, MAL, and AIDE
+
+A quick map of the three names, because they get used together and they are not the same thing.
+
+**Recall is the programming foundation.** At the bottom is a local-first memory substrate: a SQLite-backed graph of typed cells, an admission gate every write passes through, calibrated confidence, supersession instead of overwrite, and a compile path that returns a ranked, budgeted slice. That layer ships as a package and runs today. It is the working base everything else stands on, and it is what the four boundaries above are made of.
+
+**MAL is what that foundation evolves into.** v5 recasts the same primitives as a hardware abstraction layer for memory: a cell field is a pin, an addressable value is a signal, an op is a component, the between-turn tick is the thread, and the rendered graph is a netlist. On top of the proven store it adds the deterministic op and signal layer and the addressing language. The four boundaries earlier in this post are MAL running. The netlist language is MAL specified, with the reader still to come.
+
+**AIDE is where it runs.** The screenshot at the top is AIDE, an agent workspace with Recall embedded as a panel. The agent compiles, searches, and writes the same SQLite graph from inside the editor, against a live cell count and a word budget, so the memory layer is not a side service the agent calls out to; it sits in the workspace the agent already works in. MAL is the layer that panel stands on.
+
+So Recall is the substrate, MAL is the abstraction layer it grows into, and AIDE is the workspace that puts both in front of a working agent.
+
 ## Why this shape holds up
 
 Two things make MAL age well. It rides capability gains for free: a stronger model uses the same layer better with no rewrite, and a weaker model still gets the deterministic floor underneath it. And it keeps the expensive, stateful, always-on work in deterministic code where it belongs, leaving the model to do the one thing only it can do, which is to state a calibrated claim and judge relevance.
@@ -353,3 +367,7 @@ Two things make MAL age well. It rides capability gains for free: a stronger mod
 That is the whole bet, and it comes straight off the shop floor. A machine does not stay accurate because the controller is smart. It stays accurate because the wiring is legible, the signals are reconciled, the bad state gets caught and replaced instead of silently riding along, and a scheduler keeps the picture current between every move.
 
 > MAL is that discipline, applied to an AI's memory. HAL one layer up, over memory instead of motors.
+
+if you want to try Recall it is standalone and OSS [https://github.com/H-XX-D/recall-memory-substrate](https://github.com/H-XX-D/recall-memory-substrate)
+
+The AIDDE (Artificial Intelligence Driven Development Environment)is a Codex Claude SDK native bring your subscription development environment that shifts the old IDE with AI chat to a High level view cockpit where you specify design, direct intent, monitor changes, audit actions control permissions and access in real time across a codebase. Beta is done and if your interested ask in the comments for a link to the Alpha
