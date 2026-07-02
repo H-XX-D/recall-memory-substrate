@@ -71,3 +71,6 @@ scratch-*
 *.scratch.*
 .checker/*
 !.checker/checks.json
+
+# local drafts, never commit
+posts/

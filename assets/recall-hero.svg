@@ -1,0 +1,68 @@
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#0a0f1d"/>
+      <stop offset="1" stop-color="#0f1830"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#34d399" stop-opacity="0.40"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="820" height="300" rx="18" fill="url(#bg)"/>
+  <rect x="0.75" y="0.75" width="818.5" height="298.5" rx="17.25" fill="none" stroke="#1e2a45" stroke-width="1.5"/>
+
+  <!-- left: wordmark + tagline + badges -->
+  <text x="56" y="116" font-size="66" font-weight="800" fill="#f8fafc" letter-spacing="-1.5">Recall</text>
+  <rect x="59" y="134" width="92" height="5" rx="2.5" fill="url(#acc)"/>
+  <text x="58" y="176" font-size="22" font-weight="600" fill="#dbe4f0">Push-based memory for AI agents</text>
+  <text x="58" y="205" font-size="15.5" fill="#8092ad">It computes confidence instead of storing it.</text>
+  <g font-size="13" font-weight="600">
+    <rect x="58" y="230" width="96" height="27" rx="13.5" fill="#101a33" stroke="#27365a"/>
+    <text x="106" y="248" text-anchor="middle" fill="#9cb2cc">local-first</text>
+    <rect x="162" y="230" width="84" height="27" rx="13.5" fill="#101a33" stroke="#27365a"/>
+    <text x="204" y="248" text-anchor="middle" fill="#9cb2cc">no cloud</text>
+    <rect x="254" y="230" width="90" height="27" rx="13.5" fill="#101a33" stroke="#27365a"/>
+    <text x="299" y="248" text-anchor="middle" fill="#9cb2cc">no signup</text>
+  </g>
+
+  <!-- right: push -> substrate motif -->
+  <ellipse cx="688" cy="150" rx="98" ry="82" fill="url(#glow)"/>
+
+  <rect x="540" y="56" width="96" height="40" rx="20" fill="#0c1426" stroke="#34d399" stroke-width="1.5"/>
+  <text x="588" y="81" text-anchor="middle" font-size="14.5" font-weight="700" fill="#34d399">agent</text>
+
+  <g fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linecap="round">
+    <path d="M602 98 C 616 118, 632 128, 650 134" marker-end="url(#ah)"/>
+    <path d="M580 98 C 576 124, 596 152, 622 162" marker-end="url(#ah)" opacity="0.55"/>
+  </g>
+  <text x="556" y="120" font-size="12.5" font-weight="700" fill="#22d3ee" opacity="0.9">push</text>
+
+  <g stroke="#33425f" stroke-width="2" fill="none">
+    <path d="M676 150 L 742 130"/>
+    <path d="M676 150 L 700 206"/>
+    <path d="M742 130 L 760 190"/>
+  </g>
+  <path d="M676 150 L 752 210" stroke="#f59e0b" stroke-width="2" fill="none" stroke-dasharray="5 4"/>
+  <text x="694" y="174" font-size="10.5" font-weight="700" fill="#f59e0b" transform="rotate(22 694 174)">contradicts</text>
+
+  <circle cx="676" cy="150" r="22" fill="#0c1426" stroke="#1d2c49" stroke-width="3"/>
+  <circle cx="676" cy="150" r="22" fill="none" stroke="#34d399" stroke-width="3.4" stroke-dasharray="118 22" stroke-linecap="round" transform="rotate(-90 676 150)"/>
+  <text x="676" y="155" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e8f6f1">0.9</text>
+
+  <circle cx="742" cy="130" r="15" fill="#0c1426" stroke="#3b4d70" stroke-width="2"/>
+  <circle cx="700" cy="206" r="14" fill="#0c1426" stroke="#3b4d70" stroke-width="2"/>
+  <circle cx="760" cy="190" r="12" fill="#0c1426" stroke="#3b4d70" stroke-width="2"/>
+
+  <circle cx="752" cy="210" r="15" fill="#0c1426" stroke="#5a4a2e" stroke-width="2" opacity="0.85"/>
+  <line x1="743" y1="201" x2="761" y2="219" stroke="#f59e0b" stroke-width="2" opacity="0.85"/>
+  <text x="752" y="240" text-anchor="middle" font-size="10" fill="#7a6b4d">superseded</text>
+</svg>
