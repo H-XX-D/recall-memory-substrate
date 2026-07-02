@@ -1,1479 +1,418 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { admitWriteProposal } from "./core/admission.js";
-import { analyzeMemory, memoryHealthToProposal } from "./core/analysis.js";
-import { analyzeCalibration } from "./core/calibration.js";
-import { inspectCell } from "./core/cell-context.js";
-import { compileContext, formatContextPacket } from "./core/context-compiler.js";
-import { buildInceptionScaffold } from "./core/inception.js";
-import { buildTrendScaffold } from "./core/trend-scaffold.js";
-import { runCognitiveTick } from "./core/cognitive.js";
-import { enqueueAcpRequest, isAcpRequestAction, isAcpRequestStatus, runAcpCycle } from "./core/acp.js";
-import { runAcpLoop } from "./core/acp.js";
-import { runDaemonOnce } from "./core/daemon.js";
-import { defaultEvalSuite, type RecallEvalSuite } from "./core/evals.js";
-import { exportRecallArchive, importRecallArchive } from "./core/export.js";
-import { importAutoMemory } from "./core/auto-memory-adapter.js";
-import { importGlobalToLocal } from "./core/local-import.js";
-import { importMem0 } from "./core/mem0-adapter.js";
-import { importZep } from "./core/zep-adapter.js";
-import { buildPageIndex, getRecallPage, type RecallPageName } from "./core/pages.js";
-import { runOperatingCycle } from "./core/operator.js";
-import { validateWriteProposal } from "./core/schema.js";
-import { SecretGraphStore } from "./core/secrets.js";
-import { installLaunchAgent, launchAgentStatus, renderLaunchAgentPlist, uninstallLaunchAgent } from "./core/service.js";
-import { claudeIntegrationStatus, setClaudeAutoMemory } from "./core/claude-integration.js";
-import { globalDbPath, runClaudeSync } from "./core/claude-sync.js";
-import { codexIntegrationStatus, syncCodexIntegration } from "./core/codex-integration.js";
+// R8 CLI surface over the implemented v5 core. Server, TUI, import adapters,
+// and installer sync commands stay deferred; this is the npm/bin entry point.
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { admit } from "./admission.js";
 import {
-  ensureHomeLocal,
-  homeSecretsPath,
+  exportCellArchive,
+  importAutoMemory,
+  importCellArchive,
+  importMem0,
+  importZep,
+  readJsonFile,
+} from "./adapters.js";
+import { inspectCell } from "./cell-context.js";
+import { compileContext, formatContextPacket } from "./compile.js";
+import { FederatedReadStore } from "./federated-store.js";
+import { runOperatorCycle } from "./operator.js";
+import { serializeGraph, parseNetlist, loadNetlist, type LoadMode } from "./netlist.js";
+import {
+  listProjects,
   localGraphPaths,
-  openHomeReadUnion,
   registerProject,
-  resolveCwdRouting,
-  resolveDbForCwd,
-} from "./core/routing.js";
-import { SQLiteRecallStore, type DagOverlayInput, type HyperedgeInput, type RecallStore } from "./core/store.js";
-import { storageStats } from "./core/storage-stats.js";
-import { renderTui } from "./core/tui.js";
-import { RECALL_PACKAGE_NAME, RECALL_VERSION } from "./core/version.js";
-import { allocateWork, allocationToProposal, blindLockToProposal, type BlindLockInput, type WorkCandidateInput } from "./core/workflow.js";
-import type { AcpRequest, HyperedgeProgramSpec, OperatorRun } from "./core/types.js";
+  registryDbPath,
+  resolveDbForSlug,
+  whereProject,
+} from "./routing.js";
+import { validateProposal } from "./schema.js";
+import { SqliteStore } from "./store.js";
+import type { Store, WriteProposal } from "./types.js";
+
+export const CLI_NAME = "recall-memory-substrate";
+export const CLI_VERSION = "0.5.0";
+
+export interface CliIo {
+  stdout?: (text: string) => void;
+  stderr?: (text: string) => void;
+}
+
+export interface RunCliOptions extends CliIo {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  now?: string;
+}
 
 interface ParsedArgs {
   command: string[];
-  db: string;
-  /** True when the db was pinned explicitly (--db flag or RECALL_DB), so the
-   * central-model routing (project/home union) is bypassed for that store. */
-  dbExplicit: boolean;
-  secretsDb: string;
+  db?: string;
+  project?: string;
   jsonPath?: string;
-  words: number;
-  query?: string;
-  review: boolean;
-  title?: string;
-  tags: string[];
-  scope: string;
-  category: string[];
-  type: string[];
-  subject: string[];
-  project: string[];
-  idea: string[];
-  timestamp: string[];
-  topics: string[];
-  entities: string[];
-  identities: string[];
-  rings: string[];
-  passwordStdin: boolean;
-  valueStdin: boolean;
-  confirmSecretSave: boolean;
-  intervalMs: number;
-  label?: string;
-  launchAgentsDir?: string;
-  nodeBin: string;
-  cwd: string;
-  limit: number;
-  limitProvided: boolean;
-  watch: boolean;
-  derive: boolean;
-  operatorCompact: boolean;
-  skipSemanticReindex: boolean;
-  skipEvalClosure: boolean;
-  skipCognitiveTick: boolean;
-  skipDaemonMaintenance: boolean;
-  inlineReferenceValues: boolean;
-  includeReferenceParameters: boolean;
-  acpStatus?: string;
-  acpManager?: string;
-  acpToAgent?: string;
-  force: boolean;
-  apply: boolean;
+  slug?: string;
+  description?: string;
   root?: string;
   file?: string;
-  globalDb?: string;
-  measure?: string;
-  path?: string;
+  mode?: string;
+  derive: boolean;
+  apply: boolean;
+  words: number;
+  limit: number;
 }
 
-function main(): void {
-  const args = parseArgs(process.argv.slice(2));
-  const [command, subcommand] = args.command;
+interface Route {
+  scope: "explicit" | "project" | "home";
+  dbPath: string;
+  reason: string;
+  slug?: string;
+}
 
-  if (!command || command === "help" || command === "--help") {
-    printHelp();
-    return;
-  }
+export function runCli(argv: string[], options: RunCliOptions = {}): number {
+  const out = options.stdout ?? ((text: string) => process.stdout.write(text));
+  const err = options.stderr ?? ((text: string) => process.stderr.write(text));
+  const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? process.env;
 
-  if (command === "version" || command === "--version" || command === "-v") {
-    console.log(JSON.stringify({ name: RECALL_PACKAGE_NAME, version: RECALL_VERSION }, null, 2));
-    return;
-  }
-
-  if (command === "secrets") {
-    handleSecrets(args);
-    return;
-  }
-
-  if (command === "mcp" && subcommand === "config") {
-    console.log(JSON.stringify(mcpConfig(args.db), null, 2));
-    return;
-  }
-
-  if (command === "daemon" && subcommand === "plist") {
-    console.log(renderLaunchAgentPlist(launchAgentOptions(args)));
-    return;
-  }
-
-  if (command === "daemon" && subcommand === "install") {
-    console.log(JSON.stringify(installLaunchAgent(launchAgentOptions(args)), null, 2));
-    return;
-  }
-
-  if (command === "daemon" && subcommand === "uninstall") {
-    console.log(JSON.stringify(uninstallLaunchAgent(args.label, args.launchAgentsDir), null, 2));
-    return;
-  }
-
-  if (command === "daemon" && subcommand === "service-status") {
-    console.log(JSON.stringify(launchAgentStatus(args.label, args.launchAgentsDir), null, 2));
-    return;
-  }
-
-  if (command === "claude" && (!subcommand || subcommand === "sync")) {
-    const keep = process.env.RECALL_KEEP_AUTOMEMORY === "1";
-    const result = runClaudeSync({ disableAutoMemory: !keep, importMemory: !keep });
-    console.log(JSON.stringify(result, null, 2));
-    if (result.autoMemoryImport) {
-      const s = result.autoMemoryImport;
-      const processed = s.created + s.superseded;
-      // Human-readable summary on stderr so stdout stays valid JSON.
-      process.stderr.write(
-        `Recall: ${processed} auto-memory file(s) processed into the global graph (${result.autoMemoryImportDb}), ` +
-          `${s.skipped} already current. Native auto-memory is now disabled; your original .md files were left in place.\n`,
-      );
-    }
-    return;
-  }
-
-  if (command === "claude" && subcommand === "status") {
-    console.log(JSON.stringify(claudeIntegrationStatus(), null, 2));
-    return;
-  }
-
-  if (command === "claude" && (subcommand === "disable-auto-memory" || subcommand === "disable")) {
-    console.log(JSON.stringify(setClaudeAutoMemory(false), null, 2));
-    return;
-  }
-
-  if (command === "claude" && (subcommand === "enable-auto-memory" || subcommand === "enable")) {
-    console.log(JSON.stringify(setClaudeAutoMemory(true), null, 2));
-    return;
-  }
-
-  if (command === "codex" && (!subcommand || subcommand === "sync")) {
-    console.log(JSON.stringify(syncCodexIntegration(), null, 2));
-    return;
-  }
-
-  if (command === "codex" && subcommand === "status") {
-    console.log(JSON.stringify(codexIntegrationStatus(), null, 2));
-    return;
-  }
-
-  if (command === "export") {
-    console.log(JSON.stringify(exportRecallArchive(args.db), null, 2));
-    return;
-  }
-
-  if (command === "import" && subcommand !== "auto-memory" && subcommand !== "mem0" && subcommand !== "zep" && subcommand !== "local") {
-    const archive = readJsonArg(args);
-    console.log(JSON.stringify({ result: importRecallArchive(args.db, archive, { replace: args.force }) }, null, 2));
-    return;
-  }
-
-  // At home scope the writable default IS the home local (args.db ===
-  // homeDbPath). Run the first-run global.sqlite3 -> home.sqlite3 migration
-  // BEFORE opening it, so a pre-model-A user's memory is carried forward instead
-  // of a fresh empty home.sqlite3 being created. Idempotent and a no-op once the
-  // home local exists, so it is safe on every invocation.
-  // Resolve cwd routing once. A registered project whose local DB has gone
-  // missing auto-heals to the home local; inform the user once. `init` is exempt
-  // (it re-creates the project store), so it opts out of healing, and the
-  // registry resolvers stay pure for every other caller.
-  const routing = resolveCwdRouting(process.cwd(), process.env, { healMissing: !args.dbExplicit && command !== "init" });
-  if (routing.healed) {
-    process.stderr.write(
-      `Recall: project '${routing.healed.slug}' is registered here but its database ${routing.healed.dbPath} is missing; using the home local instead. Run 'recall init' to re-create the project store.\n`,
-    );
-    args.db = routing.dbPath;
-  }
-  const homeScope = !args.dbExplicit && routing.scope === "home";
-  if (homeScope) ensureHomeLocal();
-  const store = new SQLiteRecallStore(args.db);
-  // Read commands run over the central model: outside any project (home scope)
-  // they read the federated union over every local; inside a project, or when a
-  // db is pinned explicitly, they read that single local. withReadStore opens
-  // the right store via the shared home read-union resolver (openHomeReadUnion,
-  // also used by the MCP server), runs the body, and always closes a federated
-  // store it built (the single `store` is closed by the outer finally).
-  const withReadStore = (run: (read: RecallStore) => void): void => {
-    if (homeScope) {
-      const federated = openHomeReadUnion();
-      try {
-        run(federated);
-      } finally {
-        federated.close();
-      }
-      return;
-    }
-    run(store);
-  };
   try {
-    if (command === "init") {
-      // Register cwd as a project in the central registry and create/open its
-      // local. Idempotent: re-running in an already-registered dir updates the
-      // record and reports it. An explicit --db/RECALL_DB becomes the local's
-      // db_path so power users can place the local where they want.
+    const args = parseArgs(argv);
+    const [command, subcommand] = args.command;
+    if (!command || command === "help" || command === "--help" || command === "-h") {
+      out(helpText());
+      return 0;
+    }
+    if (command === "version" || command === "--version" || command === "-v") {
+      out(`${JSON.stringify({ name: CLI_NAME, version: CLI_VERSION })}\n`);
+      return 0;
+    }
+
+    if (command === "project" && (!subcommand || subcommand === "list")) {
+      outJson(out, { projects: listProjects(registryDbPath(env)) });
+      return 0;
+    }
+    if ((command === "project" && subcommand === "where") || command === "where") {
+      outJson(out, routeOutput(resolveRoute(args, cwd, env), env));
+      return 0;
+    }
+    if ((command === "project" && subcommand === "init") || command === "init") {
       const record = registerProject(
         {
-          root: process.cwd(),
-          dbPath: args.dbExplicit ? args.db : undefined,
+          root: args.root ?? cwd,
+          slug: args.slug,
+          dbPath: args.db,
+          description: args.description,
         },
-        new Date().toISOString(),
+        options.now ?? new Date().toISOString(),
+        registryDbPath(env),
       );
-      const projectStore = new SQLiteRecallStore(record.db_path);
+      ensureDbParent(record.dbPath);
+      const store = new SqliteStore(record.dbPath);
       try {
-        console.log(
-          JSON.stringify(
-            {
-              status: "initialized",
-              scope: "project",
-              slug: record.slug,
-              root: record.root_path,
-              db: record.db_path,
-              stats: projectStore.stats(),
-            },
-            null,
-            2,
-          ),
-        );
+        outJson(out, { status: "initialized", project: record, stats: store.stats() });
       } finally {
-        projectStore.close();
+        store.close();
       }
-      return;
-    }
-
-    if (command === "status") {
-      const routing = resolveCwdRouting(process.cwd(), process.env, { healMissing: !args.dbExplicit });
-      const status: Record<string, unknown> = {
-        name: RECALL_PACKAGE_NAME,
-        version: RECALL_VERSION,
-        db: args.db,
-        scope: routing.scope,
-        stats: store.stats(),
-      };
-      if (routing.scope === "project" && routing.slug) status.slug = routing.slug;
-      if (routing.scope === "home") status.unionMembers = localGraphPaths().length;
-      console.log(JSON.stringify(status, null, 2));
-      return;
-    }
-
-    if (command === "where") {
-      const routing = resolveCwdRouting(process.cwd(), process.env, { healMissing: !args.dbExplicit });
-      const out: Record<string, unknown> = {
-        scope: routing.scope,
-        db: routing.dbPath,
-      };
-      if (routing.slug) out.slug = routing.slug;
-      if (routing.scope === "home") {
-        const members = localGraphPaths();
-        out.unionMembers = members.length;
-        out.locals = members.map((m) => m.graph);
-      }
-      console.log(JSON.stringify(out, null, 2));
-      return;
-    }
-
-    if (command === "storage") {
-      console.log(JSON.stringify(storageStats(store), null, 2));
-      return;
-    }
-
-    if (command === "acp" && (!subcommand || subcommand === "status")) {
-      console.log(JSON.stringify({ mode: "agent-communication-protocol", db: args.db, stats: store.stats() }, null, 2));
-      return;
-    }
-
-    if (command === "acp" && subcommand === "send") {
-      const request = readJsonArg(args);
-      console.log(JSON.stringify({ request: enqueueAcpRequest(store, normalizeAcpRequest(request)) }, null, 2));
-      return;
-    }
-
-    if (command === "acp" && subcommand === "list") {
-      console.log(JSON.stringify({ requests: store.listAcpRequests(args.limit, acpStatusFilter(args)).map(acpRequestListItem) }, null, 2));
-      return;
-    }
-
-    if (command === "acp" && subcommand === "show") {
-      const requestId = requireCommandValue(args.command, 2, "ACP request id");
-      console.log(JSON.stringify(store.getAcpRequest(requestId), null, 2));
-      return;
-    }
-
-    if (command === "acp" && subcommand === "process") {
-      console.log(JSON.stringify(runAcpCycle(store, new Date(), { limit: args.limit, manager: args.acpManager, toAgent: args.acpToAgent }), null, 2));
-      return;
-    }
-
-    if (command === "acp" && subcommand === "run") {
-      runAcpLoop(store, {
-        intervalMs: args.intervalMs,
-        limit: args.limit,
-        manager: args.acpManager,
-        toAgent: args.acpToAgent
-      });
-      return;
-    }
-
-    if (command === "compact") {
-      const result = store.compact();
-      console.log(JSON.stringify({ result, storage: storageStats(store) }, null, 2));
-      return;
-    }
-
-    if (command === "beliefs") {
-      const report = analyzeMemory(store);
-      console.log(JSON.stringify({ report }, null, 2));
-      return;
-    }
-
-    if (command === "maintenance") {
-      const report = analyzeMemory(store);
-      const result = args.derive
-        ? admitWriteProposal(
-            memoryHealthToProposal(report, {
-              project: "Recall",
-              tenant: "local",
-              session: "maintenance"
-            }),
-            store
-          )
-        : undefined;
-      console.log(JSON.stringify({ report, result }, null, 2));
-      process.exitCode = result && !result.accepted ? 1 : 0;
-      return;
-    }
-
-    if (command === "repair") {
-      if (args.apply) {
-        const pruned = store.pruneUnresolvableTrustEdges();
-        console.log(JSON.stringify({ dryRun: false, count: pruned.deleted, relations: pruned.relations }, null, 2));
-      } else {
-        const relations = store.unresolvableTrustEdges();
-        console.log(JSON.stringify({ dryRun: true, count: relations.length, relations }, null, 2));
-      }
-      return;
-    }
-
-    if (command === "import" && subcommand === "auto-memory") {
-      const summary = importAutoMemory(store, { root: args.root, project: args.project[0], apply: args.apply });
-      console.log(JSON.stringify(summary, null, 2));
-      return;
-    }
-
-    if (command === "import" && subcommand === "local") {
-      const globalStore = new SQLiteRecallStore(args.globalDb ?? globalDbPath());
-      try {
-        const summary = importGlobalToLocal(globalStore, store, {
-          project: args.project[0],
-          tags: args.tags.length > 0 ? args.tags : args.topics,
-          apply: args.apply,
-          limit: args.limitProvided ? args.limit : undefined,
-        });
-        console.log(JSON.stringify(summary, null, 2));
-      } catch (error) {
-        fail(error instanceof Error ? error.message : String(error));
-      } finally {
-        globalStore.close();
-      }
-      return;
-    }
-
-    if (command === "import" && subcommand === "mem0") {
-      const file = args.file;
-      if (!file) {
-        fail("recall import mem0 requires --file <export.json>");
-        return;
-      }
-      let summary;
-      try {
-        summary = importMem0(store, { file, project: args.project[0], apply: args.apply });
-      } catch (error) {
-        fail(error instanceof Error ? error.message : String(error));
-        return;
-      }
-      console.log(JSON.stringify(summary, null, 2));
-      return;
-    }
-
-    if (command === "import" && subcommand === "zep") {
-      const file = args.file;
-      if (!file) {
-        fail("recall import zep requires --file <export.json>");
-        return;
-      }
-      let summary;
-      try {
-        summary = importZep(store, { file, project: args.project[0], apply: args.apply });
-      } catch (error) {
-        fail(error instanceof Error ? error.message : String(error));
-        return;
-      }
-      console.log(JSON.stringify(summary, null, 2));
-      return;
-    }
-
-    if (command === "trust") {
-      const report = analyzeMemory(store);
-      console.log(JSON.stringify({ provenance: report.provenance, warnings: report.criticalWarnings }, null, 2));
-      return;
-    }
-
-    if (command === "calibration") {
-      console.log(JSON.stringify({ calibration: analyzeCalibration(store) }, null, 2));
-      return;
-    }
-
-    if (command === "tick") {
-      console.log(JSON.stringify(runCognitiveTick(store, new Date(), args.derive), null, 2));
-      return;
-    }
-
-    if (command === "page") {
-      const page = (subcommand ?? "index") as RecallPageName;
-      const output = page === "index"
-        ? buildPageIndex(store)
-        : getRecallPage(store, page, pageOptions(args));
-      console.log(JSON.stringify(output, null, 2));
-      return;
-    }
-
-    if (command === "cell" && (!subcommand || subcommand === "show")) {
-      const idOrAddress = subcommand === "show"
-        ? requireCommandValue(args.command, 2, "cell id or address")
-        : requireCommandValue(args.command, 1, "cell id or address");
-      // Route through the same home read-union the other read commands use, so a
-      // graph-prefixed id like `acme:UUID` (which home search/compile emit)
-      // resolves via FederatedReadStore.getNode/getNodeByAddress. A not-found is
-      // a clean JSON error with a nonzero exit, never an uncaught stack trace.
-      withReadStore((read) => {
-        try {
-          console.log(JSON.stringify(inspectCell(read, idOrAddress), null, 2));
-        } catch (error) {
-          console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error), idOrAddress }, null, 2));
-          process.exitCode = 1;
-        }
-      });
-      return;
-    }
-
-    if (command === "tui") {
-      if (args.watch) {
-        runTuiLoop(store, args.intervalMs);
-      }
-      console.log(renderTui(store));
-      return;
+      return 0;
     }
 
     if (command === "validate") {
-      const proposal = readJsonArg(args);
-      const result = validateWriteProposal(proposal);
-      console.log(JSON.stringify(result, null, 2));
-      process.exitCode = result.ok ? 0 : 1;
-      return;
+      const proposal = readProposal(args);
+      const result = validateProposal(proposal);
+      outJson(out, result);
+      return result.ok ? 0 : 1;
+    }
+
+    const route = resolveRoute(args, cwd, env);
+    if (command === "status") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        outJson(out, { name: CLI_NAME, version: CLI_VERSION, route: routeOutput(route, env), stats: store.stats() });
+      } finally {
+        store.close();
+      }
+      return 0;
     }
 
     if (command === "admit" || command === "write-propose") {
-      const proposal = readJsonArg(args);
-      const result = admitWriteProposal(proposal, store, { overrideReview: args.review });
-      console.log(JSON.stringify(result, null, 2));
-      process.exitCode = result.accepted ? 0 : 1;
-      return;
+      const proposal = readProposal(args);
+      const store = openWriteStore(route.dbPath);
+      try {
+        const result = admit(proposal, { store, now: options.now });
+        outJson(out, result);
+        return result.accepted ? 0 : 1;
+      } finally {
+        store.close();
+      }
     }
 
-    if (command === "search") {
-      const query = args.query ?? args.command.slice(1).join(" ");
-      withReadStore((read) => {
-        const results = read.search(query, 20);
-        console.log(JSON.stringify({ query, results }, null, 2));
-      });
-      return;
+    if (command === "export") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        outJson(out, exportCellArchive(store, options.now ?? new Date().toISOString()));
+        return 0;
+      } finally {
+        store.close();
+      }
     }
 
-    if (command === "semantic" && subcommand === "reindex") {
-      console.log(JSON.stringify(store.reindexSemantic(), null, 2));
-      return;
-    }
-
-    if (command === "semantic") {
-      const query = args.query ?? args.command.slice(1).join(" ");
-      withReadStore((read) => {
-        const results = read.semanticSearch(query, 20);
-        console.log(JSON.stringify({ query, results }, null, 2));
-      });
-      return;
-    }
-
-    if (command === "subgraph") {
-      withReadStore((read) => {
-        const results = read.subgraph({
-          category: args.category,
-          type: args.type,
-          subject: args.subject,
-          project: args.project,
-          idea: args.idea,
-          timestamp: args.timestamp,
-          topics: args.topics,
-          entities: args.entities,
-          identities: args.identities,
-          rings: args.rings,
-          limit: 50
-        });
-        console.log(JSON.stringify({ filter: subgraphFilterForOutput(args), results }, null, 2));
-      });
-      return;
+    if (command === "import") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (subcommand === "archive") {
+          outJson(out, importCellArchive(store, readJsonValue(args, "archive import"), { apply: args.apply }));
+          return 0;
+        }
+        if (subcommand === "mem0") {
+          outJson(out, importMem0(store, readJsonValue(args, "mem0 import"), {
+            apply: args.apply,
+            now: options.now,
+            project: route.slug ?? args.project,
+          }));
+          return 0;
+        }
+        if (subcommand === "zep") {
+          outJson(out, importZep(store, readJsonValue(args, "zep import"), {
+            apply: args.apply,
+            now: options.now,
+            project: route.slug ?? args.project,
+          }));
+          return 0;
+        }
+        if (subcommand === "auto-memory") {
+          if (!args.root) throw new Error("import auto-memory requires --root <path>");
+          outJson(out, importAutoMemory(store, args.root, {
+            apply: args.apply,
+            now: options.now,
+            project: route.slug ?? args.project,
+          }));
+          return 0;
+        }
+        throw new Error("import requires one of: archive, mem0, zep, auto-memory");
+      } finally {
+        store.close();
+      }
     }
 
     if (command === "compile") {
-      const task = args.query ?? args.command.slice(1).join(" ");
-      withReadStore((read) => {
-        const packet = compileContext(read, {
-          task,
-          budgetWords: args.words,
-          inlineReferenceValues: args.inlineReferenceValues,
-          includeReferenceParameters: args.includeReferenceParameters
-        });
-        console.log(formatContextPacket(packet));
+      const objective = queryFrom(args, 1, "compile requires a task");
+      return withReadStore(args, route, env, (store) => {
+        out(`${formatContextPacket(compileContext(store, objective, { budgetWords: args.words, limit: args.limit }))}\n`);
+        return 0;
       });
-      return;
     }
 
-    if (command === "incept") {
-      const objective = args.query ?? args.command.slice(1).join(" ");
-      const scaffold = buildInceptionScaffold(store, {
-        objective,
-        project: args.project?.[0] ?? "recall",
-        createdAt: new Date().toISOString(),
-        budgetWords: args.words
+    if (command === "search") {
+      const query = queryFrom(args, 1, "search requires a query");
+      return withReadStore(args, route, env, (store) => {
+        outJson(out, { query, hits: store.search(query, { limit: args.limit }) });
+        return 0;
       });
-      console.log(JSON.stringify(scaffold, null, 2));
-      return;
     }
 
-    if (command === "trend") {
-      const objective = args.query ?? args.command.slice(1).join(" ");
-      const scaffold = buildTrendScaffold(store, {
-        objective,
-        measure: trendScaffoldMeasure(args.measure),
-        path: args.path
+    if (command === "cell" && (!subcommand || subcommand === "show")) {
+      const target = args.command[subcommand === "show" ? 2 : 1];
+      if (!target) throw new Error("cell show requires a key or handle");
+      return withReadStore(args, route, env, (store) => {
+        outJson(out, inspectCell(store, target));
+        return 0;
       });
-      console.log(JSON.stringify(scaffold, null, 2));
-      return;
-    }
-
-    if (command === "workflow" && subcommand === "allocate") {
-      const input = readJsonArg(args);
-      const candidates = parseWorkCandidates(input);
-      const limit = workflowLimit(input, args.limitProvided ? args.limit : 8);
-      const report = allocateWork(candidates, limit);
-      const result = args.derive
-        ? admitWriteProposal(
-            allocationToProposal(report, {
-              project: "Recall",
-              tenant: "local",
-              session: "workflow"
-            }),
-            store
-          )
-        : undefined;
-      console.log(JSON.stringify({ report, result }, null, 2));
-      process.exitCode = result && !result.accepted ? 1 : 0;
-      return;
-    }
-
-    if (command === "blind-lock" && subcommand === "add") {
-      const input = parseBlindLockInput(readJsonArg(args));
-      const result = admitWriteProposal(blindLockToProposal(input), store);
-      console.log(JSON.stringify({ result }, null, 2));
-      process.exitCode = result.accepted ? 0 : 1;
-      return;
-    }
-
-    if (command === "rollback" && subcommand === "list") {
-      console.log(JSON.stringify({ rollback: store.listRollback() }, null, 2));
-      return;
-    }
-
-    if (command === "rollback" && subcommand === "show") {
-      const id = requireCommandValue(args.command, 2, "rollback id");
-      console.log(JSON.stringify(store.applyRollback(id, false), null, 2));
-      return;
-    }
-
-    if (command === "rollback" && subcommand === "apply") {
-      const id = requireCommandValue(args.command, 2, "rollback id");
-      console.log(JSON.stringify(store.applyRollback(id, true), null, 2));
-      return;
-    }
-
-    if (command === "hyperedge" && subcommand === "add") {
-      console.log(JSON.stringify(store.addHyperedge(readJsonArg(args) as HyperedgeInput), null, 2));
-      return;
-    }
-
-    if (command === "hyperedge" && subcommand === "show") {
-      const hyperedgeId = requireCommandValue(args.command, 2, "hyperedge id");
-      console.log(JSON.stringify(store.getHyperedge(hyperedgeId), null, 2));
-      return;
-    }
-
-    if (command === "hyperedge" && (!subcommand || subcommand === "list")) {
-      console.log(JSON.stringify({ hyperedges: store.listHyperedges(args.limit) }, null, 2));
-      return;
-    }
-
-    if (command === "program" && subcommand === "add") {
-      const hyperedgeId = requireCommandValue(args.command, 2, "hyperedge id");
-      console.log(JSON.stringify(store.attachProgram(hyperedgeId, readJsonArg(args) as HyperedgeProgramSpec), null, 2));
-      return;
-    }
-
-    if (command === "program" && subcommand === "show") {
-      const programId = requireCommandValue(args.command, 2, "program id");
-      console.log(JSON.stringify(store.getProgram(programId), null, 2));
-      return;
-    }
-
-    if (command === "program" && (!subcommand || subcommand === "list")) {
-      console.log(JSON.stringify({ programs: store.listPrograms(args.limit) }, null, 2));
-      return;
-    }
-
-    if (command === "program" && subcommand === "run") {
-      const programId = requireCommandValue(args.command, 2, "program id");
-      console.log(JSON.stringify(args.derive ? store.runProgramAndDerive(programId, derivationOptions(args)) : store.runProgram(programId), null, 2));
-      return;
-    }
-
-    if (command === "program" && subcommand === "show-run") {
-      const runId = requireCommandValue(args.command, 2, "program run id");
-      console.log(JSON.stringify(store.getProgramRun(runId), null, 2));
-      return;
-    }
-
-    if (command === "program" && subcommand === "runs") {
-      console.log(JSON.stringify({ runs: store.listProgramRuns(args.limit) }, null, 2));
-      return;
-    }
-
-    if (command === "dag" && subcommand === "add") {
-      console.log(JSON.stringify(store.addDagOverlay(readJsonArg(args) as DagOverlayInput), null, 2));
-      return;
-    }
-
-    if (command === "dag" && subcommand === "show") {
-      const overlayId = requireCommandValue(args.command, 2, "DAG overlay id");
-      console.log(JSON.stringify(store.getDagOverlay(overlayId), null, 2));
-      return;
-    }
-
-    if (command === "dag" && subcommand === "analyze") {
-      const overlayId = requireCommandValue(args.command, 2, "DAG overlay id");
-      console.log(JSON.stringify(args.derive ? store.analyzeDagOverlayAndDerive(overlayId, dagDerivationOptions(args)) : store.analyzeDagOverlay(overlayId), null, 2));
-      return;
-    }
-
-    if (command === "dag" && (!subcommand || subcommand === "list")) {
-      console.log(JSON.stringify({ overlays: store.listDagOverlays(args.limit) }, null, 2));
-      return;
-    }
-
-    if (command === "eval" && (!subcommand || subcommand === "run")) {
-      const suite = args.jsonPath ? (readJsonArg(args) as RecallEvalSuite) : defaultEvalSuite();
-      console.log(JSON.stringify(args.derive ? store.runEvalAndDerive(suite, derivationOptions(args)) : store.runEval(suite), null, 2));
-      return;
-    }
-
-    if (command === "eval" && subcommand === "list") {
-      console.log(JSON.stringify({ evalRuns: store.listEvalRuns(args.limit) }, null, 2));
-      return;
-    }
-
-    if (command === "eval" && subcommand === "show") {
-      const evalRunId = requireCommandValue(args.command, 2, "eval run id");
-      console.log(JSON.stringify(store.getEvalRun(evalRunId), null, 2));
-      return;
-    }
-
-    if (command === "operate" && subcommand === "list") {
-      console.log(JSON.stringify({ runs: store.listOperatorRuns(args.limit).map(operatorRunListItem) }, null, 2));
-      return;
-    }
-
-    if (command === "operate" && subcommand === "show") {
-      const runId = requireCommandValue(args.command, 2, "operator run id");
-      console.log(JSON.stringify(store.getOperatorRun(runId), null, 2));
-      return;
     }
 
     if (command === "operate" && (!subcommand || subcommand === "once")) {
-      console.log(JSON.stringify(runOperatingCycle(store, new Date(), operatingCycleOptions(args)), null, 2));
-      return;
+      const store = openWriteStore(route.dbPath);
+      try {
+        outJson(out, runOperatorCycle(store, options.now ?? new Date().toISOString(), { derive: args.derive }));
+        return 0;
+      } finally {
+        store.close();
+      }
     }
 
-    if (command === "daemon" && (!subcommand || subcommand === "status")) {
-      console.log(JSON.stringify({ mode: "outside-llm", db: args.db, stats: store.stats() }, null, 2));
-      return;
+    if (command === "render") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        out(`${serializeGraph(store.active())}\n`);
+        return 0;
+      } finally {
+        store.close();
+      }
     }
 
-    if (command === "daemon" && subcommand === "run-once") {
-      console.log(JSON.stringify(runDaemonOnce(store, new Date(), { derive: args.derive }), null, 2));
-      return;
+    if (command === "load") {
+      if (!args.file) throw new Error("load requires --file <netlist.mal>");
+      const mode = (args.mode ?? "replay") as LoadMode;
+      if (!["replay", "verify", "merge"].includes(mode)) throw new Error("--mode must be replay, verify, or merge");
+      const store = openWriteStore(route.dbPath);
+      try {
+        const { nodes, errors } = parseNetlist(readFileSync(args.file, "utf8"));
+        outJson(out, { parseErrors: errors, ...loadNetlist(nodes, store, mode) });
+        return 0;
+      } finally {
+        store.close();
+      }
     }
 
-    if (command === "daemon" && subcommand === "run") {
-      runDaemonLoop(store, args.intervalMs, args.derive);
-      return;
-    }
-
-    fail(`Unknown command: ${args.command.join(" ")}`);
-  } finally {
-    store.close();
+    throw new Error(`Unknown command: ${args.command.join(" ")}`);
+  } catch (error) {
+    err(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
   }
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command: string[] = [];
-  // Precedence: explicit --db flag (set in the loop below) > RECALL_DB env
-  // > central model resolution. resolveDbForCwd joins the central model: it
-  // honors RECALL_DB (the same escape hatch the MCP server reads), then walks
-  // the registry for the deepest registered project ancestor of cwd, then
-  // falls back to the home local. So a bare `recall` outside any project hits
-  // the home local, and inside a project hits that project's local.
-  let db = resolveDbForCwd(process.cwd());
-  let dbExplicit = (process.env.RECALL_DB?.trim() ?? "") !== "";
-  let secretsDb = homeSecretsPath();
-  let jsonPath: string | undefined;
-  let words = 900;
-  let query: string | undefined;
-  let review = false;
-  let title: string | undefined;
-  let tags: string[] = [];
-  let scope = "local";
-  let category: string[] = [];
-  let type: string[] = [];
-  let subject: string[] = [];
-  let project: string[] = [];
-  let idea: string[] = [];
-  let timestamp: string[] = [];
-  let topics: string[] = [];
-  let entities: string[] = [];
-  let identities: string[] = [];
-  let rings: string[] = [];
-  let passwordStdin = false;
-  let valueStdin = false;
-  let confirmSecretSave = false;
-  let intervalMs = 60_000;
-  let label: string | undefined;
-  let launchAgentsDir: string | undefined;
-  let nodeBin = process.execPath;
-  let cwd = process.cwd();
-  let limit = 20;
-  let limitProvided = false;
-  let watch = false;
-  let derive = false;
-  let operatorCompact = false;
-  let skipSemanticReindex = false;
-  let skipEvalClosure = false;
-  let skipCognitiveTick = false;
-  let skipDaemonMaintenance = false;
-  let inlineReferenceValues = false;
-  let includeReferenceParameters = false;
-  let acpStatus: string | undefined;
-  let acpManager: string | undefined;
-  let acpToAgent: string | undefined;
-  let force = false;
-  let apply = false;
-  let root: string | undefined;
-  let file: string | undefined;
-  let globalDb: string | undefined;
-  let measure: string | undefined;
-  let path: string | undefined;
+  const parsed: ParsedArgs = { command, derive: false, apply: false, words: 900, limit: 10 };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (arg === "--db") parsed.db = requireValue(argv, ++i, arg);
+    else if (arg === "--project") parsed.project = requireValue(argv, ++i, arg);
+    else if (arg === "--json") parsed.jsonPath = requireValue(argv, ++i, arg);
+    else if (arg === "--slug") parsed.slug = requireValue(argv, ++i, arg);
+    else if (arg === "--description") parsed.description = requireValue(argv, ++i, arg);
+    else if (arg === "--root") parsed.root = requireValue(argv, ++i, arg);
+    else if (arg === "--file") parsed.file = requireValue(argv, ++i, arg);
+    else if (arg === "--mode") parsed.mode = requireValue(argv, ++i, arg);
+    else if (arg === "--derive") parsed.derive = true;
+    else if (arg === "--apply") parsed.apply = true;
+    else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
+    else if (arg === "--limit") parsed.limit = positiveInt(requireValue(argv, ++i, arg), arg);
+    else command.push(arg);
+  }
+  return parsed;
+}
 
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--db") {
-      db = requireValue(argv, ++index, "--db");
-      dbExplicit = true;
-    } else if (arg === "--secrets-db") {
-      secretsDb = requireValue(argv, ++index, "--secrets-db");
-    } else if (arg === "--json") {
-      jsonPath = requireValue(argv, ++index, "--json");
-    } else if (arg === "--words") {
-      words = Number.parseInt(requireValue(argv, ++index, "--words"), 10);
-    } else if (arg === "--query") {
-      query = requireValue(argv, ++index, "--query");
-    } else if (arg === "--review") {
-      review = true;
-    } else if (arg === "--title") {
-      title = requireValue(argv, ++index, "--title");
-    } else if (arg === "--tags") {
-      tags = splitCsv(requireValue(argv, ++index, "--tags"));
-    } else if (arg === "--scope") {
-      scope = requireValue(argv, ++index, "--scope");
-    } else if (arg === "--category" || arg === "--categories") {
-      category = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--type" || arg === "--types") {
-      type = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--subject" || arg === "--subjects") {
-      subject = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--project" || arg === "--projects") {
-      project = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--idea" || arg === "--ideas") {
-      idea = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--timestamp" || arg === "--timestamps") {
-      timestamp = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--topic" || arg === "--topics") {
-      topics = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--entity" || arg === "--entities") {
-      entities = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--identity" || arg === "--identities") {
-      identities = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--ring" || arg === "--rings") {
-      rings = splitCsv(requireValue(argv, ++index, arg));
-    } else if (arg === "--password-stdin") {
-      passwordStdin = true;
-    } else if (arg === "--value-stdin") {
-      valueStdin = true;
-    } else if (arg === "--confirm-secret-save") {
-      confirmSecretSave = true;
-    } else if (arg === "--interval-ms") {
-      intervalMs = Number.parseInt(requireValue(argv, ++index, "--interval-ms"), 10);
-    } else if (arg === "--label") {
-      label = requireValue(argv, ++index, "--label");
-    } else if (arg === "--launch-agents-dir") {
-      launchAgentsDir = requireValue(argv, ++index, "--launch-agents-dir");
-    } else if (arg === "--node-bin") {
-      nodeBin = requireValue(argv, ++index, "--node-bin");
-    } else if (arg === "--cwd") {
-      cwd = requireValue(argv, ++index, "--cwd");
-    } else if (arg === "--limit") {
-      limit = Number.parseInt(requireValue(argv, ++index, "--limit"), 10);
-      limitProvided = true;
-    } else if (arg === "--watch") {
-      watch = true;
-    } else if (arg === "--derive") {
-      derive = true;
-    } else if (arg === "--compact") {
-      operatorCompact = true;
-    } else if (arg === "--no-semantic") {
-      skipSemanticReindex = true;
-    } else if (arg === "--no-eval") {
-      skipEvalClosure = true;
-    } else if (arg === "--no-tick") {
-      skipCognitiveTick = true;
-    } else if (arg === "--no-daemon") {
-      skipDaemonMaintenance = true;
-    } else if (arg === "--inline-refs") {
-      inlineReferenceValues = true;
-    } else if (arg === "--reference-parameters") {
-      includeReferenceParameters = true;
-    } else if (arg === "--acp-status") {
-      acpStatus = requireValue(argv, ++index, "--acp-status");
-    } else if (arg === "--acp-manager") {
-      acpManager = requireValue(argv, ++index, "--acp-manager");
-    } else if (arg === "--acp-to-agent") {
-      acpToAgent = requireValue(argv, ++index, "--acp-to-agent");
-    } else if (arg === "--force") {
-      force = true;
-    } else if (arg === "--apply") {
-      apply = true;
-    } else if (arg === "--root") {
-      root = requireValue(argv, ++index, "--root");
-    } else if (arg === "--file") {
-      file = requireValue(argv, ++index, "--file");
-    } else if (arg === "--global-db") {
-      globalDb = requireValue(argv, ++index, "--global-db");
-    } else if (arg === "--measure") {
-      measure = requireValue(argv, ++index, "--measure");
-    } else if (arg === "--path") {
-      path = requireValue(argv, ++index, "--path");
-    } else {
-      command.push(arg);
-    }
+function resolveRoute(args: ParsedArgs, cwd: string, env: NodeJS.ProcessEnv): Route {
+  if (args.db) return { scope: "explicit", dbPath: args.db, reason: "--db override" };
+  if (args.project) {
+    const dbPath = resolveDbForSlug(args.project, registryDbPath(env));
+    if (!dbPath) throw new Error(`unknown project: ${args.project}`);
+    return { scope: "project", dbPath, reason: `--project ${args.project}`, slug: args.project };
   }
-
-  if (!Number.isFinite(words) || words <= 0) {
-    fail("--words must be a positive integer");
-  }
-  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
-    fail("--interval-ms must be a positive integer");
-  }
-  if (!Number.isFinite(limit) || limit <= 0) {
-    fail("--limit must be a positive integer");
-  }
-
+  const route = whereProject(cwd, env, registryDbPath(env));
   return {
-    command,
-    db,
-    dbExplicit,
-    secretsDb,
-    jsonPath,
-    words,
-    query,
-    review,
-    title,
-    tags,
-    scope,
-    category,
-    type,
-    subject,
-    project,
-    idea,
-    timestamp,
-    topics,
-    entities,
-    identities,
-    rings,
-    passwordStdin,
-    valueStdin,
-    confirmSecretSave,
-    intervalMs,
-    label,
-    launchAgentsDir,
-    nodeBin,
-    cwd,
-    limit,
-    limitProvided,
-    watch,
-    derive,
-    operatorCompact,
-    skipSemanticReindex,
-    skipEvalClosure,
-    skipCognitiveTick,
-    skipDaemonMaintenance,
-    inlineReferenceValues,
-    includeReferenceParameters,
-    acpStatus,
-    acpManager,
-    acpToAgent,
-    force,
-    apply,
-    root,
-    file,
-    globalDb,
-    measure,
-    path
+    scope: route.scope,
+    dbPath: route.dbPath,
+    reason: route.reason,
+    slug: route.project?.slug,
   };
 }
 
-function handleSecrets(args: ParsedArgs): void {
-  const [, subcommand, id] = args.command;
-  const secretsDbPath = resolve(args.secretsDb);
-  // Read verbs must not auto-create a decoy secrets DB. On a missing store,
-  // report the resolved absolute path instead of silently returning empty.
-  if (subcommand !== "save" && !existsSync(secretsDbPath)) {
-    if (subcommand === "get") {
-      fail(`No secrets DB at ${secretsDbPath}`);
+function withReadStore<T>(
+  args: ParsedArgs,
+  route: Route,
+  env: NodeJS.ProcessEnv,
+  run: (store: Store) => T,
+): T {
+  if (!args.db && !args.project && route.scope === "home") {
+    const store = new FederatedReadStore(localGraphPaths(env, registryDbPath(env)));
+    try {
+      return run(store);
+    } finally {
+      store.close();
     }
-    console.log(
-      JSON.stringify(
-        {
-          db: secretsDbPath,
-          exists: false,
-          note: `no secrets DB at ${secretsDbPath}`,
-          stats: { secretNodes: 0, secretRelations: 0 },
-          secrets: [],
-        },
-        null,
-        2,
-      ),
-    );
-    return;
   }
-  const secrets = new SecretGraphStore(args.secretsDb);
+  const store = openWriteStore(route.dbPath);
   try {
-    if (!subcommand || subcommand === "status") {
-      console.log(JSON.stringify({ db: secretsDbPath, stats: secrets.stats() }, null, 2));
-      return;
-    }
-
-    if (subcommand === "list") {
-      console.log(JSON.stringify({ db: secretsDbPath, secrets: secrets.list() }, null, 2));
-      return;
-    }
-
-    if (subcommand === "save") {
-      if (!args.confirmSecretSave) {
-        fail("Refusing to save secret without --confirm-secret-save");
-      }
-      if (!args.title) {
-        fail("Expected --title for secrets save");
-      }
-      if (!args.passwordStdin || !args.valueStdin) {
-        fail("secrets save requires --password-stdin and --value-stdin. Stdin format: first line password, remaining bytes secret.");
-      }
-      const bundle = readPasswordAndRemainingStdin();
-      const node = secrets.save({
-        title: args.title,
-        plaintext: bundle.remaining,
-        password: bundle.password,
-        tags: args.tags,
-        scope: args.scope
-      });
-      console.log(JSON.stringify({ saved: true, db: secretsDbPath, secret: node }, null, 2));
-      return;
-    }
-
-    if (subcommand === "get") {
-      if (!id) {
-        fail("Expected secret id for secrets get");
-      }
-      if (!args.passwordStdin) {
-        fail("secrets get requires --password-stdin");
-      }
-      const password = readPasswordLineFromStdin();
-      const node = secrets.get(id, password);
-      if (!node) {
-        fail(`Secret not found: ${id}`);
-      }
-      console.log(JSON.stringify(node, null, 2));
-      return;
-    }
-
-    fail(`Unknown secrets command: ${args.command.join(" ")}`);
+    return run(store);
   } finally {
-    secrets.close();
+    store.close();
   }
 }
 
-function readJsonArg(args: ParsedArgs): unknown {
-  if (!args.jsonPath) {
-    fail("Expected --json <path>");
-  }
-  let raw: string;
-  try {
-    raw = readFileSync(args.jsonPath, "utf8");
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException)?.code;
-    fail(code === "ENOENT" ? `No such --json file: ${args.jsonPath}` : `Cannot read --json file ${args.jsonPath}: ${(error as Error).message}`);
-  }
-  if (raw.trim() === "") {
-    fail(`--json file is empty: ${args.jsonPath}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    fail(`--json file is not valid JSON (${args.jsonPath}): ${(error as Error).message}`);
-  }
+function openWriteStore(dbPath: string): SqliteStore {
+  ensureDbParent(dbPath);
+  return new SqliteStore(dbPath);
 }
 
-function parseWorkCandidates(input: unknown): WorkCandidateInput[] {
-  const candidates = Array.isArray(input) ? input : isRecord(input) ? input.candidates : undefined;
-  if (!Array.isArray(candidates)) {
-    fail("Expected --json to contain an array of candidates or { \"candidates\": [...] }");
-  }
-  return candidates.map((candidate, index) => {
-    if (!isRecord(candidate) || typeof candidate.title !== "string" || candidate.title.trim() === "") {
-      fail(`Expected candidate ${index + 1} to contain a non-empty title`);
-    }
-    return {
-      id: typeof candidate.id === "string" ? candidate.id : undefined,
-      title: candidate.title,
-      description: typeof candidate.description === "string" ? candidate.description : undefined,
-      impact: optionalNumber(candidate.impact, "impact", index),
-      uncertainty: optionalNumber(candidate.uncertainty, "uncertainty", index),
-      concern: optionalNumber(candidate.concern, "concern", index),
-      dependencyWeight: optionalNumber(candidate.dependencyWeight, "dependencyWeight", index),
-      cost: optionalNumber(candidate.cost, "cost", index),
-      reversibility: optionalNumber(candidate.reversibility, "reversibility", index),
-      novelty: optionalNumber(candidate.novelty, "novelty", index),
-      tags: optionalStringArray(candidate.tags, "tags", index)
-    };
-  });
+function ensureDbParent(dbPath: string): void {
+  if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
 }
 
-function workflowLimit(input: unknown, fallback: number): number {
-  const limit = isRecord(input) && typeof input.limit === "number" ? input.limit : fallback;
-  if (!Number.isFinite(limit) || limit <= 0) {
-    fail("workflow allocate limit must be a positive number");
-  }
-  return Math.floor(limit);
-}
-
-function parseBlindLockInput(input: unknown): BlindLockInput {
-  if (!isRecord(input) || typeof input.title !== "string" || typeof input.prediction !== "string") {
-    fail("Expected blind-lock JSON with title and prediction strings");
-  }
-  return {
-    title: input.title,
-    prediction: input.prediction,
-    expectedBy: typeof input.expectedBy === "string" ? input.expectedBy : undefined,
-    falsifier: typeof input.falsifier === "string" ? input.falsifier : undefined,
-    project: typeof input.project === "string" ? input.project : undefined,
-    path: typeof input.path === "string" ? input.path : undefined,
-    tenant: typeof input.tenant === "string" ? input.tenant : undefined,
-    confidence: optionalNumber(input.confidence, "confidence"),
-    createdAt: typeof input.createdAt === "string" ? input.createdAt : undefined,
-    tags: optionalStringArray(input.tags, "tags")
+function routeOutput(route: Route, env: NodeJS.ProcessEnv): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    scope: route.scope,
+    dbPath: route.dbPath,
+    reason: route.reason,
   };
+  if (route.slug) out.slug = route.slug;
+  if (route.scope === "home") {
+    const locals = localGraphPaths(env, registryDbPath(env));
+    out.unionMembers = locals.length;
+    out.locals = locals.map((member) => member.graph);
+  }
+  return out;
 }
 
-function optionalNumber(value: unknown, key: string, index?: number): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    fail(index === undefined ? `Expected ${key} to be a number` : `Expected candidate ${index + 1} ${key} to be a number`);
-  }
-  return value;
+function readProposal(args: ParsedArgs): WriteProposal {
+  if (!args.jsonPath) throw new Error("--json <proposal.json> is required");
+  const text = args.jsonPath === "-" ? readFileSync(0, "utf8") : readFileSync(args.jsonPath, "utf8");
+  return JSON.parse(text) as WriteProposal;
 }
 
-function trendScaffoldMeasure(value: string | undefined): "effective_confidence" | "member_count" | "numeric" | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === "effective_confidence" || value === "member_count" || value === "numeric") {
-    return value;
-  }
-  fail("--measure for recall trend must be effective_confidence, member_count, or numeric");
+function readJsonValue(args: ParsedArgs, label: string): unknown {
+  if (!args.jsonPath) throw new Error("--json <file> is required");
+  if (args.jsonPath === "-") return JSON.parse(readFileSync(0, "utf8")) as unknown;
+  return readJsonFile(args.jsonPath, label);
 }
 
-function optionalStringArray(value: unknown, key: string, index?: number): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    fail(index === undefined ? `Expected ${key} to be string[]` : `Expected candidate ${index + 1} ${key} to be string[]`);
-  }
-  return value;
+function outJson(out: (text: string) => void, value: unknown): void {
+  out(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function queryFrom(args: ParsedArgs, start: number, error: string): string {
+  const query = args.command.slice(start).join(" ").trim();
+  if (!query) throw new Error(error);
+  return query;
 }
 
 function requireValue(argv: string[], index: number, flag: string): string {
   const value = argv[index];
-  if (!value) {
-    fail(`Expected value after ${flag}`);
-  }
+  if (!value) throw new Error(`${flag} requires a value`);
   return value;
 }
 
-function requireCommandValue(command: string[], index: number, label: string): string {
-  const value = command[index];
-  if (!value) {
-    fail(`Expected ${label}`);
-  }
-  return value;
+function positiveInt(value: string, flag: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${flag} must be a positive integer`);
+  return parsed;
 }
 
-function printHelp(): void {
-  console.log(`Recall CLI
+function helpText(): string {
+  return `Recall MAL CLI
 
 Commands:
-  recall init [--db path]                                        register cwd as a project and create its local
-  recall where                                                   show routing scope (project/home/explicit) and, for home, the union locals
+  recall project init [--slug name] [--description text] [--root path] [--db path]
+  recall project list
+  recall project where
+  recall where
+  recall status [--db path] [--project slug]
+  recall compile "task" [--words 900] [--limit 10] [--db path] [--project slug]
+  recall search "query" [--limit 10] [--db path] [--project slug]
+  recall cell show <key-or-handle> [--db path] [--project slug]
+  recall operate once [--derive] [--db path] [--project slug]
+  recall render [--db path] [--project slug]
+  recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]
+  recall export [--db path] [--project slug]
+  recall import archive --json archive.json [--apply] [--db path] [--project slug]
+  recall import mem0 --json mem0.json [--apply] [--db path] [--project slug]
+  recall import zep --json zep.json [--apply] [--db path] [--project slug]
+  recall import auto-memory --root path [--apply] [--db path] [--project slug]
+  recall validate --json proposal.json
+  recall admit --json proposal.json [--db path] [--project slug]
   recall version
-  recall status [--db path]
-  recall storage [--db path]
-  recall export [--db path]                                      print a portable JSON archive to stdout
-  recall import --json recall-export.json [--db path] [--force]  restore an archive into an empty db; --force replaces rows
-  recall import auto-memory [--root path] [--project name] [--apply] [--db path]  import Claude Code auto-memory files (dry-run default; --apply writes)
-  recall import local --project name [--tags a,b] [--apply] [--global-db path]  seed the local db from the global graph, scoped by project/tags (dry-run default)
-  recall import mem0 --file export.json [--project name] [--apply] [--db path]  import a Mem0 export (get_all/create_memory_export) as calibrated cells (dry-run default)
-  recall import zep --file export.json [--project name] [--apply] [--db path]   import a Zep graph export; reconstructs supersession from bi-temporal facts (dry-run default)
-  recall acp [status] [--db path]
-  recall acp send --json request.json [--db path]
-  recall acp list [--limit 20] [--acp-status queued] [--db path]
-  recall acp show <request-id> [--db path]
-  recall acp process [--limit 20] [--acp-manager recall-acp-manager] [--acp-to-agent recall-acp-manager] [--db path]
-  recall acp run [--interval-ms 5000] [--limit 20] [--acp-manager recall-acp-manager] [--acp-to-agent recall-acp-manager] [--db path]
-  recall compact [--db path]
-  recall beliefs [--db path]
-  recall trust [--db path]
-  recall calibration [--db path]                                   per-actor stated-confidence vs contradiction outcomes
-  recall maintenance [--derive] [--db path]
-  recall repair [--apply] [--db path]                              prune dangling/unresolvable trust edges (dry-run default; --apply deletes)
-  recall tick [--derive] [--db path]
-  recall page [index|reflections|agent-profile|user-profile|team-metrics|witnesses|workbench|handoffs|objectives|acp-queue|acp-manager] [--project Recall] [--topic memory] [--identity agent:codex] [--limit 25]
-  recall cell show <cell-id-or-address> [--db path]
-  recall validate --json proposal.json [--db path]
-  recall admit --json proposal.json [--db path] [--review]        agent/debug path; normal memory uses MCP recall_write
-  recall write-propose --json proposal.json [--db path] [--review] agent/debug alias; not the user-facing memory flow
-  recall search "query" [--db path]
-  recall semantic "query" [--db path]
-  recall semantic reindex [--db path]
-  recall subgraph [--category memory] [--type witness] [--subject compiler] [--project Recall] [--idea active-memory] [--timestamp 2026-05-21]
-  recall subgraph [--topic a,b] [--entity x] [--identity agent:codex] [--ring runtime]
-  recall compile "task" [--words 900] [--inline-refs] [--reference-parameters] [--db path]
-  recall incept "open objective" [--words 700] [--project name] [--db path]
-  recall workflow allocate --json candidates.json [--limit 8] [--derive] [--db path]
-  recall blind-lock add --json blind-lock.json [--db path]
-  recall rollback list [--db path]
-  recall rollback show <journal-id> [--db path]
-  recall rollback apply <journal-id> [--db path]
-  recall hyperedge add --json hyperedge.json [--db path]
-      hyperedge.json = { "kind": "evidence-bundle", "title": "<required>", "members": [{ "nodeId": "<cell-id>", "role": "claim|verification" }] }
-  recall hyperedge show <hyperedge-id> [--db path]
-  recall hyperedge list [--limit 20] [--db path]
-  recall program add <hyperedge-id> --json program.json [--db path]
-      program.json = { "schemaVersion": "recall.program.v1", "operation": "score|watch|drift|quorum|trend", "params": { "delta": 0.1, "concernTarget": "<cell-id>", "k": 2, "minEff": 0.7, "window": 8, "streak": 3, "measure": "effective_confidence|member_count|numeric", "path": "data.metrics.updates_per_s" } }
-  recall trend "<objective>" [--query q] [--measure effective_confidence|member_count|numeric] [--path data.metrics.value]
-      scaffold a trend program (direction, slope, acceleration over a series) for the agent to fill and attach
-  recall program list [--limit 20] [--db path]
-  recall program show <program-id> [--db path]
-  recall program run <program-id> [--derive] [--db path]
-  recall program runs [--limit 20] [--db path]
-  recall program show-run <program-run-id> [--db path]
-  recall dag add --json overlay.json [--db path]
-  recall dag show <overlay-id> [--db path]
-  recall dag analyze <overlay-id> [--derive] [--db path]
-  recall dag list [--limit 20] [--db path]
-  recall eval run [--derive] [--json suite.json] [--db path]
-  recall eval list [--limit 20] [--db path]
-  recall eval show <eval-run-id> [--db path]
-  recall operate once [--derive] [--compact] [--no-semantic] [--no-eval] [--no-tick] [--no-daemon] [--db path]
-  recall operate list [--limit 20] [--db path]
-  recall operate show <operator-run-id> [--db path]
-  recall mcp config [--db path]
-  recall tui [--watch] [--interval-ms 5000] [--db path]
-  recall daemon status [--db path]
-  recall daemon plist [--db path] [--interval-ms 60000]
-  recall daemon install [--db path] [--interval-ms 60000]
-  recall daemon service-status
-  recall daemon uninstall
-  recall daemon run-once [--derive] [--db path]
-  recall daemon run [--derive] [--interval-ms 60000] [--db path]
-  recall secrets status [--secrets-db path]
-  recall secrets list [--secrets-db path]
-  recall secrets save --title "name" --confirm-secret-save --password-stdin --value-stdin [--tags a,b] [--scope local]
-    stdin format for save: first line password, remaining bytes secret
-  recall secrets get <id> --password-stdin [--secrets-db path]
-  recall claude sync                  install/refresh the Claude Code integration (hook, skill, MCP), disable
-                                      built-in auto-memory, and lift existing auto-memory into the global graph
-                                      (RECALL_KEEP_AUTOMEMORY=1 keeps native auto-memory and skips the import)
-  recall claude status                report which integration pieces are installed
-  recall claude disable-auto-memory   set CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 only
-  recall claude enable-auto-memory    re-enable Claude Code built-in auto-memory
-  recall codex sync                   install/refresh the Codex integration (skill, MCP server in config.toml,
-                                      /prompts:recall custom prompt, and a Recall directive in ~/.codex/AGENTS.md).
-                                      Codex has no native-memory kill switch, so displacement is prompt-level via
-                                      the AGENTS.md directive
-  recall codex status                 report which Codex integration pieces are installed
-`);
+`;
 }
 
-function fail(message: string): never {
-  console.error(message);
-  process.exit(1);
-}
-
-function splitCsv(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function subgraphFilterForOutput(args: ParsedArgs): Record<string, string[]> {
-  return {
-    category: args.category,
-    type: args.type,
-    subject: args.subject,
-    project: args.project,
-    idea: args.idea,
-    timestamp: args.timestamp,
-    topics: args.topics,
-    entities: args.entities,
-    identities: args.identities,
-    rings: args.rings
-  };
-}
-
-function normalizeAcpRequest(value: unknown): {
-  channel?: string;
-  fromAgent: string;
-  toAgent: string;
-  action: import("./core/types.js").AcpRequestAction;
-  payload?: Record<string, unknown>;
-} {
-  if (!isRecord(value)) {
-    fail("Expected ACP request JSON object");
-  }
-  if (typeof value.fromAgent !== "string" || typeof value.toAgent !== "string" || !isAcpRequestAction(value.action)) {
-    fail("ACP request JSON requires fromAgent, toAgent, and a supported action");
-  }
-  return {
-    channel: typeof value.channel === "string" ? value.channel : undefined,
-    fromAgent: value.fromAgent,
-    toAgent: value.toAgent,
-    action: value.action,
-    payload: isRecord(value.payload) ? value.payload : undefined
-  };
-}
-
-function acpStatusFilter(args: ParsedArgs): import("./core/types.js").AcpRequestStatus | undefined {
-  return isAcpRequestStatus(args.acpStatus) ? args.acpStatus : undefined;
-}
-
-function acpRequestListItem(request: AcpRequest): Record<string, unknown> {
-  return {
-    id: request.id,
-    status: request.status,
-    action: request.action,
-    channel: request.channel,
-    fromAgent: request.fromAgent,
-    toAgent: request.toAgent,
-    createdAt: request.createdAt,
-    updatedAt: request.updatedAt,
-    processedAt: request.processedAt,
-    payloadKeys: Object.keys(request.payload).length,
-    hasResponse: request.response !== null,
-    error: request.error
-  };
-}
-
-function pageOptions(args: ParsedArgs) {
-  return {
-    project: args.project[0],
-    topic: args.topics[0],
-    identity: args.identities[0],
-    limit: args.limitProvided ? args.limit : 25
-  };
-}
-
-function runDaemonLoop(store: SQLiteRecallStore, intervalMs: number, derive: boolean): never {
-  console.error(`Recall daemon running outside the LLM every ${intervalMs}ms. Press Ctrl-C to stop.`);
-  const sleepBuffer = new SharedArrayBuffer(4);
-  const sleepArray = new Int32Array(sleepBuffer);
-  for (;;) {
-    console.log(JSON.stringify(runDaemonOnce(store, new Date(), { derive }), null, 2));
-    Atomics.wait(sleepArray, 0, 0, intervalMs);
+function isMain(metaUrl: string): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const modulePath = fileURLToPath(metaUrl);
+  try {
+    return modulePath === realpathSync(entry);
+  } catch {
+    return modulePath === entry;
   }
 }
 
-function runTuiLoop(store: SQLiteRecallStore, intervalMs: number): never {
-  const sleepBuffer = new SharedArrayBuffer(4);
-  const sleepArray = new Int32Array(sleepBuffer);
-  for (;;) {
-    process.stdout.write("\x1b[2J\x1b[H");
-    console.log(renderTui(store));
-    Atomics.wait(sleepArray, 0, 0, intervalMs);
-  }
+if (isMain(import.meta.url)) {
+  process.exitCode = runCli(process.argv.slice(2));
 }
-
-function launchAgentOptions(args: ParsedArgs) {
-  return {
-    label: args.label,
-    dbPath: args.db,
-    intervalMs: args.intervalMs,
-    nodeBin: args.nodeBin,
-    cliPath: resolve(process.argv[1] ?? "dist/src/cli.js"),
-    cwd: args.cwd,
-    launchAgentsDir: args.launchAgentsDir
-  };
-}
-
-function mcpConfig(db: string): Record<string, unknown> {
-  return {
-    mcpServers: {
-      recall: {
-        command: "recall-mcp",
-        env: {
-          RECALL_DB: db
-        }
-      }
-    }
-  };
-}
-
-function derivationOptions(args: ParsedArgs) {
-  return {
-    scope: {
-      project: args.project[0] ?? "Recall",
-      tenant: args.scope,
-      session: "cli-derivation"
-    },
-    actorId: "recall-cli",
-    actorDisplay: "Recall CLI",
-    producedBy: "recall-cli"
-  };
-}
-
-function operatingCycleOptions(args: ParsedArgs) {
-  return {
-    derive: args.derive,
-    compact: args.operatorCompact,
-    semanticReindex: !args.skipSemanticReindex,
-    evalClosure: !args.skipEvalClosure,
-    cognitiveTick: !args.skipCognitiveTick,
-    daemonMaintenance: !args.skipDaemonMaintenance,
-    lease: {
-      owner: "recall-cli"
-    }
-  };
-}
-
-function operatorRunListItem(run: OperatorRun): Record<string, unknown> {
-  const phases = Array.isArray(run.result.phases) ? run.result.phases.filter(isRecord) : [];
-  const writes = isRecord(run.result.writes) ? run.result.writes : {};
-  return {
-    id: run.id,
-    status: run.status,
-    createdAt: run.createdAt,
-    summary: run.summary,
-    phases: phases.length,
-    failedPhases: phases.filter((phase) => phase.status === "failed").length,
-    skippedPhases: phases.filter((phase) => phase.status === "skipped").length,
-    acceptedWrites: typeof writes.accepted === "number" ? writes.accepted : 0,
-    rejectedWrites: typeof writes.rejected === "number" ? writes.rejected : 0
-  };
-}
-
-function dagDerivationOptions(args: ParsedArgs) {
-  return {
-    ...derivationOptions(args),
-    createdAt: new Date().toISOString()
-  };
-}
-
-function readPasswordAndRemainingStdin(): { password: string; remaining: string } {
-  const stdin = readFileSync(0, "utf8");
-  const newline = stdin.indexOf("\n");
-  if (newline === -1) {
-    fail("Expected first stdin line to be password and remaining stdin to be secret value");
-  }
-  const password = stdin.slice(0, newline).trimEnd();
-  const remaining = stdin.slice(newline + 1);
-  if (remaining.length === 0) {
-    fail("Secret value cannot be empty");
-  }
-  return { password, remaining };
-}
-
-function readPasswordLineFromStdin(): string {
-  const stdin = readFileSync(0, "utf8");
-  const newline = stdin.indexOf("\n");
-  const password = (newline === -1 ? stdin : stdin.slice(0, newline)).trimEnd();
-  if (password.length === 0) {
-    fail("Password cannot be empty");
-  }
-  return password;
-}
-
-main();
