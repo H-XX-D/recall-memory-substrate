@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 - 2026-07-02
+
+- Fixes the build to remove `dist/` before compiling, so the published tarball no longer carries stale artifacts from the previous nested source layout. 0.5.0 was functional but shipped dead `dist/src/**` files.
+
 ## 0.5.0 - 2026-07-02
 
 Transitions the published `recall-memory-substrate` package onto the v5 Memory
