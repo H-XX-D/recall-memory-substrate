@@ -48,7 +48,6 @@
     "!dist/**/*.test.js",
     "!dist/**/*.test.d.ts",
     "python/*.py",
-    "docs",
     "README.md",
     "CHANGELOG.md",
     "CITATION.cff",
