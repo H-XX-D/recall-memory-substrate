@@ -46,7 +46,7 @@ Its answer, compressed: what kills a long session is context compaction. The win
 
 It conceded the cost without being asked, which I appreciated. The write discipline burns tokens every turn, and on a ten-minute task it may never pay back. On a long run it amortizes, and the writes double as an audit trail of what the agent did and why.
 
-One operational footnote if you want to reproduce any of this: Claude Code's native auto-memory shadows an external store while it is on. We tested arming the agent every way we could think of; it kept writing flat .md files regardless. CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 is the switch. The two do not coexist.
+One operational footnote if you want to reproduce any of this: Claude Code's native auto-memory shadows an external store while it is on. We tested arming the agent every way we could think of; it kept writing flat .md files regardless. CLAUDE\_CODE\_DISABLE\_AUTO\_MEMORY=1 is the switch. The two do not coexist.
 
 ## The two questions, again
 
