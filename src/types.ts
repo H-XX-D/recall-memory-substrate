@@ -48,6 +48,33 @@ export interface Edge {
   weight: number;
 }
 
+// Rich overlays ported from model-A. Keyed by cell key; orthogonal to cells/edges.
+export interface Hyperedge {
+  id: string;
+  kind: string;
+  title: string;
+  members: string[]; // cell keys
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SemanticVector {
+  nodeId: string; // cell key
+  backend: string;
+  dims: number;
+  vector: number[];
+  indexedAt: string;
+}
+
+export interface DagOverlay {
+  id: string;
+  title: string;
+  nodeIds: string[];
+  edges: { source: string; target: string }[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 // Provenance: who produced the cell and how trustworthy the production was.
 // producedBy is the actor id calibration keys on; signatureStatus is the
 // cryptographic-attestation upgrade path (unsigned by default until a key signs).
