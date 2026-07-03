@@ -132,3 +132,13 @@ test("store round-trips a semantic vector and a dag overlay", () => {
   assert.equal(store.listDagOverlays().length, 1);
   store.close();
 });
+
+test("cellsCreatedSince filters and orders by the generated created_at column", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "obs", title: "old", body: "x", confidence: 0.7 }, { key: "o", now: "2026-01-01T00:00:00Z" }));
+  store.put(buildCell({ kind: "obs", title: "mid", body: "x", confidence: 0.7 }, { key: "m", now: "2026-06-01T00:00:00Z" }));
+  store.put(buildCell({ kind: "obs", title: "new", body: "x", confidence: 0.7 }, { key: "n", now: "2026-07-01T00:00:00Z" }));
+  const recent = store.cellsCreatedSince("2026-05-01T00:00:00Z");
+  assert.deepEqual(recent.map((c) => c.key), ["n", "m"]); // DESC by created_at, old excluded
+  store.close();
+});

@@ -104,6 +104,18 @@ export class SqliteStore implements Store {
     return rows.map((r) => this.hydrate(r));
   }
 
+  // Temporal query pushed down to the indexed created_at generated column: no
+  // scan-and-parse, SQLite filters and orders. Backs the "what changed since"
+  // read without loading the whole graph into app memory.
+  cellsCreatedSince(iso: string, limit = 100): Cell[] {
+    const rows = this.db
+      .prepare(
+        `SELECT key, json FROM cells WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(iso, limit) as unknown as CellRow[];
+    return rows.map((r) => this.hydrate(r));
+  }
+
   neighbors(key: string): NeighborLink[] {
     const links: NeighborLink[] = [];
     const out = this.db

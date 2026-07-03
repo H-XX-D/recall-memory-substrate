@@ -48,5 +48,37 @@ export function openDb(path = ":memory:"): Db {
       edges_json TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL
     )
   `);
+  ensureGeneratedColumns(db);
   return db;
+}
+
+// The queryable surface of the cell blob. Each column is DERIVED from the json
+// via json_extract (VIRTUAL, so no write duplication and no drift), then indexed.
+// This is what lets MAL push temporal/scope/rank predicates down into SQLite
+// instead of scanning and parsing every row in app code. Adding a promotable
+// field later is one entry here plus its index; the blob stays canonical.
+const GENERATED_COLUMNS: { name: string; type: string; path: string }[] = [
+  { name: "created_at", type: "TEXT", path: "$.createdAt" },
+  { name: "updated_at", type: "TEXT", path: "$.updatedAt" },
+  { name: "project", type: "TEXT", path: "$.scope.project" },
+  { name: "effective", type: "REAL", path: "$.scores.effective" },
+];
+
+// Idempotent: adds any missing generated column (works on both fresh and already
+// populated DBs, since VIRTUAL generated columns can be added via ALTER TABLE),
+// then ensures each column's index. Safe to run on every open.
+function ensureGeneratedColumns(db: Db): void {
+  // table_xinfo (not table_info) is required: table_info omits generated columns,
+  // so on reopen the check would miss them and re-run ALTER (duplicate column).
+  const existing = new Set(
+    (db.prepare("PRAGMA table_xinfo(cells)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  for (const col of GENERATED_COLUMNS) {
+    if (!existing.has(col.name)) {
+      db.exec(
+        `ALTER TABLE cells ADD COLUMN ${col.name} ${col.type} GENERATED ALWAYS AS (json_extract(json, '${col.path}')) VIRTUAL`,
+      );
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_cells_${col.name} ON cells(${col.name})`);
+  }
 }

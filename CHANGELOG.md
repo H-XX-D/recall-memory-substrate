@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 - 2026-07-03
+
+Keeps SQL query ability while the cell stays an evolvable JSON blob: MAL becomes the operational language over indexed SQLite columns rather than trading queryability away.
+
+- Adds VIRTUAL generated columns on `cells` derived from the JSON blob via `json_extract` (`created_at`, `updated_at`, `project`, `effective`), each indexed. No write duplication and no drift: the blob stays the single source of truth; the columns are computed and indexed by SQLite. Idempotent on open (uses `PRAGMA table_xinfo` so reopen does not re-add columns), so migrated and existing DBs gain them automatically.
+- Adds `SqliteStore.cellsCreatedSince(iso, limit)`, a temporal read pushed down to the indexed `created_at` column instead of scanning and parsing every row. Verified against a 1,184-cell store: the query plan uses `idx_cells_created_at`.
+
 ## 0.6.0 - 2026-07-03
 
 Phase 1 of the subsystem port: store foundation + data migration. The MAL store gains the rich overlay tables and can read pre-0.6 memory.
