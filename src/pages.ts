@@ -3,6 +3,14 @@
 // ACP pages (acp-queue, acp-manager) are dropped; no ACP table exists in MAL.
 import type { Cell, Kind, Store, StoreStats } from "./types.js";
 
+// SqliteStore-only accessor (see store.ts): a thin wrapper over activeWhere
+// that pushes status='active' AND project= down into SQL. Not on the Store
+// interface, so callers here feature-detect with "activeByProject" in store
+// before calling, the same convention subgraph.ts uses for activeWhere.
+interface StoreWithActiveByProject extends Store {
+  activeByProject(project: string, opts?: { since?: string; limit?: number }): Cell[];
+}
+
 // The set of valid page names. acp-queue and acp-manager are intentionally absent.
 export type PageName =
   | "index"
@@ -163,7 +171,16 @@ export function getRecallPage(
       cells: [],
     };
   }
-  const active = store.active();
+  // When filter.project is set and the store supports the push-down, seed
+  // the pool from activeByProject instead of store.active(): SQL narrows to
+  // that project's active cells (newest-updated first) before the kind
+  // remap and topics filtering run app-side. LIMIT stays app-side (passed
+  // through applyFilter below) because it must apply after selectPage/topics
+  // narrow the pool further, or it would under-fill.
+  const active =
+    filter.project !== undefined && "activeByProject" in store
+      ? (store as StoreWithActiveByProject).activeByProject(filter.project, { since: filter.since })
+      : store.active();
   const selected = selectPage(name, active);
   const filtered = applyFilter(selected, filter);
   return {

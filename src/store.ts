@@ -185,6 +185,19 @@ export class SqliteStore implements Store {
     return rows.map((r) => this.hydrate(r));
   }
 
+  // SqliteStore only (NOT on the Store interface, NOT FederatedReadStore):
+  // pages.ts feature-detects with "activeByProject" in store to seed the cell
+  // pool for a project-filtered page instead of filtering store.active()
+  // app-side. Thin wrapper over activeWhere (Task 12): same status='active'
+  // predicate, same ORDER BY updated_at DESC, key ASC. LIMIT is intentionally
+  // not exposed here as a SQL LIMIT because pages.ts always applies topics
+  // filtering and the kind remap after seeding, and a SQL LIMIT before that
+  // app-side filtering would under-fill; callers that want LIMIT pass it
+  // through opts and it stays app-side downstream.
+  activeByProject(project: string, opts: { since?: string; limit?: number } = {}): Cell[] {
+    return this.activeWhere({ project, since: opts.since, limit: opts.limit });
+  }
+
   neighbors(key: string): NeighborLink[] {
     const links: NeighborLink[] = [];
     const out = this.db

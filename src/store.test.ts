@@ -370,6 +370,46 @@ test("activeWhere applies LIMIT only when the caller passes it", () => {
   store.close();
 });
 
+test("activeByProject returns only that project's active cells, newest-updated first", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "a", body: "x", confidence: 0.7, project: "p1" }, { key: "a" });
+  store.put({ ...a, updatedAt: "2026-05-01T00:00:00Z" });
+  const b = buildCell({ kind: "obs", title: "b", body: "x", confidence: 0.7, project: "p1" }, { key: "b" });
+  store.put({ ...b, updatedAt: "2026-06-01T00:00:00Z" });
+  const c = buildCell({ kind: "dec", title: "c", body: "x", confidence: 0.7, project: "p2" }, { key: "c" });
+  store.put({ ...c, updatedAt: "2026-07-01T00:00:00Z" });
+  const d = buildCell({ kind: "dec", title: "d", body: "x", confidence: 0.7, project: "p1" }, { key: "d" });
+  store.put({ ...d, status: "superseded" });
+
+  const rows = store.activeByProject("p1");
+  assert.deepEqual(rows.map((r) => r.key), ["b", "a"]); // p2 and superseded excluded, newest first
+  store.close();
+});
+
+test("activeByProject honors since >= updated_at", () => {
+  const store = new SqliteStore(":memory:");
+  const old = buildCell({ kind: "dec", title: "old", body: "x", confidence: 0.7, project: "p1" }, { key: "old" });
+  store.put({ ...old, updatedAt: "2026-01-01T00:00:00Z" });
+  const recent = buildCell({ kind: "dec", title: "recent", body: "x", confidence: 0.7, project: "p1" }, { key: "recent" });
+  store.put({ ...recent, updatedAt: "2026-07-01T00:00:00Z" });
+
+  const rows = store.activeByProject("p1", { since: "2026-05-01T00:00:00Z" });
+  assert.deepEqual(rows.map((r) => r.key), ["recent"]);
+  store.close();
+});
+
+test("activeByProject applies LIMIT only when the caller passes it", () => {
+  const store = new SqliteStore(":memory:");
+  for (let i = 0; i < 5; i++) {
+    store.put(buildCell({ kind: "dec", title: `t${i}`, body: "x", confidence: 0.7, project: "p1" }, { key: `k${i}` }));
+  }
+  const limited = store.activeByProject("p1", { limit: 2 });
+  assert.equal(limited.length, 2);
+  const unlimited = store.activeByProject("p1");
+  assert.equal(unlimited.length, 5);
+  store.close();
+});
+
 test("listSemanticVectorIds returns all stored node_ids", () => {
   const store = new SqliteStore(":memory:");
   const ts = "2026-07-03T00:00:00Z";

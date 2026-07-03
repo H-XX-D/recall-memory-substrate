@@ -8,6 +8,26 @@ import {
   type PageName,
   type PageFilter,
 } from "./pages.js";
+import type { Cell, Store } from "./types.js";
+
+// A minimal Store stand-in that deliberately omits activeByProject, forcing
+// getRecallPage/buildPageIndex down the store.active() + app-side filter
+// branch, mirroring subgraph.test.ts's withoutActiveWhere. Other Store
+// members throw if pages.ts ever comes to depend on them.
+function withoutActiveByProject(store: { active(): Cell[]; stats(): ReturnType<Store["stats"]> }): Store {
+  return new Proxy(
+    { active: () => store.active(), stats: () => store.stats() },
+    {
+      get(target, prop, receiver) {
+        if (prop in target) return Reflect.get(target, prop, receiver);
+        throw new Error(`withoutActiveByProject stub: unexpected Store member accessed: ${String(prop)}`);
+      },
+      has(target, prop) {
+        return prop in target;
+      },
+    },
+  ) as unknown as Store;
+}
 
 // Helper: create and insert a cell of a given kind at the given updatedAt time.
 function seedCell(
@@ -217,6 +237,107 @@ test("buildPageIndex top projects and topics are correct", () => {
   const topTopic = idx.topTopics[0];
   assert.ok(topTopic, "should have at least one topic");
   assert.equal(topTopic.topic, "perf");
+});
+
+test("getRecallPage calls activeByProject (not active) when filter.project is set and the store supports it", () => {
+  const store = new SqliteStore();
+  seedCell(store, "obj", "goal-p1", { project: "p1" });
+  seedCell(store, "obj", "goal-p2", { project: "p2" });
+
+  let activeByProjectCalls = 0;
+  let activeCalls = 0;
+  const spy = new Proxy(store, {
+    get(target, prop, receiver) {
+      if (prop === "activeByProject") {
+        activeByProjectCalls++;
+      } else if (prop === "active") {
+        activeCalls++;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as unknown as SqliteStore;
+
+  const page = getRecallPage("objectives", spy, { project: "p1" });
+  assert.equal(page.cells.length, 1);
+  assert.equal(activeByProjectCalls, 1, "activeByProject should be called once");
+  assert.equal(activeCalls, 0, "active() should not be called on the push-down path");
+  store.close();
+});
+
+test("golden: getRecallPage over SqliteStore with a project filter equals the same call against a store lacking activeByProject", () => {
+  const store = new SqliteStore();
+  seedCell(store, "obj", "goal-p1-a", { project: "p1", updatedAt: "2026-01-01T00:00:00Z" });
+  seedCell(store, "tsk", "task-p1-b", { project: "p1", updatedAt: "2026-02-01T00:00:00Z" });
+  seedCell(store, "rsk", "risk-p1-c", { project: "p1", updatedAt: "2026-03-01T00:00:00Z" });
+  seedCell(store, "obj", "goal-p2", { project: "p2", updatedAt: "2026-04-01T00:00:00Z" });
+  seedCell(store, "ref", "retro-p1", { project: "p1", updatedAt: "2026-05-01T00:00:00Z" }); // wrong kind
+
+  const filter: PageFilter = { project: "p1" };
+
+  // Fast path: activeByProject push-down inside getRecallPage (SqliteStore branch).
+  const fast = getRecallPage("objectives", store, filter);
+
+  // App-side reference: a Store-shaped wrapper without activeByProject, forcing
+  // getRecallPage down the store.active() + applyFilter branch, over the same data.
+  const plainStore = withoutActiveByProject(store);
+  const appSide = getRecallPage("objectives", plainStore, filter);
+
+  assert.deepEqual(fast.cells.map((c) => c.key), appSide.cells.map((c) => c.key));
+  assert.equal(fast.cells.length, 3);
+  store.close();
+});
+
+test("golden: getRecallPage honors since together with project on both the push-down and app-side paths", () => {
+  const store = new SqliteStore();
+  seedCell(store, "obj", "old-goal", { project: "p1", updatedAt: "2026-01-01T00:00:00Z" });
+  seedCell(store, "obj", "new-goal", { project: "p1", updatedAt: "2026-06-01T00:00:00Z" });
+  seedCell(store, "obj", "other-project", { project: "p2", updatedAt: "2026-06-01T00:00:00Z" });
+
+  const filter: PageFilter = { project: "p1", since: "2026-03-01T00:00:00Z" };
+
+  const fast = getRecallPage("objectives", store, filter);
+  const plainStore = withoutActiveByProject(store);
+  const appSide = getRecallPage("objectives", plainStore, filter);
+
+  assert.deepEqual(fast.cells.map((c) => c.key), appSide.cells.map((c) => c.key));
+  assert.equal(fast.cells.length, 1);
+  assert.equal(fast.cells[0]!.title, "new-goal");
+  store.close();
+});
+
+test("golden: buildPageIndex is unaffected by activeByProject availability (no project filter applies)", () => {
+  const store = new SqliteStore();
+  seedCell(store, "ref", "r1", { project: "p1" });
+  seedCell(store, "obj", "o1", { project: "p2" });
+
+  const fast = buildPageIndex(store);
+  const plainStore = withoutActiveByProject(store);
+  const appSide = buildPageIndex(plainStore);
+
+  assert.deepEqual(fast.kindCounts, appSide.kindCounts);
+  assert.deepEqual(fast.topProjects, appSide.topProjects);
+  store.close();
+});
+
+test("getRecallPage still applies topics filter and kind remap after activeByProject seeds the pool", () => {
+  const store = new SqliteStore();
+  seedCell(store, "obj", "goal-alpha", { project: "p1", topics: ["alpha"] });
+  seedCell(store, "obj", "goal-beta", { project: "p1", topics: ["beta"] });
+  seedCell(store, "ref", "retro-alpha", { project: "p1", topics: ["alpha"] }); // wrong kind, same project
+
+  const page = getRecallPage("objectives", store, { project: "p1", topics: ["alpha"] });
+  assert.equal(page.cells.length, 1);
+  assert.equal(page.cells[0]!.title, "goal-alpha");
+  store.close();
+});
+
+test("getRecallPage with project + limit still caps app-side after activeByProject seeds the pool", () => {
+  const store = new SqliteStore();
+  for (let i = 0; i < 5; i++) seedCell(store, "ref", `retro-${i}`, { project: "p1" });
+
+  const page = getRecallPage("reflections", store, { project: "p1", limit: 2 });
+  assert.equal(page.cells.length, 2);
+  store.close();
 });
 
 // Compile-time exhaustiveness: if PageName union had unknown keys,
