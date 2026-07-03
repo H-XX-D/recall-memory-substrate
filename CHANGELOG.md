@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 - 2026-07-03
+
+Phase 2 of the subsystem port: retrieval and compile richness. Semantic search, hybrid fusion re-ranking, and curated views land on the MAL base.
+
+- Adds `src/semantic.ts`: a hash-fallback embedding core (`hashEmbedding`, `cosine`, `embedTextRecord` with an optional HTTP-via-curl backend), `indexCell`, and `semanticSearch` (cosine scan with a dims-mismatch guard). Every admitted cell is auto-indexed into `semantic_index`, and a new `recall_semantic` MCP tool exposes cosine search.
+- Adds `src/retrieval.ts`: a shared Unicode FTS phrase builder (reused by the store), and `fuseCandidates`, a hybrid re-ranker combining normalized BM25, a graph-degree prior, the stored effective-confidence, and recency decay, with per-kind lexical factors (`TASK_CONTEXT_KIND_FACTOR`).
+- `compileContext` now fetches a wide candidate pool and drives packet ordering through the fusion, so a high-confidence low-BM25 cell can outrank a saturated keyword stub; challenged cells surface as low-trust.
+- Adds `src/references.ts`: cell-reference parsing/resolution and field-path addressing over a cell (`resolveCellReference`, `cellReferenceView`, `selectCellPath`), plus a `recall_ref` MCP tool.
+- Adds `src/pages.ts`: curated named views over the graph by kind (`getRecallPage`, `buildPageIndex`), plus a `recall_page` MCP tool.
+- Verified against the migrated 1,184-cell store: semantic search, fused compile ordering, and pages all return sensible results.
+
 ## 0.6.1 - 2026-07-03
 
 Keeps SQL query ability while the cell stays an evolvable JSON blob: MAL becomes the operational language over indexed SQLite columns rather than trading queryability away.
