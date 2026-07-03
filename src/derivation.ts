@@ -53,6 +53,12 @@ export function derivationHash(kind: DerivationKind, value: unknown): string {
 // duplicate result (no put, no supersede walk, no semantic indexing). Only
 // when the key is unoccupied does the proposal actually admit, pinned to
 // that key so the next identical derivation collides with it.
+//
+// A non-active occupant (superseded or annexed) must never be overwritten:
+// store.put is INSERT OR REPLACE, so pinning a new cell to that key would
+// silently destroy the historical row and its lineage. In that case admit
+// without a key override, so the re-derivation lands under a fresh random
+// key instead, mirroring the legacy re-derive-under-a-new-id semantics.
 export function deriveAdmit(
   store: Store,
   proposal: WriteProposal,
@@ -69,6 +75,9 @@ export function deriveAdmit(
       warnings: ["derivation key already admitted: " + key],
       attenuations: [],
     };
+  }
+  if (existing) {
+    return admit(proposal, { store, now });
   }
   return admit(proposal, { store, now, key });
 }

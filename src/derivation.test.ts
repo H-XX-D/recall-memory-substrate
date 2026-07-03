@@ -8,6 +8,7 @@ import {
   sortJson,
   stableJson,
 } from "./derivation.js";
+import { admit } from "./admission.js";
 import { buildCell } from "./build.js";
 import { SqliteStore } from "./store.js";
 import type { DagAnalysis } from "./dag.js";
@@ -115,6 +116,43 @@ test("deriveAdmit admits fresh when the key is not found in the store", () => {
     assert.equal(result.accepted, true);
     assert.equal(result.duplicateOf, undefined);
     assert.equal(result.cell?.key, key);
+  } finally {
+    store.close();
+  }
+});
+
+test("deriveAdmit re-derives under a fresh key when the derived key holds a non-active (superseded) cell, leaving the historical row untouched", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const key = derivationHash("program_run", { programKey: "p3", output: {} });
+    const now = "2026-07-03T00:00:00Z";
+
+    const first = deriveAdmit(store, proposal({ body: "original body" }), key, now);
+    assert.equal(first.accepted, true);
+    assert.equal(first.cell?.key, key);
+
+    // Supersede the derived cell through the normal admit path, not deriveAdmit,
+    // since a fresh key is expected to be minted for the superseding cell.
+    const supersede = admit(
+      { ...proposal({ title: "supersedes it" }), edges: [{ relation: "supersedes", target: key }] },
+      { store, now },
+    );
+    assert.equal(supersede.accepted, true);
+    assert.equal(store.get(key)?.status, "superseded");
+
+    const originalBody = store.get(key)!.body;
+
+    // Re-derive with the same key and proposal: the key now holds a superseded
+    // cell, so this must not land there and must not destroy it.
+    const redo = deriveAdmit(store, proposal({ body: "original body" }), key, now);
+
+    const stillSuperseded = store.get(key)!;
+    assert.equal(stillSuperseded.status, "superseded");
+    assert.equal(stillSuperseded.body, originalBody);
+
+    assert.equal(redo.accepted, true);
+    assert.notEqual(redo.cell?.key, key);
+    assert.equal(redo.duplicateOf, undefined);
   } finally {
     store.close();
   }
