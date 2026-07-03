@@ -165,11 +165,11 @@ export class FederatedReadStore implements Store {
       return member ? hyperedges.map((h) => prefixHyperedge(member.graph, h)) : [];
     }
 
-    for (const member of this.members) {
-      const hyperedges = member.store.hyperedgesForCell(key, limit);
-      if (hyperedges.length > 0) return hyperedges.map((h) => prefixHyperedge(member.graph, h));
-    }
-    return [];
+    const all = this.members.flatMap((member) =>
+      member.store.hyperedgesForCell(key, limit).map((h) => prefixHyperedge(member.graph, h)),
+    );
+    all.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+    return all.slice(0, limit);
   }
 
   lexicalBackend(): "federated" {

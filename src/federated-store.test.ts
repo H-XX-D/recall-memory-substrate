@@ -239,6 +239,37 @@ test("federated hyperedgesForCell decodes a prefixed key, queries the owning mem
   }
 });
 
+test("federated hyperedgesForCell merges memberships across members for a bare shared key", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.putHyperedge({
+    id: "h-home", kind: "cluster", title: "home edge",
+    members: [{ key: "shared", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  proj.putHyperedge({
+    id: "h-proj", kind: "cluster", title: "proj edge",
+    members: [{ key: "shared", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+
+  const fed = new FederatedReadStore([
+    { graph: "home", store: home, ownsStore: true },
+    { graph: "proj", store: proj, ownsStore: true },
+  ]);
+  try {
+    const merged = fed.hyperedgesForCell("shared");
+    assert.equal(merged.length, 2);
+    assert.deepEqual(merged.map((h) => h.id), ["h-proj", "h-home"]); // newest-first by createdAt
+    const homeEdge = merged.find((h) => h.id === "h-home")!;
+    const projEdge = merged.find((h) => h.id === "h-proj")!;
+    assert.deepEqual(homeEdge.members, [{ key: "home:shared", role: "member", ordinal: 0 }]);
+    assert.deepEqual(projEdge.members, [{ key: "proj:shared", role: "member", ordinal: 0 }]);
+  } finally {
+    fed.close();
+  }
+});
+
 test("federated getSemanticVector resolves across members by prefixed key", () => {
   const home = new SqliteStore(":memory:");
   const proj = new SqliteStore(":memory:");
