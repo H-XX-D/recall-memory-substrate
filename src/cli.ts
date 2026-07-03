@@ -39,7 +39,7 @@ import { SqliteStore } from "./store.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 
 export const CLI_NAME = "recall-memory-substrate";
-export const CLI_VERSION = "0.7.0";
+export const CLI_VERSION = "0.8.0";
 
 export interface CliIo {
   stdout?: (text: string) => void;
