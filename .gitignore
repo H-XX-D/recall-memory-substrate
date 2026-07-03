@@ -74,3 +74,4 @@ scratch-*
 
 # local drafts, never commit
 posts/
+*.tgz
