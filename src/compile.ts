@@ -3,6 +3,12 @@
 // zero-vocabulary or no-match query yields zero hits: a loud miss, not garbage.
 import type { Cell, SearchHit, Store } from "./types.js";
 import { renderMiniIndexLine } from "./render.js";
+import {
+  degreeMap,
+  fuseCandidates,
+  TASK_CONTEXT_KIND_FACTOR,
+  type RankedHit,
+} from "./retrieval.js";
 
 export interface CompileResult {
   hits: SearchHit[];
@@ -49,15 +55,32 @@ export function compileContext(
   store: Store,
   objective: string,
   opts: ContextCompileOptions = {},
+  now: Date = new Date(),
 ): ContextPacket {
   const limit = opts.limit ?? 10;
   const budget = Math.max(80, opts.budgetWords ?? 900);
-  const result = compile(store, objective, { limit });
+
+  // Wide candidate pool: fetch 30 hits so fusion has room to reorder.
+  const wideHits = store.search(objective, { limit: 30 });
+  const allKeys = wideHits.map((h) => h.cell.key);
+  const dm = degreeMap(store, allKeys);
+  const candidates = wideHits.map((h) => ({
+    cell: h.cell,
+    bm25: h.score,
+    degree: dm.get(h.cell.key) ?? 0,
+  }));
+  const fusedHits: RankedHit[] = fuseCandidates(
+    candidates,
+    limit,
+    now,
+    { kindLexicalFactor: TASK_CONTEXT_KIND_FACTOR },
+  );
+
   const stats = store.stats();
   const packet: ContextPacket = {
     objective: trimWords(objective, 40),
     compilerState: [
-      `retrieval=${stats.lexicalBackend}; query="${trimWords(objective, 24)}"; selected_cells=${result.hits.length}; budget_words=${budget}`,
+      `retrieval=${stats.lexicalBackend}; query="${trimWords(objective, 24)}"; selected_cells=${fusedHits.length}; budget_words=${budget}`,
       `graph=cells:${stats.cells}, active:${stats.activeCells}, edges:${stats.edges}, indexed:${stats.indexedCells}`,
       "policy=ids-first; use expansion_handles with inspectCell() for exact fields",
     ],
@@ -75,7 +98,7 @@ export function compileContext(
   };
 
   const seenChallenges = new Set<string>();
-  for (const hit of result.hits) {
+  for (const hit of fusedHits) {
     placeHit(packet, hit);
     pushUnique(packet.cellState, cellStateLine(store, hit.cell));
     pushUnique(packet.expansionHandles, hit.cell.key);
@@ -83,7 +106,9 @@ export function compileContext(
       surfaceIncomingChallenges(packet, store, hit.cell, seenChallenges);
     }
     surfaceDependencies(packet, store, hit.cell);
-    surfaceLowTrust(packet, hit.cell);
+    // Surface challenged cells (effective < conf * 0.5) as low-trust, in
+    // addition to the existing requiresReview / expiry checks.
+    surfaceLowTrust(packet, hit.cell, hit.challenged);
     packet.wordCount = countPacketWords(packet);
     if (packet.wordCount >= budget) break;
   }
@@ -113,7 +138,7 @@ export function formatContextPacket(packet: ContextPacket): string {
   ].join("\n\n");
 }
 
-function placeHit(packet: ContextPacket, hit: SearchHit): void {
+function placeHit(packet: ContextPacket, hit: SearchHit | RankedHit): void {
   const line = `${renderMiniIndexLine(hit.cell, { expand: needsExpansion(hit.cell) })} score(${round2(hit.score)}) [${hit.cell.kind}:${hit.cell.key}]`;
   switch (hit.cell.kind) {
     case "bel":
@@ -190,8 +215,8 @@ function surfaceDependencies(packet: ContextPacket, store: Store, cell: Cell): v
   }
 }
 
-function surfaceLowTrust(packet: ContextPacket, cell: Cell): void {
-  const effectiveCollapsed = cell.scores.effective < cell.scores.conf * 0.5;
+function surfaceLowTrust(packet: ContextPacket, cell: Cell, challenged?: boolean): void {
+  const effectiveCollapsed = challenged ?? cell.scores.effective < cell.scores.conf * 0.5;
   if (!needsExpansion(cell) && !effectiveCollapsed) return;
   const reasons = [
     cell.flags.requiresReview ? "requires_review" : "",

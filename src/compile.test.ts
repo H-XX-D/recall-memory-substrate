@@ -84,7 +84,10 @@ test("compileContext surfaces incoming contradictions for selected cells", () =>
     ),
   );
 
-  const packet = compileContext(store, "watchdog claim", { limit: 1 });
+  // Use limit: 2 so both cells are in the fused packet. Under the fused ranker
+  // the challenger cell may rank above the claim cell (it has an outgoing edge,
+  // boosting degree), but both need to be present for contradiction surfacing.
+  const packet = compileContext(store, "watchdog claim", { limit: 2 });
   assert.ok(packet.conflicts.some((line) => /contradicts/.test(line)));
   assert.ok(packet.expansionHandles.includes("challenge"));
   store.close();
@@ -123,5 +126,125 @@ test("compileContext flags a depends_on dependency that is superseded", () => {
   store.put(buildCell({ kind: "dec", title: "watchdog rollout plan", body: "rests on the config", confidence: 0.8, edges: [{ relation: "depends_on", target: "dep1" }] }, { key: "down1" }));
   const packet = compileContext(store, "watchdog rollout");
   assert.ok(packet.dependencies.some((line) => /superseded/.test(line)));
+  store.close();
+});
+
+// Task 10: wide-pool fused ranking
+test("compileContext: fused ranking places a decision above a ref that out-BM25s it", () => {
+  const store = new SqliteStore(":memory:");
+
+  // A ref stub that spams the query term 6 times in a short title/body,
+  // giving it a high raw-BM25 score due to term density. But it has degree 0
+  // and low effective confidence (0.5).
+  const refCell = buildCell(
+    {
+      kind: "ref",
+      title: "watchdog watchdog watchdog watchdog watchdog watchdog",
+      body: "watchdog watchdog watchdog",
+      confidence: 0.5,
+    },
+    { key: "ref-stub", now: new Date().toISOString() },
+  );
+
+  // A decision that mentions the query token in a longer text (lower BM25 term
+  // density) but has high effective confidence (0.9) and 3 in-edges (degree 3).
+  const decCell = buildCell(
+    {
+      kind: "dec",
+      title: "watchdog decision",
+      body: "decision body text with a lot of other words to reduce term density so BM25 scores lower than the ref stub that spams watchdog many times in a short title",
+      confidence: 0.9,
+    },
+    { key: "dec-main", now: new Date().toISOString() },
+  );
+
+  // Three supporter obs cells that point INTO dec-main, giving it in-degree 3.
+  // They do NOT mention the query term, so they stay out of the result set.
+  for (let i = 0; i < 3; i++) {
+    const supporter = buildCell(
+      {
+        kind: "obs",
+        title: `supporting observation ${i}`,
+        body: "evidence",
+        confidence: 0.8,
+        edges: [{ relation: "supports", target: "dec-main" }],
+      },
+      { key: `sup-${i}`, now: new Date().toISOString() },
+    );
+    store.put(supporter);
+  }
+
+  store.put(refCell);
+  store.put(decCell);
+
+  // With raw BM25: ref-stub scores ~0.69, dec-main ~0.42 (ref comes first).
+  // With fusion: ref kind factor 0.15 crushes ref's lexical term; dec wins
+  // via higher effective confidence (0.9) and degree (3 vs 0).
+  const packet = compileContext(store, "watchdog", { limit: 5 });
+
+  const memLines = packet.relevantMemory;
+  const decIdx = memLines.findIndex((l) => /dec:dec-main/.test(l));
+  const refIdx = memLines.findIndex((l) => /ref:ref-stub/.test(l));
+  assert.ok(decIdx !== -1, "dec-main should appear in relevantMemory");
+  assert.ok(refIdx !== -1, "ref-stub should appear in relevantMemory");
+  assert.ok(
+    decIdx < refIdx,
+    `fused ranking should put dec-main (idx ${decIdx}) before ref-stub (idx ${refIdx})`,
+  );
+
+  store.close();
+});
+
+test("compileContext: a challenged cell appears in staleOrLowTrust", () => {
+  const store = new SqliteStore(":memory:");
+
+  // Build a cell whose effective score will be below 0.5 * conf.
+  // effective starts as conf=0.8, we manually set it lower after building.
+  const cell = buildCell(
+    { kind: "dec", title: "watchdog decision challenged", body: "claim body", confidence: 0.8 },
+    { key: "challenged-cell", now: new Date().toISOString() },
+  );
+  // Collapse effective below 0.5 * conf (0.8*0.5=0.4) to trigger challenged.
+  cell.scores.effective = 0.1;
+  store.put(cell);
+
+  const packet = compileContext(store, "watchdog decision", { limit: 5 });
+
+  assert.ok(
+    packet.staleOrLowTrust.some((l) => /challenged-cell/.test(l)),
+    "challenged cell should appear in staleOrLowTrust",
+  );
+
+  store.close();
+});
+
+test("compileContext: budget/word-count trimming still bounds the packet", () => {
+  const store = new SqliteStore(":memory:");
+  // Insert many cells so the packet would overflow a tight budget without trimming.
+  for (let i = 0; i < 15; i++) {
+    store.put(
+      buildCell(
+        {
+          kind: "obs",
+          title: `watchdog observation with many extra words to inflate count ${i}`,
+          body: `body text that is very long and full of words to push over the word budget threshold for observation cell number ${i}`,
+          confidence: 0.7,
+        },
+        { key: `obs-${i}`, now: new Date().toISOString() },
+      ),
+    );
+  }
+
+  const tightBudget = 100; // very low to force trimming
+  const packet = compileContext(store, "watchdog observation", {
+    limit: 15,
+    budgetWords: tightBudget,
+  });
+
+  assert.ok(
+    packet.wordCount <= tightBudget + 20, // slight tolerance for final trim pass
+    `wordCount ${packet.wordCount} should be near or below budget ${tightBudget}`,
+  );
+
   store.close();
 });
