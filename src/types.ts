@@ -242,4 +242,8 @@ export interface Store {
   putSemanticVector(v: SemanticVector): void;
   getSemanticVector(nodeId: string): SemanticVector | undefined;
   listSemanticVectorIds(): string[];
+  putHyperedge(h: Hyperedge): void;
+  getHyperedge(id: string): Hyperedge | undefined;
+  listHyperedges(limit?: number): Hyperedge[];
+  hyperedgesForCell(key: string, limit?: number): Hyperedge[];
 }

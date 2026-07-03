@@ -153,6 +153,90 @@ test("store round-trips a hyperedge", () => {
   store.close();
 });
 
+test("getHyperedge resolves an exact id", () => {
+  const store = new SqliteStore(":memory:");
+  store.putHyperedge({
+    id: "11111111-2222-3333-4444-555555555555", kind: "cluster", title: "t",
+    members: [{ key: "a", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  const got = store.getHyperedge("11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.id, "11111111-2222-3333-4444-555555555555");
+  store.close();
+});
+
+test("getHyperedge resolves a unique 8-char prefix", () => {
+  const store = new SqliteStore(":memory:");
+  store.putHyperedge({
+    id: "11111111-2222-3333-4444-555555555555", kind: "cluster", title: "t",
+    members: [], metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  const got = store.getHyperedge("11111111");
+  assert.equal(got?.id, "11111111-2222-3333-4444-555555555555");
+  store.close();
+});
+
+test("getHyperedge returns undefined for an ambiguous prefix", () => {
+  const store = new SqliteStore(":memory:");
+  store.putHyperedge({
+    id: "aaaaaaaa-2222-3333-4444-555555555555", kind: "cluster", title: "t1",
+    members: [], metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  store.putHyperedge({
+    id: "aaaaaaab-2222-3333-4444-555555555555", kind: "cluster", title: "t2",
+    members: [], metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+  assert.equal(store.getHyperedge("aaaaaaa"), undefined);
+  store.close();
+});
+
+test("getHyperedge returns undefined for an unknown id", () => {
+  const store = new SqliteStore(":memory:");
+  assert.equal(store.getHyperedge("does-not-exist"), undefined);
+  store.close();
+});
+
+test("hyperedgesForCell finds membership by exact key and respects limit", () => {
+  const store = new SqliteStore(":memory:");
+  store.putHyperedge({
+    id: "h1", kind: "cluster", title: "one",
+    members: [{ key: "a", role: "member", ordinal: 0 }, { key: "b", role: "member", ordinal: 1 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  store.putHyperedge({
+    id: "h2", kind: "cluster", title: "two",
+    members: [{ key: "b", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+  store.putHyperedge({
+    id: "h3", kind: "cluster", title: "three",
+    members: [{ key: "c", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:02Z",
+  });
+
+  const forB = store.hyperedgesForCell("b");
+  assert.deepEqual(forB.map((h) => h.id).sort(), ["h1", "h2"]);
+
+  const forBLimited = store.hyperedgesForCell("b", 1);
+  assert.equal(forBLimited.length, 1);
+
+  assert.deepEqual(store.hyperedgesForCell("c").map((h) => h.id), ["h3"]);
+  assert.deepEqual(store.hyperedgesForCell("nope"), []);
+  store.close();
+});
+
+test("hyperedgesForCell does not match a key that is only a JSON-string substring of another key", () => {
+  const store = new SqliteStore(":memory:");
+  store.putHyperedge({
+    id: "h1", kind: "cluster", title: "one",
+    members: [{ key: "abcdef", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  // "cde" is a substring of "abcdef" but must not match on exact-key semantics.
+  assert.deepEqual(store.hyperedgesForCell("cde"), []);
+  store.close();
+});
+
 test("listHyperedges normalizes a raw legacy-shaped members array written directly to the db", () => {
   const store = new SqliteStore(":memory:");
   // Simulate a pre-normalizer row: members_json holds legacy {nodeId, role, weight}

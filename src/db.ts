@@ -36,6 +36,7 @@ export function openDb(path = ":memory:"): Db {
       members_json TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL
     )
   `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_hyperedges_kind ON hyperedges(kind)");
   db.exec(`
     CREATE TABLE IF NOT EXISTS semantic_index (
       node_id TEXT PRIMARY KEY, backend TEXT NOT NULL, dims INTEGER NOT NULL,

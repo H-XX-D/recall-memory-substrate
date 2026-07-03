@@ -49,6 +49,14 @@ interface FtsRow extends CellRow {
 interface CountRow {
   count: number;
 }
+interface HyperedgeRow {
+  id: string;
+  kind: string;
+  title: string;
+  members_json: string;
+  metadata_json: string;
+  created_at: string;
+}
 
 export class SqliteStore implements Store {
   private db: Db;
@@ -153,15 +161,39 @@ export class SqliteStore implements Store {
   }
 
   listHyperedges(limit = 100): Hyperedge[] {
-    const rows = this.db.prepare(`SELECT * FROM hyperedges ORDER BY created_at DESC LIMIT ?`).all(limit) as Array<{ id: string; kind: string; title: string; members_json: string; metadata_json: string; created_at: string }>;
-    return rows.map((r) => ({
-      id: r.id,
-      kind: r.kind,
-      title: r.title,
-      members: normalizeHyperedgeMembers(JSON.parse(r.members_json)),
-      metadata: JSON.parse(r.metadata_json),
-      createdAt: r.created_at,
-    }));
+    const rows = this.db
+      .prepare(`SELECT * FROM hyperedges ORDER BY created_at DESC LIMIT ?`)
+      .all(limit) as unknown as HyperedgeRow[];
+    return rows.map((r) => this.hydrateHyperedge(r));
+  }
+
+  getHyperedge(id: string): Hyperedge | undefined {
+    const resolved = this.resolveStoredId("hyperedges", id);
+    if (resolved === null) return undefined;
+    const row = this.db.prepare(`SELECT * FROM hyperedges WHERE id = ?`).get(resolved) as
+      | HyperedgeRow
+      | undefined;
+    return row ? this.hydrateHyperedge(row) : undefined;
+  }
+
+  // Prefilters with a LIKE on the raw members_json (cheap, index-friendly on the
+  // needle substring) then confirms with an exact JS equality check on the
+  // normalized member keys, so a key that only appears as a JSON-string
+  // substring of another key never false-positives.
+  hyperedgesForCell(key: string, limit = 50): Hyperedge[] {
+    const needle = `%${escapeLike(JSON.stringify(key))}%`;
+    const rows = this.db
+      .prepare(`SELECT * FROM hyperedges WHERE members_json LIKE ? ESCAPE '\\' ORDER BY created_at DESC`)
+      .all(needle) as unknown as HyperedgeRow[];
+    const out: Hyperedge[] = [];
+    for (const row of rows) {
+      const hyperedge = this.hydrateHyperedge(row);
+      if (hyperedge.members.some((m) => m.key === key)) {
+        out.push(hyperedge);
+        if (out.length >= limit) break;
+      }
+    }
+    return out;
   }
 
   putSemanticVector(v: SemanticVector): void {
@@ -325,6 +357,40 @@ export class SqliteStore implements Store {
       .prepare(`SELECT source, relation, target, weight FROM edges WHERE source = ?`)
       .all(row.key) as unknown as EdgeRow[];
     return { ...cell, edgesOut: edgeRows.map((e) => this.toEdge(e)) };
+  }
+
+  private hydrateHyperedge(row: HyperedgeRow): Hyperedge {
+    return {
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      members: normalizeHyperedgeMembers(JSON.parse(row.members_json)),
+      metadata: JSON.parse(row.metadata_json),
+      createdAt: row.created_at,
+    };
+  }
+
+  // Resolves a stored id: exact match wins. Otherwise, if the value looks like a
+  // (partial) hex/uuid id, we try it as a unique prefix, LIMIT 2 so we can tell
+  // "exactly one match" from "ambiguous" without scanning the whole table.
+  private resolveStoredId(
+    table: "hyperedges" | "program_runs" | "eval_runs" | "operator_runs" | "dag_overlays",
+    id: string,
+  ): string | null {
+    const exact = this.db.prepare(`SELECT id FROM ${table} WHERE id = ?`).get(id) as
+      | { id: string }
+      | undefined;
+    if (exact) return exact.id;
+
+    if (!(id.length >= 6 && id.length < 36 && /^[0-9a-fA-F-]+$/.test(id))) {
+      return null;
+    }
+
+    const pattern = `${escapeLike(id)}%`;
+    const rows = this.db
+      .prepare(`SELECT id FROM ${table} WHERE id LIKE ? ESCAPE '\\' LIMIT 2`)
+      .all(pattern) as Array<{ id: string }>;
+    return rows.length === 1 ? rows[0]!.id : null;
   }
 
   private toEdge(e: EdgeRow): Edge {

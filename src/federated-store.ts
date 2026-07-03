@@ -5,7 +5,7 @@
 // accidentally mixing domains.
 import { existsSync } from "node:fs";
 import { SqliteStore } from "./store.js";
-import type { Cell, Edge, Kind, NeighborLink, SearchHit, SemanticVector, Store, StoreStats } from "./types.js";
+import type { Cell, Edge, Hyperedge, HyperedgeMember, Kind, NeighborLink, SearchHit, SemanticVector, Store, StoreStats } from "./types.js";
 
 export const FEDERATED_READ_ONLY_MESSAGE =
   "federated read store is read-only; route writes to a home or project local";
@@ -130,6 +130,48 @@ export class FederatedReadStore implements Store {
     );
   }
 
+  putHyperedge(_h: Hyperedge): void {
+    throw new Error(FEDERATED_READ_ONLY_MESSAGE);
+  }
+
+  getHyperedge(id: string): Hyperedge | undefined {
+    const { graph, key } = decodeFederatedKey(id);
+    if (graph !== undefined) {
+      const member = this.byGraph.get(graph);
+      const hyperedge = member ? member.store.getHyperedge(key) : undefined;
+      return hyperedge && member ? prefixHyperedge(member.graph, hyperedge) : undefined;
+    }
+
+    for (const member of this.members) {
+      const hyperedge = member.store.getHyperedge(id);
+      if (hyperedge) return prefixHyperedge(member.graph, hyperedge);
+    }
+    return undefined;
+  }
+
+  listHyperedges(limit = 100): Hyperedge[] {
+    const all = this.members.flatMap((member) =>
+      member.store.listHyperedges(limit).map((h) => prefixHyperedge(member.graph, h)),
+    );
+    all.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+    return all.slice(0, limit);
+  }
+
+  hyperedgesForCell(key: string, limit = 50): Hyperedge[] {
+    const { graph, key: bareKey } = decodeFederatedKey(key);
+    if (graph !== undefined) {
+      const member = this.byGraph.get(graph);
+      const hyperedges = member ? member.store.hyperedgesForCell(bareKey, limit) : [];
+      return member ? hyperedges.map((h) => prefixHyperedge(member.graph, h)) : [];
+    }
+
+    for (const member of this.members) {
+      const hyperedges = member.store.hyperedgesForCell(key, limit);
+      if (hyperedges.length > 0) return hyperedges.map((h) => prefixHyperedge(member.graph, h));
+    }
+    return [];
+  }
+
   lexicalBackend(): "federated" {
     return "federated";
   }
@@ -216,4 +258,15 @@ function prefixEdge(graph: string, edge: Edge): Edge {
 
 function prefixBare(graph: string, key: string): string {
   return key.includes(":") ? key : encodeFederatedKey(graph, key);
+}
+
+function prefixHyperedge(graph: string, hyperedge: Hyperedge): Hyperedge {
+  return {
+    ...hyperedge,
+    members: hyperedge.members.map((m) => prefixHyperedgeMember(graph, m)),
+  };
+}
+
+function prefixHyperedgeMember(graph: string, member: HyperedgeMember): HyperedgeMember {
+  return { ...member, key: prefixBare(graph, member.key) };
 }

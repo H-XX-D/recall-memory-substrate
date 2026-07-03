@@ -122,6 +122,123 @@ test("federated putSemanticVector throws read-only error", () => {
   }
 });
 
+test("federated putHyperedge throws read-only error", () => {
+  const store = new SqliteStore(":memory:");
+  const fed = new FederatedReadStore([{ graph: "home", store, ownsStore: true }]);
+  try {
+    assert.throws(
+      () =>
+        fed.putHyperedge({
+          id: "h1",
+          kind: "cluster",
+          title: "t",
+          members: [],
+          metadata: {},
+          createdAt: "2026-07-03T00:00:00Z",
+        }),
+      new RegExp(FEDERATED_READ_ONLY_MESSAGE),
+    );
+  } finally {
+    fed.close();
+  }
+});
+
+test("federated getHyperedge routes a prefixed id and scans unprefixed ids across members", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.putHyperedge({
+    id: "h-home", kind: "cluster", title: "home edge",
+    members: [{ key: "aaaa", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  proj.putHyperedge({
+    id: "h-proj", kind: "cluster", title: "proj edge",
+    members: [{ key: "bbbb", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+
+  const fed = new FederatedReadStore([
+    { graph: "home", store: home, ownsStore: true },
+    { graph: "proj", store: proj, ownsStore: true },
+  ]);
+  try {
+    const routed = fed.getHyperedge("proj:h-proj");
+    assert.equal(routed?.id, "h-proj");
+    assert.deepEqual(routed?.members, [{ key: "proj:bbbb", role: "member", ordinal: 0 }]);
+
+    const scanned = fed.getHyperedge("h-home");
+    assert.equal(scanned?.id, "h-home");
+    assert.deepEqual(scanned?.members, [{ key: "home:aaaa", role: "member", ordinal: 0 }]);
+
+    assert.equal(fed.getHyperedge("does-not-exist"), undefined);
+  } finally {
+    fed.close();
+  }
+});
+
+test("federated listHyperedges fans out, prefixes members, and merges newest-first", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.putHyperedge({
+    id: "h-home", kind: "cluster", title: "home edge",
+    members: [{ key: "aaaa", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  proj.putHyperedge({
+    id: "h-proj", kind: "cluster", title: "proj edge",
+    members: [{ key: "bbbb", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+
+  const fed = new FederatedReadStore([
+    { graph: "home", store: home, ownsStore: true },
+    { graph: "proj", store: proj, ownsStore: true },
+  ]);
+  try {
+    const all = fed.listHyperedges();
+    assert.deepEqual(all.map((h) => h.id), ["h-proj", "h-home"]); // newest-first by createdAt
+    const projEdge = all.find((h) => h.id === "h-proj")!;
+    assert.deepEqual(projEdge.members, [{ key: "proj:bbbb", role: "member", ordinal: 0 }]);
+
+    const limited = fed.listHyperedges(1);
+    assert.equal(limited.length, 1);
+    assert.equal(limited[0]!.id, "h-proj");
+  } finally {
+    fed.close();
+  }
+});
+
+test("federated hyperedgesForCell decodes a prefixed key, queries the owning member, and prefixes results", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.putHyperedge({
+    id: "h-home", kind: "cluster", title: "home edge",
+    members: [{ key: "aaaa", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  proj.putHyperedge({
+    id: "h-proj", kind: "cluster", title: "proj edge",
+    members: [{ key: "bbbb", role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+
+  const fed = new FederatedReadStore([
+    { graph: "home", store: home, ownsStore: true },
+    { graph: "proj", store: proj, ownsStore: true },
+  ]);
+  try {
+    const forProjB = fed.hyperedgesForCell("proj:bbbb");
+    assert.equal(forProjB.length, 1);
+    assert.equal(forProjB[0]!.id, "h-proj");
+    assert.deepEqual(forProjB[0]!.members, [{ key: "proj:bbbb", role: "member", ordinal: 0 }]);
+
+    assert.deepEqual(fed.hyperedgesForCell("proj:aaaa"), []);
+    assert.deepEqual(fed.hyperedgesForCell("nope:zzzz"), []);
+  } finally {
+    fed.close();
+  }
+});
+
 test("federated getSemanticVector resolves across members by prefixed key", () => {
   const home = new SqliteStore(":memory:");
   const proj = new SqliteStore(":memory:");
