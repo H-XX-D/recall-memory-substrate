@@ -8,6 +8,7 @@ import {
   textForEmbedding,
   embedText,
   indexCell,
+  semanticSearch,
 } from "./semantic.js";
 import { buildCell } from "./build.js";
 import { SqliteStore } from "./store.js";
@@ -149,5 +150,108 @@ describe("indexCell", () => {
     assert.ok(vec, "semantic vector should exist");
     assert.strictEqual(vec.backend, "hash:v1");
     assert.strictEqual(vec.dims, vec.vector.length);
+  });
+});
+
+describe("semanticSearch", () => {
+  it("returns the best-matching cell at the top with score above minScore", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+
+    const cellA = buildCell({ kind: "obs", title: "quantum physics experiment", body: "quantum entanglement and wave functions", summary: "", confidence: 0.9, topics: [], entities: [] });
+    const cellB = buildCell({ kind: "obs", title: "recipe for chocolate cake", body: "flour butter sugar eggs chocolate cocoa baking", summary: "", confidence: 0.9, topics: [], entities: [] });
+    const cellC = buildCell({ kind: "obs", title: "typescript compiler internals", body: "type checker emit transform sourcemap", summary: "", confidence: 0.9, topics: [], entities: [] });
+
+    store.put(cellA); store.put(cellB); store.put(cellC);
+    indexCell(cellA, store);
+    indexCell(cellB, store);
+    indexCell(cellC, store);
+
+    const hits = semanticSearch("quantum wave function physics", store, { minScore: 0.01 });
+    assert.ok(hits.length > 0, "should return at least one hit");
+    assert.strictEqual(hits[0]!.cell.key, cellA.key, "top hit should be cellA (quantum physics)");
+    assert.ok(hits[0]!.score > 0.01, `score ${hits[0]!.score} should be > minScore 0.01`);
+    assert.strictEqual(hits[0]!.backend, "hash:v1");
+  });
+
+  it("skips vectors whose dims do not match the query vector dims", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+
+    const cell = buildCell({ kind: "obs", title: "wrong dims cell", body: "some content here", summary: "", confidence: 0.9, topics: [], entities: [] });
+    store.put(cell);
+
+    // Inject a vector with wrong dims directly (simulates a mid-store model switch)
+    store.putSemanticVector({
+      nodeId: cell.key,
+      backend: "other:model",
+      dims: 512,
+      vector: new Array(512).fill(0.1),
+      indexedAt: new Date().toISOString(),
+    });
+
+    const hits = semanticSearch("wrong dims cell content", store);
+    // The wrong-dims vector must be skipped; nothing survives
+    assert.strictEqual(hits.length, 0, "wrong-dims vector should be skipped and not scored");
+  });
+
+  it("minScore filters out low-scoring hits", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+
+    const cell = buildCell({ kind: "obs", title: "irrelevant topic about cooking pasta", body: "spaghetti carbonara sauce garlic olive oil", summary: "", confidence: 0.9, topics: [], entities: [] });
+    store.put(cell);
+    indexCell(cell, store);
+
+    // Query something totally unrelated to guarantee a very low score
+    const hits = semanticSearch("quantum entanglement physics wave", store, { minScore: 0.99 });
+    assert.strictEqual(hits.length, 0, "no cell should exceed minScore 0.99 for a very different query");
+  });
+
+  it("returns empty array for an empty store", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+    const hits = semanticSearch("any query text", store);
+    assert.strictEqual(hits.length, 0);
+  });
+
+  it("respects limit option", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+
+    // Index 5 cells all with overlapping text to get non-zero scores
+    for (let i = 0; i < 5; i++) {
+      const cell = buildCell({ kind: "obs", title: `cell number ${i} about dogs pets animals`, body: "dog cat animal pet fur", summary: "", confidence: 0.9, topics: [], entities: [] });
+      store.put(cell);
+      indexCell(cell, store);
+    }
+
+    const hits = semanticSearch("dogs pets animals", store, { limit: 3 });
+    assert.ok(hits.length <= 3, `limit 3 should return at most 3 hits, got ${hits.length}`);
+  });
+
+  it("sorts by score descending with stable key tiebreak ascending", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+
+    const cell1 = buildCell({ kind: "obs", title: "aaa identical text dogs", body: "dog pet animal", summary: "", confidence: 0.9, topics: [], entities: [] });
+    const cell2 = buildCell({ kind: "obs", title: "bbb identical text dogs", body: "dog pet animal", summary: "", confidence: 0.9, topics: [], entities: [] });
+
+    store.put(cell1); store.put(cell2);
+    indexCell(cell1, store);
+    indexCell(cell2, store);
+
+    const hits = semanticSearch("dogs pet animal", store, { minScore: 0 });
+    assert.ok(hits.length >= 1);
+    // Scores must be descending (or equal with key ascending as tiebreak)
+    for (let i = 1; i < hits.length; i++) {
+      const prev = hits[i - 1]!;
+      const curr = hits[i]!;
+      if (prev.score === curr.score) {
+        assert.ok(prev.cell.key <= curr.cell.key, "tiebreak: key should be ascending");
+      } else {
+        assert.ok(prev.score >= curr.score, "scores should be descending");
+      }
+    }
   });
 });

@@ -139,6 +139,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export interface SemanticHit {
+  cell: Cell;
+  score: number;
+  backend: string;
+}
+
+export function semanticSearch(
+  query: string,
+  store: SqliteStore,
+  opts?: { limit?: number; minScore?: number }
+): SemanticHit[] {
+  const limit = opts?.limit ?? 10;
+  const minScore = opts?.minScore ?? 0;
+
+  const qRec = embedTextRecord(query);
+  const qv = qRec.vector;
+  const queryBackend = qRec.backend;
+
+  const ids = store.listSemanticVectorIds();
+  const candidates: Array<{ id: string; score: number }> = [];
+
+  for (const id of ids) {
+    const vec = store.getSemanticVector(id);
+    if (!vec) continue;
+    if (vec.dims !== qv.length) continue;
+    const score = cosine(qv, vec.vector);
+    if (score < minScore) continue;
+    candidates.push({ id, score });
+  }
+
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+
+  const top = candidates.slice(0, limit);
+  const hits: SemanticHit[] = [];
+
+  for (const { id, score } of top) {
+    const cell = store.get(id);
+    if (!cell) continue;
+    hits.push({ cell, score, backend: queryBackend });
+  }
+
+  return hits;
+}
+
 export function indexCell(cell: Cell, store: SqliteStore): void {
   const text = textForEmbedding([cell.title, cell.summary, cell.body, ...cell.tags.topics, ...cell.tags.entities]);
   const rec = embedTextRecord(text);
