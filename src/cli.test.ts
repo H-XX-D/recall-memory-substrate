@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -164,6 +165,29 @@ test("invalid proposal exits nonzero and reports schema issues", () => {
     const result = capture(["validate", "--json", proposalPath]);
     assert.equal(result.code, 1);
     assert.equal(JSON.parse(result.stdout).ok, false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("cli migrate dry-run reports counts and writes nothing", () => {
+  const tmp = tempDir();
+  const oldPath = join(tmp, "old.sqlite3");
+  const malPath = join(tmp, "mal.sqlite3");
+  const old = new DatabaseSync(oldPath);
+  old.exec(`CREATE TABLE graph_nodes (id TEXT, cell_address TEXT, kind TEXT, title TEXT, body TEXT, summary TEXT, scope_json TEXT, tags_json TEXT, data_json TEXT, provenance_json TEXT, status TEXT, created_at TEXT, updated_at TEXT);
+    CREATE TABLE graph_relations (id TEXT, kind TEXT, source_id TEXT, target_id TEXT, data_json TEXT, created_at TEXT);
+    CREATE TABLE hyperedges (id TEXT, kind TEXT, title TEXT, members_json TEXT, metadata_json TEXT, created_at TEXT);
+    CREATE TABLE semantic_index (node_id TEXT, backend TEXT, dims INTEGER, vector_json TEXT, indexed_at TEXT);`);
+  old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("a", null, "observation", "A", "abody", null, null, JSON.stringify({ topics: ["t"] }), JSON.stringify({ confidence: { value: 0.8 } }), null, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+  old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("b", null, "decision", "B", "bbody", null, null, null, null, null, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+  old.close();
+  try {
+    const result = capture(["migrate", "--from", oldPath, "--db", malPath]);
+    assert.equal(result.code, 0, result.stderr);
+    const json = JSON.parse(result.stdout) as { cells: number; applied: boolean };
+    assert.equal(json.cells, 2);
+    assert.equal(json.applied, false);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

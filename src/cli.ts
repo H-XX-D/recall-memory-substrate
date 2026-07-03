@@ -13,12 +13,14 @@ import {
   importZep,
   readJsonFile,
 } from "./adapters.js";
+import { migrate } from "./migrate.js";
 import { inspectCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { FederatedReadStore } from "./federated-store.js";
 import { runOperatorCycle } from "./operator.js";
 import { serializeGraph, parseNetlist, loadNetlist, type LoadMode } from "./netlist.js";
 import {
+  homeDbPath,
   listProjects,
   localGraphPaths,
   registerProject,
@@ -47,6 +49,7 @@ export interface RunCliOptions extends CliIo {
 interface ParsedArgs {
   command: string[];
   db?: string;
+  from?: string;
   project?: string;
   jsonPath?: string;
   slug?: string;
@@ -251,6 +254,19 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    if (command === "migrate") {
+      if (!args.from) throw new Error("migrate requires --from <old.sqlite3>");
+      const dbPath = args.db ?? homeDbPath(env);
+      const store = openWriteStore(dbPath);
+      try {
+        const result = migrate(args.from, store, { apply: args.apply });
+        outJson(out, result);
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
     throw new Error(`Unknown command: ${args.command.join(" ")}`);
   } catch (error) {
     err(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -264,6 +280,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--db") parsed.db = requireValue(argv, ++i, arg);
+    else if (arg === "--from") parsed.from = requireValue(argv, ++i, arg);
     else if (arg === "--project") parsed.project = requireValue(argv, ++i, arg);
     else if (arg === "--json") parsed.jsonPath = requireValue(argv, ++i, arg);
     else if (arg === "--slug") parsed.slug = requireValue(argv, ++i, arg);
@@ -396,6 +413,7 @@ Commands:
   recall import mem0 --json mem0.json [--apply] [--db path] [--project slug]
   recall import zep --json zep.json [--apply] [--db path] [--project slug]
   recall import auto-memory --root path [--apply] [--db path] [--project slug]
+  recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json
   recall admit --json proposal.json [--db path] [--project slug]
   recall version
