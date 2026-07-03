@@ -1,5 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SqliteStore } from "./store.js";
+import { migrate } from "./migrate.js";
 import { mapKind, mapNodeToCell, mapRelationToEdge, type OldNodeRow } from "./migrate.js";
 
 test("mapKind maps old vocabulary to MAL kinds with obs fallback", () => {
@@ -38,4 +44,41 @@ test("mapRelationToEdge maps known relations and drops unknown", () => {
   assert.equal(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "supports" })!.weight, 1);
   assert.equal(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "concerns" })!.weight, -0.5);
   assert.equal(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "not_a_relation" }), null);
+});
+
+test("migrate copies nodes, relations, hyperedges, and semantic vectors", () => {
+  const dir = mkdtempSync(join(tmpdir(), "recall-mig-"));
+  const oldPath = join(dir, "old.sqlite3");
+  const old = new DatabaseSync(oldPath);
+  old.exec(`CREATE TABLE graph_nodes (id TEXT, cell_address TEXT, kind TEXT, title TEXT, body TEXT, summary TEXT, scope_json TEXT, tags_json TEXT, data_json TEXT, provenance_json TEXT, status TEXT, created_at TEXT, updated_at TEXT);
+    CREATE TABLE graph_relations (id TEXT, kind TEXT, source_id TEXT, target_id TEXT, data_json TEXT, created_at TEXT);
+    CREATE TABLE hyperedges (id TEXT, kind TEXT, title TEXT, members_json TEXT, metadata_json TEXT, created_at TEXT);
+    CREATE TABLE semantic_index (node_id TEXT, backend TEXT, dims INTEGER, vector_json TEXT, indexed_at TEXT);`);
+  old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("a", null, "observation", "A", "abody", null, null, JSON.stringify({ topics: ["t"] }), JSON.stringify({ confidence: { value: 0.8 } }), null, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+  old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("b", null, "decision", "B", "bbody", null, null, null, null, null, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+  old.prepare(`INSERT INTO graph_relations VALUES (?,?,?,?,?,?)`).run("r1", "supports", "b", "a", null, "2026-06-01T00:00:00Z");
+  old.prepare(`INSERT INTO hyperedges VALUES (?,?,?,?,?,?)`).run("h1", "cluster", "H", JSON.stringify(["a", "b"]), JSON.stringify({}), "2026-06-01T00:00:00Z");
+  old.prepare(`INSERT INTO semantic_index VALUES (?,?,?,?,?)`).run("a", "hash", 2, JSON.stringify([0.1, 0.2]), "2026-06-01T00:00:00Z");
+  old.close();
+
+  const target = new SqliteStore(":memory:");
+  const dry = migrate(oldPath, target, { apply: false });
+  assert.equal(dry.cells, 2);
+  assert.equal(dry.applied, false);
+  assert.equal(target.all().length, 0); // dry-run wrote nothing
+
+  const res = migrate(oldPath, target, { apply: true });
+  assert.equal(res.cells, 2);
+  assert.equal(res.edges, 1);
+  assert.equal(res.hyperedges, 1);
+  assert.equal(res.semanticVectors, 1);
+  assert.equal(target.all().length, 2);
+  assert.equal(target.get("a")?.kind, "obs");
+  const b = target.get("b");
+  assert.equal(b?.edgesOut[0]?.relation, "supports");
+  assert.equal(b?.edgesOut[0]?.target, "a");
+  assert.equal(target.getSemanticVector("a")?.dims, 2);
+  assert.equal(target.listHyperedges().length, 1);
+  target.close();
+  rmSync(dir, { recursive: true, force: true });
 });

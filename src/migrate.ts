@@ -1,6 +1,8 @@
+import { DatabaseSync } from "node:sqlite";
 import { buildCell } from "./build.js";
 import type { Cell, Edge, Kind, Relation } from "./types.js";
 import { RELATIONS } from "./types.js";
+import { SqliteStore } from "./store.js";
 
 const KIND_MAP: Record<string, Kind> = {
   observation: "obs", verification_result: "ver", decision: "dec",
@@ -71,4 +73,76 @@ export function mapRelationToEdge(row: OldRelationRow): Edge | null {
   if (!(RELATIONS as readonly string[]).includes(row.kind)) return null;
   const relation = row.kind as Relation;
   return { relation, source: row.source_id, target: row.target_id, weight: WEIGHT[relation] };
+}
+
+export interface MigrateResult {
+  cells: number;
+  edges: number;
+  hyperedges: number;
+  semanticVectors: number;
+  dagOverlays: number;
+  applied: boolean;
+}
+
+export function migrate(
+  oldDbPath: string,
+  target: SqliteStore,
+  opts: { apply?: boolean } = {},
+): MigrateResult {
+  const apply = opts.apply ?? false;
+  const db = new DatabaseSync(oldDbPath, { readOnly: true });
+  const res: MigrateResult = {
+    cells: 0, edges: 0, hyperedges: 0, semanticVectors: 0, dagOverlays: 0, applied: apply,
+  };
+
+  // Build edge map from relations so they can be attached to each cell before put().
+  const rels = db.prepare(`SELECT source_id, target_id, kind FROM graph_relations`).all() as unknown as OldRelationRow[];
+  const edgesBySource = new Map<string, Edge[]>();
+  for (const r of rels) {
+    const e = mapRelationToEdge(r);
+    if (!e) continue;
+    const list = edgesBySource.get(e.source) ?? [];
+    list.push(e);
+    edgesBySource.set(e.source, list);
+    res.edges++;
+  }
+
+  const nodes = db.prepare(`SELECT * FROM graph_nodes`).all() as unknown as OldNodeRow[];
+  for (const row of nodes) {
+    res.cells++;
+    if (!apply) continue;
+    const cell = mapNodeToCell(row);
+    cell.edgesOut = edgesBySource.get(cell.key) ?? [];
+    target.put(cell);
+  }
+
+  type HyperedgeRow = { id: string; kind: string; title: string; members_json: string; metadata_json: string; created_at: string };
+  const hes = db.prepare(`SELECT * FROM hyperedges`).all() as unknown as HyperedgeRow[];
+  for (const h of hes) {
+    res.hyperedges++;
+    if (apply) {
+      target.putHyperedge({
+        id: h.id, kind: h.kind, title: h.title,
+        members: JSON.parse(h.members_json) as string[],
+        metadata: JSON.parse(h.metadata_json) as Record<string, unknown>,
+        createdAt: h.created_at,
+      });
+    }
+  }
+
+  type SemanticRow = { node_id: string; backend: string; dims: number; vector_json: string; indexed_at: string };
+  const vecs = db.prepare(`SELECT * FROM semantic_index`).all() as unknown as SemanticRow[];
+  for (const v of vecs) {
+    res.semanticVectors++;
+    if (apply) {
+      target.putSemanticVector({
+        nodeId: v.node_id, backend: v.backend, dims: v.dims,
+        vector: JSON.parse(v.vector_json) as number[],
+        indexedAt: v.indexed_at,
+      });
+    }
+  }
+
+  db.close();
+  return res;
 }
