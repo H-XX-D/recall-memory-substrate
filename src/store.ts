@@ -4,6 +4,7 @@
 import type {
   Cell,
   Edge,
+  Hyperedge,
   Kind,
   LexicalBackend,
   NeighborLink,
@@ -127,6 +128,17 @@ export class SqliteStore implements Store {
       )
       .get(kind, ck) as CellRow | undefined;
     return row ? this.hydrate(row) : undefined;
+  }
+
+  putHyperedge(h: Hyperedge): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO hyperedges (id, kind, title, members_json, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(h.id, h.kind, h.title, JSON.stringify(h.members), JSON.stringify(h.metadata), h.createdAt);
+  }
+
+  listHyperedges(limit = 100): Hyperedge[] {
+    const rows = this.db.prepare(`SELECT * FROM hyperedges ORDER BY created_at DESC LIMIT ?`).all(limit) as Array<{ id: string; kind: string; title: string; members_json: string; metadata_json: string; created_at: string }>;
+    return rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, members: JSON.parse(r.members_json), metadata: JSON.parse(r.metadata_json), createdAt: r.created_at }));
   }
 
   search(query: string, opts: { limit?: number } = {}): SearchHit[] {

@@ -111,3 +111,13 @@ test("stats reports cells, active cells, edges, and lexical indexing state", () 
   }
   store.close();
 });
+
+test("store round-trips a hyperedge", () => {
+  const store = new SqliteStore(":memory:");
+  store.putHyperedge({ id: "h1", kind: "cluster", title: "t", members: ["a", "b"], metadata: { n: 1 }, createdAt: "2026-07-03T00:00:00Z" });
+  const all = store.listHyperedges();
+  assert.equal(all.length, 1);
+  assert.deepEqual(all[0]!.members, ["a", "b"]);
+  assert.equal(all[0]!.metadata.n, 1);
+  store.close();
+});

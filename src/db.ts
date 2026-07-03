@@ -30,5 +30,11 @@ export function openDb(path = ":memory:"): Db {
     )
   `);
   db.exec("CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS hyperedges (
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL,
+      members_json TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL
+    )
+  `);
   return db;
 }
