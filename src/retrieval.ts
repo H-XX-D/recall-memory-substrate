@@ -1,7 +1,7 @@
 // Shared FTS phrase layer and fusion scoring for retrieval.
 // FTS phrase building used by store.ts and compile.ts; fusion re-ranking
 // implemented here for Task 8.
-import type { Cell, Kind, SearchHit } from "./types.js";
+import type { Cell, Kind, SearchHit, Store } from "./types.js";
 
 // Closed-class glue words that carry no retrieval intent. Code-collision tokens
 // (out, up, re, ...) are deliberately excluded so symbol search keeps working.
@@ -161,4 +161,21 @@ export function fuseCandidates(
     effectiveConfidence: c.cell.scores.effective,
     challenged,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Degree batching (Task 9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the total in+out edge degree for each key. Returns a Map where each
+ * key is paired with its degree: the count of neighbors() links in both
+ * directions (store.neighbors already returns both in and out edges combined).
+ */
+export function degreeMap(store: Store, keys: string[]): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const key of keys) {
+    result.set(key, store.neighbors(key).length);
+  }
+  return result;
 }

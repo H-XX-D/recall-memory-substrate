@@ -1,7 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildFtsMatchQuery, searchTerms, fuseCandidates, TASK_CONTEXT_KIND_FACTOR, type MalLexicalCandidate } from "./retrieval.js";
+import { buildFtsMatchQuery, searchTerms, fuseCandidates, TASK_CONTEXT_KIND_FACTOR, type MalLexicalCandidate, degreeMap } from "./retrieval.js";
 import { buildCell } from "./build.js";
+import { SqliteStore } from "./store.js";
 
 describe("buildFtsMatchQuery", () => {
   it("wraps a symbol token in a quoted phrase", () => {
@@ -193,5 +194,86 @@ describe("fuseCandidates", () => {
     const c = makeCandidate({ bm25: 0, degree: 5, effective: 0.7 });
     const results = fuseCandidates([c], 10, NOW);
     assert.ok(Number.isFinite(results[0]!.score), "score should be finite");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// degreeMap
+// ---------------------------------------------------------------------------
+
+describe("degreeMap", () => {
+  it("returns in+out degree for each key from store.neighbors", () => {
+    const store = new SqliteStore(":memory:");
+
+    // Build a small graph: A -> B, A -> C (A has 2 out edges)
+    const cellA = buildCell({ kind: "dec", title: "A", body: "cell A", confidence: 0.8 });
+    const cellB = buildCell({ kind: "dec", title: "B", body: "cell B", confidence: 0.8 });
+    const cellC = buildCell({ kind: "dec", title: "C", body: "cell C", confidence: 0.8 });
+
+    store.put(cellA);
+    store.put(cellB);
+    store.put(cellC);
+
+    // Add edges: A supports B and A supports C
+    const edgeAB: import("./types.js").Edge = {
+      relation: "supports",
+      source: cellA.key,
+      target: cellB.key,
+      weight: 1,
+    };
+    const edgeAC: import("./types.js").Edge = {
+      relation: "supports",
+      source: cellA.key,
+      target: cellC.key,
+      weight: 1,
+    };
+
+    cellA.edgesOut = [edgeAB, edgeAC];
+    store.put(cellA);
+
+    // Query degrees for A, B, C
+    const degrees = degreeMap(store, [cellA.key, cellB.key, cellC.key]);
+
+    // A has 2 outgoing edges => degree 2
+    assert.equal(degrees.get(cellA.key), 2, `A should have degree 2 (2 out edges)`);
+
+    // B has 1 incoming edge (from A) => degree 1
+    assert.equal(degrees.get(cellB.key), 1, `B should have degree 1 (1 in edge from A)`);
+
+    // C has 1 incoming edge (from A) => degree 1
+    assert.equal(degrees.get(cellC.key), 1, `C should have degree 1 (1 in edge from A)`);
+
+    store.close();
+  });
+
+  it("returns 0 for isolated cells", () => {
+    const store = new SqliteStore(":memory:");
+
+    const cellIsolated = buildCell({ kind: "dec", title: "isolated", body: "no edges", confidence: 0.8 });
+    store.put(cellIsolated);
+
+    const degrees = degreeMap(store, [cellIsolated.key]);
+    assert.equal(degrees.get(cellIsolated.key), 0, "isolated cell should have degree 0");
+
+    store.close();
+  });
+
+  it("returns a Map with entries for all queried keys", () => {
+    const store = new SqliteStore(":memory:");
+
+    const cell1 = buildCell({ kind: "dec", title: "1", body: "cell", confidence: 0.8 });
+    const cell2 = buildCell({ kind: "dec", title: "2", body: "cell", confidence: 0.8 });
+
+    store.put(cell1);
+    store.put(cell2);
+
+    const degrees = degreeMap(store, [cell1.key, cell2.key]);
+
+    assert.ok(degrees instanceof Map, "result should be a Map");
+    assert.equal(degrees.size, 2, "should have entries for both keys");
+    assert.ok(degrees.has(cell1.key), "should have key for cell1");
+    assert.ok(degrees.has(cell2.key), "should have key for cell2");
+
+    store.close();
   });
 });

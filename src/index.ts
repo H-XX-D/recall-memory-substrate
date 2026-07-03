@@ -25,6 +25,7 @@ export {
   buildFtsMatchQuery,
   searchTerms,
   fuseCandidates,
+  degreeMap,
   TASK_CONTEXT_KIND_FACTOR,
   type RankedHit,
   type MalLexicalCandidate,
