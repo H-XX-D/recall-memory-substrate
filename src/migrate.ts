@@ -1,5 +1,6 @@
 import { buildCell } from "./build.js";
-import type { Cell, Kind } from "./types.js";
+import type { Cell, Edge, Kind, Relation } from "./types.js";
+import { RELATIONS } from "./types.js";
 
 const KIND_MAP: Record<string, Kind> = {
   observation: "obs", verification_result: "ver", decision: "dec",
@@ -58,4 +59,16 @@ export function mapNodeToCell(row: OldNodeRow): Cell {
   cell.provenance.producedBy = (prov.produced_by as string) ?? cell.provenance.producedBy;
   cell.props = { ...cell.props, _migrated: { cell_address: row.cell_address, data_json: data, provenance_json: prov } };
   return cell;
+}
+
+const WEIGHT: Record<Relation, number> = {
+  supports: 1, contradicts: -1, concerns: -0.5, depends_on: 0, supersedes: 0, derived_from: 0,
+};
+
+export interface OldRelationRow { source_id: string; target_id: string; kind: string }
+
+export function mapRelationToEdge(row: OldRelationRow): Edge | null {
+  if (!(RELATIONS as readonly string[]).includes(row.kind)) return null;
+  const relation = row.kind as Relation;
+  return { relation, source: row.source_id, target: row.target_id, weight: WEIGHT[relation] };
 }

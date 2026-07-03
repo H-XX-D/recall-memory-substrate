@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapKind, mapNodeToCell, type OldNodeRow } from "./migrate.js";
+import { mapKind, mapNodeToCell, mapRelationToEdge, type OldNodeRow } from "./migrate.js";
 
 test("mapKind maps old vocabulary to MAL kinds with obs fallback", () => {
   assert.equal(mapKind("observation"), "obs");
@@ -31,4 +31,11 @@ test("mapNodeToCell builds a MAL cell losslessly", () => {
   assert.equal(cell.createdAt, "2026-06-01T00:00:00Z");
   // lossless: the raw old row is preserved
   assert.equal((cell.props._migrated as { cell_address?: string }).cell_address, "recall://cell/n1");
+});
+
+test("mapRelationToEdge maps known relations and drops unknown", () => {
+  assert.deepEqual(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "supports" }), { relation: "supports", source: "a", target: "b", weight: 1 });
+  assert.equal(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "supports" })!.weight, 1);
+  assert.equal(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "concerns" })!.weight, -0.5);
+  assert.equal(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "not_a_relation" }), null);
 });
