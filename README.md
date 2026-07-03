@@ -62,6 +62,26 @@ recall import auto-memory --root ~/.claude/projects --project my-project --apply
 `recall-mcp` binary; it resolves its database from `RECALL_DB`, falling back to
 the home local at `~/.recall/db/home.sqlite3`.
 
+Tools:
+
+- `recall_compile` / `recall_search` / `recall_cell` — the read path: a compiled
+  context packet, lexical (FTS5/BM25) search, and single-cell inspection.
+- `recall_admit` — write a proposal through the admission gate.
+- `recall_semantic` `{query, limit?, minScore?}` — cosine search over stored
+  embeddings. Cells are auto-embedded on admit (hash backend by default; set
+  `RECALL_EMBEDDING_URL` for an OpenAI or Ollama endpoint). Note: a store migrated
+  from a pre-0.7 database must be re-indexed before semantic search returns hits
+  (loop over the cells calling the library `indexCell`).
+- `recall_ref` `{reference}` — resolve a reference like `handle#scores.effective`
+  to its field value; returns `{targetId, handle, path, value, resolved}`.
+- `recall_page` `{name, project?, topics?, since?, limit?}` — a curated view by
+  kind (e.g. `reflections`, `objectives`, `workbench`); `since` filters on last
+  modified.
+
+Retrieval ranking is hybrid: lexical BM25 is fused with a graph-degree prior, the
+cell's stored effective confidence, and recency decay, with per-kind weighting, so
+a high-confidence cell can outrank a keyword-stuffed low-confidence one.
+
 ## Library
 
 ```ts
