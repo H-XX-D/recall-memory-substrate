@@ -2,9 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runCli } from "./cli.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test("project init/list/where use the central registry under RECALL_HOME", () => {
   const tmp = tempDir();
@@ -188,6 +192,80 @@ test("cli migrate dry-run reports counts and writes nothing", () => {
     const json = JSON.parse(result.stdout) as { cells: number; applied: boolean };
     assert.equal(json.cells, 2);
     assert.equal(json.applied, false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("hyperedge add from stdin JSON then show round-trips, and list respects --limit", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const memberPath = join(tmp, "member.json");
+    writeFileSync(
+      memberPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "hyperedge member cell",
+        body: "A cell that will join a hyperedge.",
+        confidence: 0.8,
+        topics: ["hyperedge"],
+      }),
+    );
+    const member = capture(["admit", "--json", memberPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(member.code, 0, member.stderr);
+    const memberKey = JSON.parse(member.stdout).cell.key as string;
+
+    const edgePath = join(tmp, "edge.json");
+    writeFileSync(
+      edgePath,
+      JSON.stringify({
+        kind: "cluster",
+        title: "cli hyperedge",
+        members: [memberKey],
+      }),
+    );
+
+    const added = capture(["hyperedge", "add", "--json", edgePath, "--db", db], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(added.code, 0, added.stderr);
+    const addedJson = JSON.parse(added.stdout);
+    assert.equal(addedJson.title, "cli hyperedge");
+    assert.equal(addedJson.members[0].key, memberKey);
+    const edgeId = addedJson.id as string;
+
+    const shown = capture(["hyperedge", "show", edgeId, "--db", db]);
+    assert.equal(shown.code, 0, shown.stderr);
+    assert.equal(JSON.parse(shown.stdout).id, edgeId);
+
+    // stdin form: --json -
+    const stdinInput = JSON.stringify({ kind: "cluster", title: "second hyperedge", members: [memberKey] });
+    const stdinAdd = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "cli.ts"), "hyperedge", "add", "--json", "-", "--db", db],
+      { input: stdinInput, encoding: "utf8" },
+    );
+    assert.equal(stdinAdd.status, 0, stdinAdd.stderr);
+    assert.equal(JSON.parse(stdinAdd.stdout).title, "second hyperedge");
+
+    const list = capture(["hyperedge", "list", "--limit", "1", "--db", db]);
+    assert.equal(list.code, 0, list.stderr);
+    const listJson = JSON.parse(list.stdout);
+    assert.equal(listJson.hyperedges.length, 1);
+
+    const listAll = capture(["hyperedge", "list", "--db", db]);
+    assert.equal(JSON.parse(listAll.stdout).hyperedges.length, 2);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("hyperedge show with an unknown id exits nonzero with an error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const result = capture(["hyperedge", "show", "no-such-id", "--db", db]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /no-such-id/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

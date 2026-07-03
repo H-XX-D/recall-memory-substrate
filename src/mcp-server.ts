@@ -1,8 +1,9 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Eight tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Eleven tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
-// recall_ref, recall_page. The daemon/operator tick runs from the Stop hook, not here.
+// recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
+// recall_hyperedge_list. The daemon/operator tick runs from the Stop hook, not here.
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell } from "./cell-context.js";
 import { admit } from "./admission.js";
@@ -10,6 +11,7 @@ import { semanticSearch } from "./semantic.js";
 import { resolveCellReference, cellReferenceView } from "./references.js";
 import { getRecallPage } from "./pages.js";
 import type { PageName, PageFilter } from "./pages.js";
+import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import type { Store, WriteProposal } from "./types.js";
 import type { SqliteStore } from "./store.js";
 
@@ -40,6 +42,9 @@ export const TOOLS = [
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
   { name: "recall_ref", description: "Resolve a cell reference (handle#field.path) to the addressed value.", inputSchema: { type: "object", properties: { reference: { type: "string" } }, required: ["reference"] } },
   { name: "recall_page", description: "Return a curated kind-filtered page view (reflections, objectives, workbench, witnesses, handoffs, team-metrics, agent-profile, user-profile, index).", inputSchema: { type: "object", properties: { name: { type: "string" }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } }, required: ["name"] } },
+  { name: "recall_hyperedge_add", description: "Create a hyperedge grouping cell members under a kind and title.", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, members: { type: "array" }, metadata: { type: "object" } }, required: ["kind", "title", "members"] } },
+  { name: "recall_hyperedge_show", description: "Expand one hyperedge by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+  { name: "recall_hyperedge_list", description: "List hyperedges, optionally filtered to those containing a given cell.", inputSchema: { type: "object", properties: { limit: { type: "number" }, forCell: { type: "string" } } } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -151,6 +156,28 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       if (typeof args.limit === "number") filter.limit = args.limit;
       const page = getRecallPage(pageName as PageName, store, filter);
       return JSON.stringify(page);
+    }
+    case "recall_hyperedge_add": {
+      const input: HyperedgeInput = {
+        kind: String(args.kind ?? ""),
+        title: String(args.title ?? ""),
+        members: Array.isArray(args.members) ? (args.members as HyperedgeInput["members"]) : [],
+        metadata: args.metadata && typeof args.metadata === "object" ? (args.metadata as Record<string, unknown>) : undefined,
+      };
+      const hyperedge = addHyperedge(store, input);
+      return JSON.stringify(hyperedge);
+    }
+    case "recall_hyperedge_show": {
+      const id = String(args.id ?? "");
+      const hyperedge = store.getHyperedge(id);
+      if (!hyperedge) return JSON.stringify({ error: `unknown hyperedge: ${id}` });
+      return JSON.stringify(hyperedge);
+    }
+    case "recall_hyperedge_list": {
+      const limit = typeof args.limit === "number" ? args.limit : undefined;
+      const forCell = typeof args.forCell === "string" ? args.forCell : undefined;
+      const hyperedges = forCell ? store.hyperedgesForCell(forCell, limit) : store.listHyperedges(limit);
+      return JSON.stringify(hyperedges);
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

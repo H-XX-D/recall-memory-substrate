@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the eight lean tools", () => {
+test("tools/list returns exactly the eleven-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -35,6 +35,9 @@ test("tools/list returns exactly the eight lean tools", () => {
     "recall_semantic",
     "recall_ref",
     "recall_page",
+    "recall_hyperedge_add",
+    "recall_hyperedge_show",
+    "recall_hyperedge_list",
   ]);
   store.close();
 });
@@ -86,8 +89,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the eight-tool surface", () => {
-  assert.equal(TOOLS.length, 8);
+test("TOOLS is the eleven-tool surface", () => {
+  assert.equal(TOOLS.length, 11);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -190,5 +193,81 @@ test("recall_page with unknown name returns a clear error object without throwin
 
   assert.ok(typeof out.error === "string", "error must be a string");
   assert.ok(out.error.includes("no-such-page"), "error must name the bad page");
+  store.close();
+});
+
+test("recall_hyperedge_add creates a hyperedge and recall_hyperedge_show returns it", () => {
+  const store = new SqliteStore(":memory:");
+  const r = admit(
+    { kind: "obs", title: "hyperedge mcp member", body: "a cell to join a hyperedge", confidence: 0.8, topics: [], entities: [] },
+    { store },
+  );
+  assert.equal(r.accepted, true);
+  const memberKey = r.cell!.key;
+
+  const added = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_add",
+    arguments: { kind: "cluster", title: "mcp hyperedge", members: [memberKey] },
+  }), store));
+  assert.equal(added.title, "mcp hyperedge");
+  assert.equal(added.members[0].key, memberKey);
+
+  const shown = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_show",
+    arguments: { id: added.id },
+  }), store));
+  assert.equal(shown.id, added.id);
+  assert.equal(shown.title, "mcp hyperedge");
+  store.close();
+});
+
+test("recall_hyperedge_show with an unknown id returns a clear not-found payload, not a throw", () => {
+  const store = new SqliteStore(":memory:");
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_show",
+    arguments: { id: "no-such-hyperedge-id" },
+  }), store));
+  assert.ok(typeof out.error === "string", "error must be a string");
+  assert.ok(out.error.includes("no-such-hyperedge-id"), "error must name the bad id");
+  store.close();
+});
+
+test("recall_hyperedge_list returns hyperedges and respects limit", () => {
+  const store = new SqliteStore(":memory:");
+  const r = admit(
+    { kind: "obs", title: "hyperedge list member", body: "a cell to join two hyperedges", confidence: 0.8, topics: [], entities: [] },
+    { store },
+  );
+  assert.equal(r.accepted, true);
+  const memberKey = r.cell!.key;
+
+  callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_add",
+    arguments: { kind: "cluster", title: "list hyperedge one", members: [memberKey] },
+  }), store));
+  callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_add",
+    arguments: { kind: "cluster", title: "list hyperedge two", members: [memberKey] },
+  }), store));
+
+  const limited = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_list",
+    arguments: { limit: 1 },
+  }), store));
+  assert.ok(Array.isArray(limited), "result should be an array");
+  assert.equal(limited.length, 1);
+
+  const all = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_list",
+    arguments: {},
+  }), store));
+  assert.equal(all.length, 2);
+
+  const forCell = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_hyperedge_list",
+    arguments: { forCell: memberKey },
+  }), store));
+  assert.equal(forCell.length, 2);
+  assert.ok(forCell.every((h: any) => h.members.some((m: any) => m.key === memberKey)));
   store.close();
 });

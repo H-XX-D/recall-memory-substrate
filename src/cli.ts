@@ -14,6 +14,7 @@ import {
   readJsonFile,
 } from "./adapters.js";
 import { migrate } from "./migrate.js";
+import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { inspectCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { FederatedReadStore } from "./federated-store.js";
@@ -220,6 +221,35 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       });
     }
 
+    if (command === "hyperedge" && subcommand === "add") {
+      const input = readJsonValue(args, "hyperedge add") as HyperedgeInput;
+      const store = openWriteStore(route.dbPath);
+      try {
+        outJson(out, addHyperedge(store, input, options.now));
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "hyperedge" && subcommand === "show") {
+      const id = args.command[2];
+      if (!id) throw new Error("hyperedge show requires an id");
+      return withReadStore(args, route, env, (store) => {
+        const hyperedge = store.getHyperedge(id);
+        if (!hyperedge) throw new Error(`Unknown hyperedge: ${id}`);
+        outJson(out, hyperedge);
+        return 0;
+      });
+    }
+
+    if (command === "hyperedge" && subcommand === "list") {
+      return withReadStore(args, route, env, (store) => {
+        outJson(out, { hyperedges: store.listHyperedges(args.limit) });
+        return 0;
+      });
+    }
+
     if (command === "operate" && (!subcommand || subcommand === "once")) {
       const store = openWriteStore(route.dbPath);
       try {
@@ -405,6 +435,9 @@ Commands:
   recall compile "task" [--words 900] [--limit 10] [--db path] [--project slug]
   recall search "query" [--limit 10] [--db path] [--project slug]
   recall cell show <key-or-handle> [--db path] [--project slug]
+  recall hyperedge add --json edge.json [--db path] [--project slug]
+  recall hyperedge show <id> [--db path] [--project slug]
+  recall hyperedge list [--limit 10] [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]
