@@ -129,7 +129,7 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       const query = String(args.query ?? "");
       const limit = typeof args.limit === "number" ? args.limit : 10;
       const minScore = typeof args.minScore === "number" ? args.minScore : undefined;
-      const hits = semanticSearch(query, store as SqliteStore, { limit, minScore }).map((h) => ({
+      const hits = semanticSearch(query, store, { limit, minScore }).map((h) => ({
         key: h.cell.key,
         handle: h.cell.handle,
         title: h.cell.title,

@@ -121,7 +121,7 @@ function runSemanticCase(
   store: Store,
   c: Extract<RecallEvalCase, { kind: "semantic" }>,
 ): RecallEvalCaseResult {
-  const hits = semanticSearch(c.query, store as SqliteStore, { limit: 20 });
+  const hits = semanticSearch(c.query, store, { limit: 20 });
   const minResults = c.minResults ?? 0;
   const containsOk =
     !c.expectContains ||

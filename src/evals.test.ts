@@ -11,6 +11,8 @@ import {
 import { buildCell } from "./build.js";
 import { SqliteStore } from "./store.js";
 import { indexCell } from "./semantic.js";
+import type { Cell, Store } from "./types.js";
+import { resolveCell } from "./cell-context.js";
 
 function seededStore(): SqliteStore {
   const store = new SqliteStore(":memory:");
@@ -309,4 +311,147 @@ test("runEvalAndDerive twice with an identical result returns duplicateOf on the
   } finally {
     store.close();
   }
+});
+
+// Store-typed double (no SqliteStore-only methods behind it): if semanticSearch
+// ever grew a real SqliteStore-only dependency, this bare object literal would
+// fail to satisfy the Store type and the test would not compile.
+function bareStoreWithCells(cells: Cell[]): Store {
+  const byKey = new Map(cells.map((c) => [c.key, c]));
+  return {
+    put: (cell) => { byKey.set(cell.key, cell); },
+    get: (key) => byKey.get(key),
+    getByHandle: (handle) => [...byKey.values()].find((c) => c.handle === handle),
+    all: () => [...byKey.values()],
+    active: () => [...byKey.values()].filter((c) => c.status === "active"),
+    neighbors: () => [],
+    findByContentKey: () => undefined,
+    search: () => [],
+    lexicalBackend: () => "like",
+    stats: () => ({
+      cells: byKey.size,
+      activeCells: [...byKey.values()].filter((c) => c.status === "active").length,
+      edges: 0,
+      indexedCells: byKey.size,
+      lexicalBackend: "like",
+    }),
+    close: () => {},
+    putSemanticVector: () => {},
+    getSemanticVector: () => undefined,
+    listSemanticVectorIds: () => [],
+    putHyperedge: () => {},
+    getHyperedge: () => undefined,
+    listHyperedges: () => [],
+    hyperedgesForCell: () => [],
+    putDagOverlay: () => {},
+    getDagOverlay: () => undefined,
+    listDagOverlays: () => [],
+  };
+}
+
+test("runRecallEval DEFAULT suite runs against a bare Store double (no SqliteStore-only methods) and passes", () => {
+  const a = buildCell(
+    { kind: "obs", title: "Deployment pipeline uses blue-green rollout", body: "The deployment pipeline uses a blue-green rollout strategy.", confidence: 0.8, topics: ["deploy"] },
+    { key: "aaaaaaaa-0000-0000-0000-000000000000" },
+  );
+  const b = buildCell(
+    { kind: "bel", title: "Team believes rollout strategy is stable", body: "Team believes the current rollout strategy is stable.", confidence: 0.7, topics: ["deploy"] },
+    { key: "bbbbbbbb-0000-0000-0000-000000000000" },
+  );
+  const store = bareStoreWithCells([a, b]);
+  assert.equal("recordEvalRun" in store, false);
+
+  const result = runRecallEval(store);
+  assert.equal(result.name, "recall-default");
+  assert.equal(result.cases.length, 8);
+  assert.ok(result.passed, JSON.stringify(result.cases.filter((c) => !c.passed)));
+  const semanticCase = result.cases.find((c) => c.kind === "semantic");
+  assert.ok(semanticCase);
+  assert.equal(semanticCase!.passed, true);
+});
+
+test("prefix-resolution invariant passes with details.ambiguous set when two cells share an 8-char key prefix", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const shared = "aaaaaaaa";
+    const a = buildCell(
+      { kind: "obs", title: "A", body: "a", confidence: 0.8 },
+      { key: `${shared}-0000-0000-0000-000000000001` },
+    );
+    const b = buildCell(
+      { kind: "obs", title: "B", body: "b", confidence: 0.8 },
+      { key: `${shared}-0000-0000-0000-000000000002` },
+    );
+    store.put(a);
+    store.put(b);
+    const suite = {
+      name: "custom",
+      cases: [{ name: "prefix", kind: "invariant" as const, invariant: "prefix-resolution" as const }],
+    };
+    const result = runRecallEval(store, suite);
+    assert.equal(result.cases[0]!.passed, true);
+    assert.equal(result.cases[0]!.details.ambiguous, true);
+  } finally {
+    store.close();
+  }
+});
+
+test("prefix-resolution invariant fails when the resolver returns a different cell (or none) than the first active cell", () => {
+  const a = buildCell(
+    { kind: "obs", title: "A", body: "a", confidence: 0.8 },
+    { key: "aaaaaaaa-0000-0000-0000-000000000000" },
+  );
+  const wrong = buildCell(
+    { kind: "obs", title: "Wrong", body: "wrong", confidence: 0.8 },
+    { key: "ffffffff-0000-0000-0000-000000000000" },
+  );
+
+  // get/getByHandle resolve to a DIFFERENT cell than active()[0] for any
+  // input, which is exactly the "wrong resolution" branch of the invariant
+  // (resolveCell falls through get/getByHandle before its prefix scan).
+  const wrongResolutionStore: Store = {
+    put: () => {},
+    get: () => wrong,
+    getByHandle: () => wrong,
+    all: () => [a, wrong],
+    active: () => [a, wrong],
+    neighbors: () => [],
+    findByContentKey: () => undefined,
+    search: () => [],
+    lexicalBackend: () => "like",
+    stats: () => ({ cells: 2, activeCells: 2, edges: 0, indexedCells: 2, lexicalBackend: "like" }),
+    close: () => {},
+    putSemanticVector: () => {},
+    getSemanticVector: () => undefined,
+    listSemanticVectorIds: () => [],
+    putHyperedge: () => {},
+    getHyperedge: () => undefined,
+    listHyperedges: () => [],
+    hyperedgesForCell: () => [],
+    putDagOverlay: () => {},
+    getDagOverlay: () => undefined,
+    listDagOverlays: () => [],
+  };
+  const suite = {
+    name: "custom",
+    cases: [{ name: "prefix", kind: "invariant" as const, invariant: "prefix-resolution" as const }],
+  };
+  const wrongResult = runRecallEval(wrongResolutionStore, suite);
+  assert.equal(wrongResult.cases[0]!.passed, false);
+  assert.equal(wrongResult.cases[0]!.details.resolvedKey, wrong.key);
+  // Sanity: resolveCell itself indeed resolves to the wrong cell for this double.
+  assert.equal(resolveCell(wrongResolutionStore, a.key.slice(0, 8))?.key, wrong.key);
+
+  // get/getByHandle return undefined and the prefix scan (store.all()) is
+  // empty, so resolveCell returns undefined: the "no resolution" branch.
+  const undefinedResolutionStore: Store = {
+    ...wrongResolutionStore,
+    get: () => undefined,
+    getByHandle: () => undefined,
+    all: () => [],
+    active: () => [a],
+  };
+  const undefinedResult = runRecallEval(undefinedResolutionStore, suite);
+  assert.equal(undefinedResult.cases[0]!.passed, false);
+  assert.equal(undefinedResult.cases[0]!.details.resolvedKey, undefined);
 });

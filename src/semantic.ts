@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
-import type { Cell } from "./types.js";
-import type { SqliteStore } from "./store.js";
+import type { Cell, Store } from "./types.js";
 
 export interface EmbeddingRecord {
   backend: string;
@@ -147,7 +146,7 @@ export interface SemanticHit {
 
 export function semanticSearch(
   query: string,
-  store: SqliteStore,
+  store: Store,
   opts?: { limit?: number; minScore?: number }
 ): SemanticHit[] {
   const limit = opts?.limit ?? 10;
@@ -186,7 +185,7 @@ export function semanticSearch(
   return hits;
 }
 
-export function indexCell(cell: Cell, store: SqliteStore): void {
+export function indexCell(cell: Cell, store: Store): void {
   const text = textForEmbedding([cell.title, cell.summary, cell.body, ...cell.tags.topics, ...cell.tags.entities]);
   const rec = embedTextRecord(text);
   store.putSemanticVector({
