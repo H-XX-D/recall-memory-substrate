@@ -8,8 +8,11 @@ import {
   previewReferenceValue,
   cellProjection,
   selectCellPath,
+  resolveCellReference,
+  cellReferenceView,
 } from "./references.js";
 import { buildCell } from "./build.js";
+import { SqliteStore } from "./store.js";
 
 describe("parseCellReference", () => {
   it("parses target and dot-path when # is present", () => {
@@ -193,5 +196,66 @@ describe("cellProjection + selectCellPath", () => {
     for (const field of expected) {
       assert.ok(Object.prototype.hasOwnProperty.call(proj, field), `missing field: ${field}`);
     }
+  });
+});
+
+describe("resolveCellReference + cellReferenceView", () => {
+  it("resolves a cell by handle and returns cell != null with correct value via view", () => {
+    const store = new SqliteStore(":memory:");
+    const cell = buildCell(
+      { kind: "bel", title: "Score test", body: "body", confidence: 0.8 },
+      { key: "aabb1234efef" },
+    );
+    store.put(cell);
+    const ref = `${cell.handle}#scores.effective`;
+    const res = resolveCellReference(ref, store);
+    assert.ok(res.cell !== null, "cell should resolve");
+    assert.equal(res.cell!.key, "aabb1234efef");
+    assert.equal(res.targetId, cell.handle);
+    assert.equal(res.handle, cell.handle);
+    // canonical should be the resolved cell key
+    assert.equal(res.canonical, "aabb1234efef");
+    const view = cellReferenceView(res.cell!, ref);
+    assert.equal(view.reference, ref);
+    assert.equal(view.handle, cell.handle);
+    assert.equal(view.path, "scores.effective");
+    assert.equal(view.value, previewReferenceValue(selectCellPath(cell, "scores.effective")));
+    store.close();
+  });
+
+  it("returns cell: null for an unknown reference", () => {
+    const store = new SqliteStore(":memory:");
+    const res = resolveCellReference("no-such-cell", store);
+    assert.equal(res.cell, null);
+    store.close();
+  });
+
+  it("returns cell: null (not throw) for an ambiguous hex prefix", () => {
+    const store = new SqliteStore(":memory:");
+    store.put(buildCell({ kind: "dec", title: "A", body: "b", confidence: 0.7 }, { key: "abcd1111cccc" }));
+    store.put(buildCell({ kind: "dec", title: "B", body: "b", confidence: 0.7 }, { key: "abcd2222dddd" }));
+    let res: ReturnType<typeof resolveCellReference> | undefined;
+    assert.doesNotThrow(() => {
+      res = resolveCellReference("abcd", store);
+    });
+    assert.equal(res!.cell, null);
+    // canonical should carry the error reason
+    assert.ok(res!.canonical.length > 0, "canonical should have reason string");
+    store.close();
+  });
+
+  it("cellReferenceView omits value when no path on reference", () => {
+    const store = new SqliteStore(":memory:");
+    const cell = buildCell(
+      { kind: "obs", title: "No path", body: "b", confidence: 0.5 },
+      { key: "ccdd5678abab" },
+    );
+    store.put(cell);
+    const res = resolveCellReference(cell.key, store);
+    assert.ok(res.cell !== null);
+    const view = cellReferenceView(res.cell!, cell.key);
+    assert.equal(view.path, undefined);
+    assert.equal(view.value, undefined);
+    store.close();
   });
 });

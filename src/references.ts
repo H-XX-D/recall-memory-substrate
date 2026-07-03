@@ -1,9 +1,10 @@
 // Pure string utilities for cell references, plus MAL cell field addressing.
 // Tasks 12+: cellProjection and selectCellPath require Cell from types and
-// selectField from resolve. Lower-level string helpers have no such imports.
+// selectField from resolve. Task 13 adds store-backed resolution.
 
-import type { Cell } from "./types.js";
+import type { Cell, Store } from "./types.js";
 import { selectField } from "./resolve.js";
+import { resolveCell } from "./cell-context.js";
 
 export interface ParsedCellReference {
   raw: string;
@@ -105,6 +106,65 @@ export function cellProjection(cell: Cell): Record<string, unknown> {
 // Delegates fully to resolve.selectField; does not reimplement the walk.
 export function selectCellPath(cell: Cell, path: string): unknown {
   return selectField(cellProjection(cell), path.split("."));
+}
+
+// Store-backed resolution (Task 13).
+
+export interface ResolvedCellReference extends ParsedCellReference {
+  cell: Cell | null;
+  targetId: string;
+  canonical: string;
+  handle?: string;
+}
+
+// Resolve a cell reference against a store. Never throws:
+//   - undefined from resolveCell is normalized to null
+//   - an ambiguous-prefix throw is caught; null cell + reason on canonical
+export function resolveCellReference(reference: string, store: Store): ResolvedCellReference {
+  const parsed = parseCellReference(reference);
+  const targetId = cellReferenceTarget(reference);
+  let cell: Cell | null = null;
+  let canonical: string = targetId;
+  let handle: string | undefined;
+  try {
+    const resolved = resolveCell(store, targetId);
+    cell = resolved ?? null;
+    if (cell !== null) {
+      canonical = cell.key;
+      handle = cell.handle;
+    }
+  } catch (err) {
+    cell = null;
+    canonical = err instanceof Error ? err.message : String(err);
+  }
+  const result: ResolvedCellReference = { ...parsed, cell, targetId, canonical };
+  if (handle !== undefined) result.handle = handle;
+  return result;
+}
+
+export interface CellReferenceView {
+  reference: string;
+  targetId: string;
+  handle?: string;
+  path?: string;
+  value?: unknown;
+}
+
+// Build a display view for a resolved cell. If the reference has a path,
+// the value is previewed via previewReferenceValue + selectCellPath.
+export function cellReferenceView(cell: Cell, reference: string): CellReferenceView {
+  const targetId = cellReferenceTarget(reference);
+  const path = cellReferencePath(reference);
+  const view: CellReferenceView = {
+    reference,
+    targetId,
+    handle: cell.handle,
+  };
+  if (path !== undefined) {
+    view.path = path;
+    view.value = previewReferenceValue(selectCellPath(cell, path));
+  }
+  return view;
 }
 
 // Helpers
