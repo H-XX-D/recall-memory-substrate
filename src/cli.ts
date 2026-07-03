@@ -714,7 +714,7 @@ Commands:
   recall dag analyze <id> [--derive] [--db path] [--project slug]
   recall program run <key-or-handle> [--derive] [--db path] [--project slug]
   recall program list [--db path] [--project slug]
-  recall program runs [<key-or-handle>] [--limit 20] [--db path] [--project slug]
+  recall program runs [<key-or-handle>] [--limit 10] [--db path] [--project slug]
   recall program show-run <id> [--db path] [--project slug]
   recall eval run [--derive] [--json suite.json|-] [--db path] [--project slug]
   recall eval list [--limit 10] [--db path] [--project slug]
