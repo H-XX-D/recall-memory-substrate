@@ -10,6 +10,7 @@ export * from "./codex-integration.js";
 export * from "./compile.js";
 export * from "./federated-store.js";
 export * from "./firewall.js";
+export * from "./hyperedges.js";
 export * from "./mass.js";
 export * from "./netlist.js";
 export * from "./operator.js";

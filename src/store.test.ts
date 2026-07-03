@@ -138,11 +138,38 @@ test("stats reports cells, active cells, edges, and lexical indexing state", () 
 
 test("store round-trips a hyperedge", () => {
   const store = new SqliteStore(":memory:");
-  store.putHyperedge({ id: "h1", kind: "cluster", title: "t", members: ["a", "b"], metadata: { n: 1 }, createdAt: "2026-07-03T00:00:00Z" });
+  store.putHyperedge({
+    id: "h1", kind: "cluster", title: "t",
+    members: [{ key: "a", role: "member", ordinal: 0 }, { key: "b", role: "member", ordinal: 1 }],
+    metadata: { n: 1 }, createdAt: "2026-07-03T00:00:00Z",
+  });
   const all = store.listHyperedges();
   assert.equal(all.length, 1);
-  assert.deepEqual(all[0]!.members, ["a", "b"]);
+  assert.deepEqual(all[0]!.members, [
+    { key: "a", role: "member", ordinal: 0 },
+    { key: "b", role: "member", ordinal: 1 },
+  ]);
   assert.equal(all[0]!.metadata.n, 1);
+  store.close();
+});
+
+test("listHyperedges normalizes a raw legacy-shaped members array written directly to the db", () => {
+  const store = new SqliteStore(":memory:");
+  // Simulate a pre-normalizer row: members_json holds legacy {nodeId, role, weight}
+  // objects, exactly what an already-migrated store could still hold on disk.
+  const raw = [{ nodeId: "n1", role: "driver", weight: 0.5 }, "k2"];
+  (store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): void } } }).db
+    .prepare(
+      `INSERT OR REPLACE INTO hyperedges (id, kind, title, members_json, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run("h2", "cluster", "legacy shape", JSON.stringify(raw), JSON.stringify({}), "2026-07-03T00:00:00Z");
+
+  const all = store.listHyperedges();
+  assert.equal(all.length, 1);
+  assert.deepEqual(all[0]!.members, [
+    { key: "n1", role: "driver", ordinal: 0, weight: 0.5 },
+    { key: "k2", role: "member", ordinal: 1 },
+  ]);
   store.close();
 });
 

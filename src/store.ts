@@ -17,6 +17,7 @@ import type {
 } from "./types.js";
 import { openDb, type Db } from "./db.js";
 import { buildFtsMatchQuery } from "./retrieval.js";
+import { normalizeHyperedgeMembers } from "./hyperedges.js";
 
 // Content fingerprint for dedup: kind + normalized title. Stable, not relational,
 // so it is safe to store and index (it is a content key, not derived graph state).
@@ -153,7 +154,14 @@ export class SqliteStore implements Store {
 
   listHyperedges(limit = 100): Hyperedge[] {
     const rows = this.db.prepare(`SELECT * FROM hyperedges ORDER BY created_at DESC LIMIT ?`).all(limit) as Array<{ id: string; kind: string; title: string; members_json: string; metadata_json: string; created_at: string }>;
-    return rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, members: JSON.parse(r.members_json), metadata: JSON.parse(r.metadata_json), createdAt: r.created_at }));
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      title: r.title,
+      members: normalizeHyperedgeMembers(JSON.parse(r.members_json)),
+      metadata: JSON.parse(r.metadata_json),
+      createdAt: r.created_at,
+    }));
   }
 
   putSemanticVector(v: SemanticVector): void {

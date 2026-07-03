@@ -106,7 +106,13 @@ test("migrate copies nodes, relations, hyperedges, and semantic vectors", () => 
   old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("a", null, "observation", "A", "abody", null, null, JSON.stringify({ topics: ["t"] }), JSON.stringify({ confidence: { value: 0.8 } }), null, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
   old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("b", null, "decision", "B", "bbody", null, null, null, null, null, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
   old.prepare(`INSERT INTO graph_relations VALUES (?,?,?,?,?,?)`).run("r1", "supports", "b", "a", null, "2026-06-01T00:00:00Z");
-  old.prepare(`INSERT INTO hyperedges VALUES (?,?,?,?,?,?)`).run("h1", "cluster", "H", JSON.stringify(["a", "b"]), JSON.stringify({}), "2026-06-01T00:00:00Z");
+  // legacy hyperedge rows store member OBJECTS, not plain keys; the fixture
+  // mixes both shapes to exercise the migrate mapping fix end to end.
+  old.prepare(`INSERT INTO hyperedges VALUES (?,?,?,?,?,?)`).run(
+    "h1", "cluster", "H",
+    JSON.stringify(["a", { nodeId: "b", role: "driver", weight: 0.5 }]),
+    JSON.stringify({}), "2026-06-01T00:00:00Z",
+  );
   old.prepare(`INSERT INTO semantic_index VALUES (?,?,?,?,?)`).run("a", "hash", 2, JSON.stringify([0.1, 0.2]), "2026-06-01T00:00:00Z");
   old.close();
 
@@ -127,7 +133,12 @@ test("migrate copies nodes, relations, hyperedges, and semantic vectors", () => 
   assert.equal(b?.edgesOut[0]?.relation, "supports");
   assert.equal(b?.edgesOut[0]?.target, "a");
   assert.equal(target.getSemanticVector("a")?.dims, 2);
-  assert.equal(target.listHyperedges().length, 1);
+  const migratedHyperedges = target.listHyperedges();
+  assert.equal(migratedHyperedges.length, 1);
+  // legacy node id becomes the cell key unchanged; the string member gets
+  // defaulted, the object member keeps its stated role/weight.
+  assert.deepEqual(migratedHyperedges[0]!.members[0], { key: "a", role: "member", ordinal: 0 });
+  assert.deepEqual(migratedHyperedges[0]!.members[1], { key: "b", role: "driver", ordinal: 1, weight: 0.5 });
   target.close();
   rmSync(dir, { recursive: true, force: true });
 });

@@ -48,12 +48,22 @@ export interface Edge {
   weight: number;
 }
 
+// A single participant in a hyperedge. key is the cell key; role and ordinal
+// give the membership meaning and stable order beyond a plain set of keys.
+export interface HyperedgeMember {
+  key: string;
+  role: string;
+  ordinal: number;
+  weight?: number;
+  metadata?: Record<string, unknown>;
+}
+
 // Rich overlays ported from model-A. Keyed by cell key; orthogonal to cells/edges.
 export interface Hyperedge {
   id: string;
   kind: string;
   title: string;
-  members: string[]; // cell keys
+  members: HyperedgeMember[];
   metadata: Record<string, unknown>;
   createdAt: string;
 }

@@ -3,6 +3,7 @@ import { buildCell } from "./build.js";
 import type { Cell, Edge, Kind, Relation } from "./types.js";
 import { RELATIONS } from "./types.js";
 import { SqliteStore } from "./store.js";
+import { normalizeHyperedgeMembers } from "./hyperedges.js";
 
 const KIND_MAP: Record<string, Kind> = {
   observation: "obs", verification_result: "ver", decision: "dec",
@@ -136,7 +137,10 @@ export function migrate(
     if (apply) {
       target.putHyperedge({
         id: h.id, kind: h.kind, title: h.title,
-        members: JSON.parse(h.members_json) as string[],
+        // legacy rows may hold plain keys or {nodeId, role, ordinal, ...}
+        // objects; normalize both shapes through the same read-path mapper
+        // instead of casting straight to string[].
+        members: normalizeHyperedgeMembers(JSON.parse(h.members_json)),
         metadata: JSON.parse(h.metadata_json) as Record<string, unknown>,
         createdAt: h.created_at,
       });
