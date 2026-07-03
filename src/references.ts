@@ -1,5 +1,9 @@
-// Pure string utilities for cell references. No store access, no Cell import.
-// Consumers that need node resolution (Tasks 12-14) build on top of these.
+// Pure string utilities for cell references, plus MAL cell field addressing.
+// Tasks 12+: cellProjection and selectCellPath require Cell from types and
+// selectField from resolve. Lower-level string helpers have no such imports.
+
+import type { Cell } from "./types.js";
+import { selectField } from "./resolve.js";
 
 export interface ParsedCellReference {
   raw: string;
@@ -68,6 +72,39 @@ export function previewReferenceValue(value: unknown): unknown {
     return Object.fromEntries(Object.entries(value).slice(0, 8));
   }
   return value;
+}
+
+// MAL cell field addressing (Task 12).
+//
+// cellProjection: returns a plain object with the addressable MAL fields.
+// Only real MAL names are exposed; no compat aliases (confirmed by audit of
+// compile.ts, render.ts, mcp-server.ts -- no live consumer addresses
+// confidence.value, data.evidence, intent.*, or any scores/props compat keys).
+export function cellProjection(cell: Cell): Record<string, unknown> {
+  return {
+    key: cell.key,
+    handle: cell.handle,
+    kind: cell.kind,
+    title: cell.title,
+    body: cell.body,
+    summary: cell.summary,
+    scope: cell.scope,
+    status: cell.status,
+    scores: cell.scores,
+    flags: cell.flags,
+    tags: cell.tags,
+    policy: cell.policy,
+    provenance: cell.provenance,
+    props: cell.props,
+    createdAt: cell.createdAt,
+    updatedAt: cell.updatedAt,
+  };
+}
+
+// selectCellPath: walk a dot-path into a cell's projected fields.
+// Delegates fully to resolve.selectField; does not reimplement the walk.
+export function selectCellPath(cell: Cell, path: string): unknown {
+  return selectField(cellProjection(cell), path.split("."));
 }
 
 // Helpers

@@ -6,7 +6,10 @@ import {
   cellReferenceTarget,
   cellReferencePath,
   previewReferenceValue,
+  cellProjection,
+  selectCellPath,
 } from "./references.js";
+import { buildCell } from "./build.js";
 
 describe("parseCellReference", () => {
   it("parses target and dot-path when # is present", () => {
@@ -140,5 +143,55 @@ describe("previewReferenceValue", () => {
 
   it("passes through undefined unchanged", () => {
     assert.equal(previewReferenceValue(undefined), undefined);
+  });
+});
+
+describe("cellProjection + selectCellPath", () => {
+  const cell = buildCell({
+    kind: "bel",
+    title: "Test belief",
+    body: "Some body text",
+    confidence: 0.9,
+    topics: ["ai", "ml"],
+    entities: ["gpt"],
+  });
+
+  it("selectCellPath: scores.effective returns a number", () => {
+    const val = selectCellPath(cell, "scores.effective");
+    assert.equal(typeof val, "number");
+  });
+
+  it("selectCellPath: tags.topics returns the array", () => {
+    const val = selectCellPath(cell, "tags.topics");
+    assert.ok(Array.isArray(val));
+    assert.deepEqual(val, ["ai", "ml"]);
+  });
+
+  it("selectCellPath: key returns cell.key (projection exposes key, not id)", () => {
+    const val = selectCellPath(cell, "key");
+    assert.equal(val, cell.key);
+  });
+
+  it("selectCellPath: unknown path returns undefined", () => {
+    const val = selectCellPath(cell, "nope.missing");
+    assert.equal(val, undefined);
+  });
+
+  it("cellProjection: exposes key not id", () => {
+    const proj = cellProjection(cell);
+    assert.ok(Object.prototype.hasOwnProperty.call(proj, "key"));
+    assert.ok(!Object.prototype.hasOwnProperty.call(proj, "id"));
+  });
+
+  it("cellProjection: includes all required MAL fields", () => {
+    const proj = cellProjection(cell);
+    const expected = [
+      "key", "handle", "kind", "title", "body", "summary", "scope",
+      "status", "scores", "flags", "tags", "policy", "provenance",
+      "props", "createdAt", "updatedAt",
+    ];
+    for (const field of expected) {
+      assert.ok(Object.prototype.hasOwnProperty.call(proj, field), `missing field: ${field}`);
+    }
   });
 });
