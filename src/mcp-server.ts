@@ -1,11 +1,11 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Fifteen tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Sixteen tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
 // recall_hyperedge_list, recall_dag_analyze, recall_program_run,
-// recall_program_runs, recall_eval_run. The daemon/operator tick runs from the
-// Stop hook, not here.
+// recall_program_runs, recall_eval_run, recall_subgraph. The daemon/operator
+// tick runs from the Stop hook, not here.
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { admit } from "./admission.js";
@@ -18,6 +18,7 @@ import { analyzeDagOverlay } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
 import { runProgramCell } from "./programs.js";
 import { runAndRecordEval, runEvalAndDerive } from "./evals.js";
+import { subgraphCells, type SubgraphFilter } from "./subgraph.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 import type { SqliteStore } from "./store.js";
 
@@ -55,6 +56,7 @@ export const TOOLS = [
   { name: "recall_program_run", description: "Run a standing program cell by key or handle; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { key: { type: "string" }, derive: { type: "boolean" } }, required: ["key"] } },
   { name: "recall_program_runs", description: "List program run history, optionally filtered to one program key or handle.", inputSchema: { type: "object", properties: { key: { type: "string" }, limit: { type: "number" } } } },
   { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
+  { name: "recall_subgraph", description: "Tag-composed retrieval over active cells (AND across kinds/project/topics/entities/since; every listed value within an array family required), newest-updated first.", inputSchema: { type: "object", properties: { kinds: { type: "array", items: { type: "string" } }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } } } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -253,6 +255,23 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
         score: result.score,
         cases: result.cases.map((c) => ({ name: c.name, passed: c.passed })),
       });
+    }
+    case "recall_subgraph": {
+      const filter: SubgraphFilter = {};
+      if (Array.isArray(args.kinds)) filter.kinds = args.kinds as SubgraphFilter["kinds"];
+      if (typeof args.project === "string") filter.project = args.project;
+      if (Array.isArray(args.topics)) filter.topics = args.topics as string[];
+      if (Array.isArray(args.entities)) filter.entities = args.entities as string[];
+      if (typeof args.since === "string") filter.since = args.since;
+      if (typeof args.limit === "number") filter.limit = args.limit;
+      const cells = subgraphCells(store, filter).map((c) => ({
+        key: c.key,
+        handle: c.handle,
+        kind: c.kind,
+        title: c.title,
+        updatedAt: c.updatedAt,
+      }));
+      return JSON.stringify(cells);
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

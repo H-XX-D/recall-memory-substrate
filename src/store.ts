@@ -150,6 +150,38 @@ export class SqliteStore implements Store {
     return rows.map((r) => this.hydrate(r));
   }
 
+  // SqliteStore only (NOT on the Store interface, NOT FederatedReadStore):
+  // subgraph.ts feature-detects with "activeWhere" in store to take this fast
+  // path instead of filtering store.active() app-side. Pushes status='active'
+  // plus kind/project/since down into SQL against the real `kind` column and
+  // the indexed `project`/`updated_at` generated columns, newest-updated first.
+  // LIMIT is applied only when the caller passes it: subgraphCells omits it
+  // whenever tag families (topics/entities/lifecycle/quality/subject) are also
+  // present, since app-side tag filtering after a SQL LIMIT would under-fill.
+  activeWhere(opts: { kinds?: Kind[]; project?: string; since?: string; limit?: number }): Cell[] {
+    const clauses = [`status = 'active'`];
+    const params: (string | number)[] = [];
+    if (opts.kinds !== undefined && opts.kinds.length > 0) {
+      clauses.push(`kind IN (${opts.kinds.map(() => "?").join(", ")})`);
+      params.push(...opts.kinds);
+    }
+    if (opts.project !== undefined) {
+      clauses.push(`project = ?`);
+      params.push(opts.project);
+    }
+    if (opts.since !== undefined) {
+      clauses.push(`updated_at >= ?`);
+      params.push(opts.since);
+    }
+    let sql = `SELECT key, json FROM cells WHERE ${clauses.join(" AND ")} ORDER BY updated_at DESC`;
+    if (opts.limit !== undefined) {
+      sql += ` LIMIT ?`;
+      params.push(opts.limit);
+    }
+    const rows = this.db.prepare(sql).all(...params) as unknown as CellRow[];
+    return rows.map((r) => this.hydrate(r));
+  }
+
   neighbors(key: string): NeighborLink[] {
     const links: NeighborLink[] = [];
     const out = this.db

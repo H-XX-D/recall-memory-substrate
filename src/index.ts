@@ -37,4 +37,5 @@ export {
 } from "./retrieval.js";
 export * from "./pages.js";
 export * from "./store.js";
+export * from "./subgraph.js";
 export * from "./types.js";

@@ -146,6 +146,55 @@ test("compile case passes when wordCount <= maxWords and expectContains matches 
   }
 });
 
+test("subgraph case passes when subgraphCells returns at least minResults", () => {
+  const store = seededStore();
+  try {
+    const suite = {
+      name: "custom",
+      cases: [
+        { name: "sub1", kind: "subgraph" as const, filter: { topics: ["deploy"] }, minResults: 1 },
+      ],
+    };
+    const result = runRecallEval(store, suite);
+    assert.equal(result.cases[0]!.kind, "subgraph");
+    assert.equal(result.cases[0]!.passed, true);
+  } finally {
+    store.close();
+  }
+});
+
+test("subgraph case fails when subgraphCells returns fewer than minResults", () => {
+  const store = seededStore();
+  try {
+    const suite = {
+      name: "custom",
+      cases: [
+        { name: "sub1", kind: "subgraph" as const, filter: { topics: ["nonexistent-topic"] }, minResults: 1 },
+      ],
+    };
+    const result = runRecallEval(store, suite);
+    assert.equal(result.cases[0]!.passed, false);
+  } finally {
+    store.close();
+  }
+});
+
+test("subgraph case defaults minResults to 0 and passes with zero results", () => {
+  const store = seededStore();
+  try {
+    const suite = {
+      name: "custom",
+      cases: [
+        { name: "sub1", kind: "subgraph" as const, filter: { topics: ["nonexistent-topic"] } },
+      ],
+    };
+    const result = runRecallEval(store, suite);
+    assert.equal(result.cases[0]!.passed, true);
+  } finally {
+    store.close();
+  }
+});
+
 test("edge-targets-resolve fails with a dangling edge triple in details when a cell has an edge to a nonexistent target", () => {
   const store = new SqliteStore(":memory:");
   try {

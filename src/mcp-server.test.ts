@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the fifteen-tool surface", () => {
+test("tools/list returns exactly the sixteen-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -42,6 +42,7 @@ test("tools/list returns exactly the fifteen-tool surface", () => {
     "recall_program_run",
     "recall_program_runs",
     "recall_eval_run",
+    "recall_subgraph",
   ]);
   store.close();
 });
@@ -93,8 +94,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the fifteen-tool surface", () => {
-  assert.equal(TOOLS.length, 15);
+test("TOOLS is the sixteen-tool surface", () => {
+  assert.equal(TOOLS.length, 16);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -197,6 +198,41 @@ test("recall_page with unknown name returns a clear error object without throwin
 
   assert.ok(typeof out.error === "string", "error must be a string");
   assert.ok(out.error.includes("no-such-page"), "error must name the bad page");
+  store.close();
+});
+
+test("recall_subgraph round-trips: AND-conjunction over kinds+topics returns [{key, handle, kind, title, updatedAt}]", () => {
+  const store = new SqliteStore(":memory:");
+  const a = admit({ kind: "dec", title: "matches", body: "b", confidence: 0.8, topics: ["alpha", "beta"], entities: [] }, { store });
+  admit({ kind: "obs", title: "wrong kind", body: "b", confidence: 0.8, topics: ["alpha", "beta"], entities: [] }, { store });
+  admit({ kind: "dec", title: "missing beta", body: "b", confidence: 0.8, topics: ["alpha"], entities: [] }, { store });
+  assert.equal(a.accepted, true);
+
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_subgraph",
+    arguments: { kinds: ["dec"], topics: ["alpha", "beta"] },
+  }), store));
+
+  assert.equal(out.length, 1);
+  assert.equal(out[0].kind, "dec");
+  assert.equal(out[0].title, "matches");
+  assert.ok(typeof out[0].key === "string");
+  assert.ok(typeof out[0].handle === "string");
+  assert.ok(typeof out[0].updatedAt === "string");
+  store.close();
+});
+
+test("recall_subgraph with no filter returns active cells newest-updated first up to the default limit", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "dec", title: "one", body: "b", confidence: 0.8, topics: [], entities: [] }, { store });
+  admit({ kind: "obs", title: "two", body: "b", confidence: 0.8, topics: [], entities: [] }, { store });
+
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_subgraph",
+    arguments: {},
+  }), store));
+
+  assert.equal(out.length, 2);
   store.close();
 });
 

@@ -320,6 +320,56 @@ test("cellsCreatedSince filters and orders by the generated created_at column", 
   store.close();
 });
 
+test("activeWhere pushes kind/project/since predicates into SQL and orders newest-updated first", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "a", body: "x", confidence: 0.7, project: "p1" }, { key: "a" });
+  store.put({ ...a, updatedAt: "2026-05-01T00:00:00Z" });
+  const b = buildCell({ kind: "dec", title: "b", body: "x", confidence: 0.7, project: "p1" }, { key: "b" });
+  store.put({ ...b, updatedAt: "2026-06-01T00:00:00Z" });
+  const c = buildCell({ kind: "obs", title: "c", body: "x", confidence: 0.7, project: "p1" }, { key: "c" });
+  store.put({ ...c, updatedAt: "2026-07-01T00:00:00Z" });
+  const d = buildCell({ kind: "dec", title: "d", body: "x", confidence: 0.7, project: "p2" }, { key: "d" });
+  store.put({ ...d, updatedAt: "2026-08-01T00:00:00Z" });
+
+  const rows = store.activeWhere({ kinds: ["dec"], project: "p1" });
+  assert.deepEqual(rows.map((r) => r.key), ["b", "a"]); // newest first, kind+project both applied
+  store.close();
+});
+
+test("activeWhere excludes non-active cells", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "a", body: "x", confidence: 0.7 }, { key: "a" });
+  store.put(a);
+  store.put({ ...a, status: "superseded" });
+  const rows = store.activeWhere({});
+  assert.equal(rows.length, 0);
+  store.close();
+});
+
+test("activeWhere filters on since >= updated_at", () => {
+  const store = new SqliteStore(":memory:");
+  const old = buildCell({ kind: "dec", title: "old", body: "x", confidence: 0.7 }, { key: "old" });
+  store.put({ ...old, updatedAt: "2026-01-01T00:00:00Z" });
+  const recent = buildCell({ kind: "dec", title: "recent", body: "x", confidence: 0.7 }, { key: "recent" });
+  store.put({ ...recent, updatedAt: "2026-07-01T00:00:00Z" });
+
+  const rows = store.activeWhere({ since: "2026-05-01T00:00:00Z" });
+  assert.deepEqual(rows.map((r) => r.key), ["recent"]);
+  store.close();
+});
+
+test("activeWhere applies LIMIT only when the caller passes it", () => {
+  const store = new SqliteStore(":memory:");
+  for (let i = 0; i < 5; i++) {
+    store.put(buildCell({ kind: "dec", title: `t${i}`, body: "x", confidence: 0.7 }, { key: `k${i}` }));
+  }
+  const limited = store.activeWhere({ limit: 2 });
+  assert.equal(limited.length, 2);
+  const unlimited = store.activeWhere({});
+  assert.equal(unlimited.length, 5);
+  store.close();
+});
+
 test("listSemanticVectorIds returns all stored node_ids", () => {
   const store = new SqliteStore(":memory:");
   const ts = "2026-07-03T00:00:00Z";

@@ -10,6 +10,7 @@ import { compileContext, formatContextPacket } from "./compile.js";
 import { derivationHash, deriveAdmit, stableJson } from "./derivation.js";
 import { semanticSearch } from "./semantic.js";
 import type { SqliteStore } from "./store.js";
+import { subgraphCells, type SubgraphFilter } from "./subgraph.js";
 import type { AdmissionResult, Cell, Store, WriteProposal } from "./types.js";
 
 export type RecallEvalInvariant =
@@ -23,7 +24,8 @@ export type RecallEvalCase =
   | { name: string; kind: "search"; query: string; expectContains?: string; minResults?: number }
   | { name: string; kind: "semantic"; query: string; expectContains?: string; minResults?: number }
   | { name: string; kind: "compile"; task: string; expectContains?: string; maxWords?: number }
-  | { name: string; kind: "invariant"; invariant: RecallEvalInvariant };
+  | { name: string; kind: "invariant"; invariant: RecallEvalInvariant }
+  | { name: string; kind: "subgraph"; filter: SubgraphFilter; minResults?: number };
 
 export interface RecallEvalSuite {
   name: string;
@@ -95,6 +97,8 @@ function runCase(store: Store, c: RecallEvalCase): RecallEvalCaseResult {
       return runCompileCase(store, c);
     case "invariant":
       return runInvariantCase(store, c);
+    case "subgraph":
+      return runSubgraphCase(store, c);
     default:
       // Exhaustiveness guard: a custom suite (e.g. from the CLI's --json) can
       // carry a case with an unrecognized kind (a typo like "serach"). Fail
@@ -157,6 +161,22 @@ function runCompileCase(
     passed,
     score: passed ? 1 : 0,
     details: { wordCount: packet.wordCount, maxWords, withinBudget, containsOk },
+  };
+}
+
+function runSubgraphCase(
+  store: Store,
+  c: Extract<RecallEvalCase, { kind: "subgraph" }>,
+): RecallEvalCaseResult {
+  const results = subgraphCells(store, c.filter);
+  const minResults = c.minResults ?? 0;
+  const passed = results.length >= minResults;
+  return {
+    name: c.name,
+    kind: c.kind,
+    passed,
+    score: passed ? 1 : 0,
+    details: { resultCount: results.length, minResults },
   };
 }
 
