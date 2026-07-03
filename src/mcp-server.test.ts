@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the sixteen-tool surface", () => {
+test("tools/list returns exactly the seventeen-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -43,6 +43,7 @@ test("tools/list returns exactly the sixteen-tool surface", () => {
     "recall_program_runs",
     "recall_eval_run",
     "recall_subgraph",
+    "recall_health",
   ]);
   store.close();
 });
@@ -94,8 +95,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the sixteen-tool surface", () => {
-  assert.equal(TOOLS.length, 16);
+test("TOOLS is the seventeen-tool surface", () => {
+  assert.equal(TOOLS.length, 17);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -602,5 +603,24 @@ test("recall_eval_run with derive:true reports a derived admission", () => {
   assert.equal(out.name, "recall-default");
   assert.ok(out.derived);
   assert.equal(out.derived.accepted, true);
+  store.close();
+});
+
+test("recall_health returns a memory health report mirroring recall_status's simple {} shape", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "obs", title: "health mcp seed cell", body: "seed body", confidence: 0.8, topics: [], entities: [] }, { store });
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_health",
+    arguments: {},
+  }), store));
+  assert.equal(typeof out.createdAt, "string");
+  assert.ok(typeof out.stats === "object" && out.stats !== null);
+  assert.ok(Array.isArray(out.beliefs));
+  assert.ok(Array.isArray(out.stale));
+  assert.ok(Array.isArray(out.contradictions));
+  assert.ok(Array.isArray(out.nextActions));
+  assert.ok(Array.isArray(out.criticalWarnings));
+  assert.ok(typeof out.dangling === "object" && out.dangling !== null);
+  assert.ok(typeof out.provenance === "object" && out.provenance !== null);
   store.close();
 });

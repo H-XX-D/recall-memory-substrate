@@ -1,6 +1,7 @@
 export * from "./address.js";
 export * from "./adapters.js";
 export * from "./admission.js";
+export * from "./analysis.js";
 export * from "./agent-integration.js";
 export * from "./build.js";
 export * from "./calibration.js";

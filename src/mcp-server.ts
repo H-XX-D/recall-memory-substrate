@@ -1,11 +1,12 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Sixteen tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Seventeen tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
 // recall_hyperedge_list, recall_dag_analyze, recall_program_run,
-// recall_program_runs, recall_eval_run, recall_subgraph. The daemon/operator
-// tick runs from the Stop hook, not here.
+// recall_program_runs, recall_eval_run, recall_subgraph, recall_health. The
+// daemon/operator tick runs from the Stop hook, not here.
+import { analyzeMemory } from "./analysis.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { admit } from "./admission.js";
@@ -57,6 +58,7 @@ export const TOOLS = [
   { name: "recall_program_runs", description: "List program run history, optionally filtered to one program key or handle.", inputSchema: { type: "object", properties: { key: { type: "string" }, limit: { type: "number" } } } },
   { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
   { name: "recall_subgraph", description: "Tag-composed retrieval over active cells (AND across kinds/project/topics/entities/since; every listed value within an array family required), newest-updated first.", inputSchema: { type: "object", properties: { kinds: { type: "array", items: { type: "string" } }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } } } },
+  { name: "recall_health", description: "Memory health report: belief pressure, staleness, contradictions, dangling edges, and provenance concentration.", inputSchema: { type: "object", properties: {} } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -272,6 +274,9 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
         updatedAt: c.updatedAt,
       }));
       return JSON.stringify(cells);
+    }
+    case "recall_health": {
+      return JSON.stringify(analyzeMemory(store));
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

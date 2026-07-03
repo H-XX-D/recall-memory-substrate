@@ -14,6 +14,7 @@ import {
   readJsonFile,
 } from "./adapters.js";
 import { migrate } from "./migrate.js";
+import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
 import { runAndRecordEval, runEvalAndDerive, type RecallEvalSuite } from "./evals.js";
@@ -427,6 +428,26 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    if (command === "health") {
+      if (!args.derive) {
+        return withReadStore(args, route, env, (store) => {
+          outJson(out, analyzeMemory(store, options.now ? new Date(options.now) : undefined));
+          return 0;
+        });
+      }
+      const store = openWriteStore(route.dbPath);
+      try {
+        const now = options.now ? new Date(options.now) : new Date();
+        const report = analyzeMemory(store, now);
+        const proposal = memoryHealthToProposal(report, { project: route.slug ?? args.project });
+        const derived = admit(proposal, { store, now: now.toISOString() });
+        outJson(out, { report, derive: derived });
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
     if (command === "operate" && (!subcommand || subcommand === "once")) {
       const store = openWriteStore(route.dbPath);
       try {
@@ -686,6 +707,7 @@ Commands:
   recall eval run [--derive] [--json suite.json|-] [--db path] [--project slug]
   recall eval list [--limit 10] [--db path] [--project slug]
   recall eval show <id> [--db path] [--project slug]
+  recall health [--derive] [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
   recall operate list [--limit 20] [--db path] [--project slug]
   recall operate show <id> [--db path] [--project slug]

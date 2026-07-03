@@ -839,6 +839,87 @@ test("eval show with an unknown id exits nonzero with a clear error", () => {
   }
 });
 
+test("health prints a memory health report over a routed db", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "health cli seed cell",
+        body: "Seed cell for the health report.",
+        confidence: 0.8,
+        topics: ["health"],
+      }),
+    );
+    const seeded = capture(["admit", "--json", proposalPath, "--db", db]);
+    assert.equal(seeded.code, 0, seeded.stderr);
+
+    const health = capture(["health", "--db", db]);
+    assert.equal(health.code, 0, health.stderr);
+    const report = JSON.parse(health.stdout);
+    assert.equal(typeof report.createdAt, "string");
+    assert.ok(Array.isArray(report.beliefs));
+    assert.ok(Array.isArray(report.stale));
+    assert.ok(Array.isArray(report.contradictions));
+    assert.ok(Array.isArray(report.nextActions));
+    assert.equal(report.dangling.total, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("health --derive admits an obs cell with concerns edges into the store", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const targetPath = join(tmp, "target.json");
+    writeFileSync(
+      targetPath,
+      JSON.stringify({
+        kind: "bel",
+        title: "belief target for health derive",
+        body: "A belief that will attract a contradiction.",
+        confidence: 0.7,
+        topics: ["health"],
+      }),
+    );
+    const target = capture(["admit", "--json", targetPath, "--db", db]);
+    assert.equal(target.code, 0, target.stderr);
+    const targetKey = JSON.parse(target.stdout).cell.key as string;
+
+    const contradictorPath = join(tmp, "contradictor.json");
+    writeFileSync(
+      contradictorPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "contradictor for health derive",
+        body: "Contradicts the belief target.",
+        confidence: 0.8,
+        topics: ["health"],
+        edges: [{ relation: "contradicts", target: targetKey }],
+      }),
+    );
+    const contradictor = capture(["admit", "--json", contradictorPath, "--db", db]);
+    assert.equal(contradictor.code, 0, contradictor.stderr);
+
+    const derived = capture(["health", "--derive", "--db", db]);
+    assert.equal(derived.code, 0, derived.stderr);
+    const derivedJson = JSON.parse(derived.stdout);
+    assert.equal(derivedJson.derive.accepted, true, JSON.stringify(derivedJson));
+    assert.equal(derivedJson.derive.cell.kind, "obs");
+    assert.equal(derivedJson.derive.cell.provenance.origin, "daemon");
+    assert.ok(derivedJson.derive.cell.edgesOut.every((e: { relation: string }) => e.relation === "concerns"));
+
+    const shown = capture(["cell", "show", derivedJson.derive.cell.key, "--db", db]);
+    assert.equal(shown.code, 0, shown.stderr);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 function capture(
   argv: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; now?: string } = {},
