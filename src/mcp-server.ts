@@ -1,9 +1,10 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Eleven tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Twelve tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
-// recall_hyperedge_list. The daemon/operator tick runs from the Stop hook, not here.
+// recall_hyperedge_list, recall_dag_analyze. The daemon/operator tick runs from
+// the Stop hook, not here.
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell } from "./cell-context.js";
 import { admit } from "./admission.js";
@@ -12,7 +13,9 @@ import { resolveCellReference, cellReferenceView } from "./references.js";
 import { getRecallPage } from "./pages.js";
 import type { PageName, PageFilter } from "./pages.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
-import type { Store, WriteProposal } from "./types.js";
+import { analyzeDagOverlay } from "./dag.js";
+import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
+import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 import type { SqliteStore } from "./store.js";
 
 type JsonRpcId = string | number;
@@ -45,6 +48,7 @@ export const TOOLS = [
   { name: "recall_hyperedge_add", description: "Create a hyperedge grouping cell members under a kind and title.", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, members: { type: "array" }, metadata: { type: "object" } }, required: ["kind", "title", "members"] } },
   { name: "recall_hyperedge_show", description: "Expand one hyperedge by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
   { name: "recall_hyperedge_list", description: "List hyperedges, optionally filtered to those containing a given cell.", inputSchema: { type: "object", properties: { limit: { type: "number" }, forCell: { type: "string" } } } },
+  { name: "recall_dag_analyze", description: "Analyze a DAG overlay for cycles and holonomy witnesses; with derive:true, admit keyed derived writes and report accepted/duplicate/rejected counts.", inputSchema: { type: "object", properties: { id: { type: "string" }, derive: { type: "boolean" } }, required: ["id"] } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -179,6 +183,16 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       const hyperedges = forCell ? store.hyperedgesForCell(forCell, limit) : store.listHyperedges(limit);
       return JSON.stringify(hyperedges);
     }
+    case "recall_dag_analyze": {
+      const id = String(args.id ?? "");
+      const overlay = store.getDagOverlay(id);
+      if (!overlay) return JSON.stringify({ error: `unknown dag overlay: ${id}` });
+      const analysis = analyzeDagOverlay(overlay);
+      if (args.derive !== true) return JSON.stringify({ analysis });
+      const now = new Date().toISOString();
+      const results = dagAnalysisToKeyedProposals(analysis).map((kp) => deriveAdmit(store, kp.proposal, kp.key, now));
+      return JSON.stringify({ analysis, derived: summarizeDerived(results) });
+    }
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -215,4 +229,15 @@ function recordParam(params: Record<string, unknown> | undefined, key: string): 
 }
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+function summarizeDerived(results: AdmissionResult[]): { accepted: number; duplicates: number; rejected: number } {
+  let accepted = 0;
+  let duplicates = 0;
+  let rejected = 0;
+  for (const result of results) {
+    if (!result.accepted) rejected += 1;
+    else if (result.duplicateOf) duplicates += 1;
+    else accepted += 1;
+  }
+  return { accepted, duplicates, rejected };
 }

@@ -354,6 +354,106 @@ test("dag add from stdin JSON then show/list/analyze round-trip", () => {
   }
 });
 
+test("dag analyze --derive reports derived counts and short-circuits duplicates on a second run", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const nodeAPath = join(tmp, "node-a.json");
+    const nodeBPath = join(tmp, "node-b.json");
+    writeFileSync(
+      nodeAPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "derive node a",
+        body: "First node in the derive overlay.",
+        confidence: 0.8,
+        topics: ["dag"],
+      }),
+    );
+    writeFileSync(
+      nodeBPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "derive node b",
+        body: "Second node in the derive overlay.",
+        confidence: 0.8,
+        topics: ["dag"],
+      }),
+    );
+    const nodeA = capture(["admit", "--json", nodeAPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(nodeA.code, 0, nodeA.stderr);
+    const nodeAKey = JSON.parse(nodeA.stdout).cell.key as string;
+    const nodeB = capture(["admit", "--json", nodeBPath, "--db", db], { now: "2026-06-26T12:00:01.000Z" });
+    assert.equal(nodeB.code, 0, nodeB.stderr);
+    const nodeBKey = JSON.parse(nodeB.stdout).cell.key as string;
+
+    const overlayPath = join(tmp, "derive-overlay.json");
+    writeFileSync(
+      overlayPath,
+      JSON.stringify({
+        title: "cli derive overlay",
+        nodeIds: [nodeAKey, nodeBKey],
+        edges: [
+          { source: nodeAKey, target: nodeBKey, label: "x" },
+          { source: nodeAKey, target: nodeBKey, label: "y" },
+        ],
+      }),
+    );
+    const added = capture(["dag", "add", "--json", overlayPath, "--db", db], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(added.code, 0, added.stderr);
+    const overlayId = JSON.parse(added.stdout).id as string;
+
+    const first = capture(["dag", "analyze", overlayId, "--derive", "--db", db], { now: "2026-06-26T12:02:00.000Z" });
+    assert.equal(first.code, 0, first.stderr);
+    const firstJson = JSON.parse(first.stdout);
+    assert.equal(firstJson.analysis.overlayId, overlayId);
+    assert.equal(firstJson.derived.accepted > 0, true);
+    assert.equal(firstJson.derived.duplicates, 0);
+    assert.equal(firstJson.derived.rejected, 0);
+
+    const second = capture(["dag", "analyze", overlayId, "--derive", "--db", db], { now: "2026-06-26T12:03:00.000Z" });
+    assert.equal(second.code, 0, second.stderr);
+    const secondJson = JSON.parse(second.stdout);
+    assert.equal(secondJson.derived.accepted, 0);
+    assert.equal(secondJson.derived.duplicates, firstJson.derived.accepted);
+    assert.equal(secondJson.derived.rejected, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dag analyze without --derive omits the derived field", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const nodeAPath = join(tmp, "node-a.json");
+    writeFileSync(
+      nodeAPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "plain node a",
+        body: "Node for a plain analyze.",
+        confidence: 0.8,
+        topics: ["dag"],
+      }),
+    );
+    const nodeA = capture(["admit", "--json", nodeAPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    const nodeAKey = JSON.parse(nodeA.stdout).cell.key as string;
+    const overlayPath = join(tmp, "plain-overlay.json");
+    writeFileSync(overlayPath, JSON.stringify({ title: "plain overlay", nodeIds: [nodeAKey], edges: [] }));
+    const added = capture(["dag", "add", "--json", overlayPath, "--db", db]);
+    const overlayId = JSON.parse(added.stdout).id as string;
+
+    const plain = capture(["dag", "analyze", overlayId, "--db", db]);
+    assert.equal(plain.code, 0, plain.stderr);
+    const plainJson = JSON.parse(plain.stdout);
+    assert.equal(plainJson.overlayId, overlayId);
+    assert.equal(plainJson.derived, undefined);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("dag add rejects a cyclic overlay and exits nonzero", () => {
   const tmp = tempDir();
   try {

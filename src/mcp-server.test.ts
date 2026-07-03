@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the eleven-tool surface", () => {
+test("tools/list returns exactly the twelve-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -38,6 +38,7 @@ test("tools/list returns exactly the eleven-tool surface", () => {
     "recall_hyperedge_add",
     "recall_hyperedge_show",
     "recall_hyperedge_list",
+    "recall_dag_analyze",
   ]);
   store.close();
 });
@@ -89,8 +90,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the eleven-tool surface", () => {
-  assert.equal(TOOLS.length, 11);
+test("TOOLS is the twelve-tool surface", () => {
+  assert.equal(TOOLS.length, 12);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -229,6 +230,86 @@ test("recall_hyperedge_show with an unknown id returns a clear not-found payload
   }), store));
   assert.ok(typeof out.error === "string", "error must be a string");
   assert.ok(out.error.includes("no-such-hyperedge-id"), "error must name the bad id");
+  store.close();
+});
+
+test("recall_dag_analyze without derive returns the plain analysis", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "dag mcp a", body: "b", confidence: 0.8 }, { key: "aaaa" });
+  const b = buildCell({ kind: "obs", title: "dag mcp b", body: "b", confidence: 0.7 }, { key: "bbbb" });
+  store.put(a);
+  store.put(b);
+  store.putDagOverlay({
+    id: "ov-mcp-1",
+    title: "mcp overlay",
+    nodeIds: ["aaaa", "bbbb"],
+    edges: [{ source: "aaaa", target: "bbbb" }],
+    metadata: {},
+    createdAt: "2026-07-03T00:00:00Z",
+  });
+
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_dag_analyze",
+    arguments: { id: "ov-mcp-1" },
+  }), store));
+  assert.equal(out.analysis.overlayId, "ov-mcp-1");
+  assert.equal(out.analysis.isDag, true);
+  assert.equal(out.derived, undefined);
+  store.close();
+});
+
+test("recall_dag_analyze with derive:true over a seeded cyclic-free overlay returns derived counts and short-circuits on replay", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "dag mcp derive a", body: "b", confidence: 0.8 }, { key: "cccc" });
+  const b1 = buildCell({ kind: "obs", title: "dag mcp derive b1", body: "b", confidence: 0.7 }, { key: "dddd" });
+  const b2 = buildCell({ kind: "obs", title: "dag mcp derive b2", body: "b", confidence: 0.7 }, { key: "eeee" });
+  const c = buildCell({ kind: "obs", title: "dag mcp derive c", body: "b", confidence: 0.7 }, { key: "ffff" });
+  store.put(a);
+  store.put(b1);
+  store.put(b2);
+  store.put(c);
+  store.putDagOverlay({
+    id: "ov-mcp-2",
+    title: "mcp derive overlay",
+    nodeIds: ["cccc", "dddd", "eeee", "ffff"],
+    edges: [
+      { source: "cccc", target: "dddd", label: "x" },
+      { source: "dddd", target: "ffff", label: "edge" },
+      { source: "cccc", target: "eeee", label: "y" },
+      { source: "eeee", target: "ffff", label: "edge" },
+    ],
+    metadata: {},
+    createdAt: "2026-07-03T00:00:00Z",
+  });
+
+  const first = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_dag_analyze",
+    arguments: { id: "ov-mcp-2", derive: true },
+  }), store));
+  assert.equal(first.analysis.isDag, true);
+  assert.equal(first.analysis.overlayId, "ov-mcp-2");
+  assert.ok(first.derived.accepted > 0);
+  assert.equal(first.derived.duplicates, 0);
+  assert.equal(first.derived.rejected, 0);
+
+  const second = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_dag_analyze",
+    arguments: { id: "ov-mcp-2", derive: true },
+  }), store));
+  assert.equal(second.derived.accepted, 0);
+  assert.equal(second.derived.duplicates, first.derived.accepted);
+  assert.equal(second.derived.rejected, 0);
+  store.close();
+});
+
+test("recall_dag_analyze with an unknown id returns a clear not-found payload, not a throw", () => {
+  const store = new SqliteStore(":memory:");
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_dag_analyze",
+    arguments: { id: "no-such-overlay" },
+  }), store));
+  assert.ok(typeof out.error === "string", "error must be a string");
+  assert.ok(out.error.includes("no-such-overlay"), "error must name the bad id");
   store.close();
 });
 

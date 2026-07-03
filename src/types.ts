@@ -201,6 +201,7 @@ export interface AdmissionResult {
   issues: ValidationIssue[];
   warnings: string[];
   attenuations: string[];
+  duplicateOf?: string; // set when deriveAdmit short-circuited on an existing derivation key
 }
 
 // One resolved past write by an actor, for calibration.

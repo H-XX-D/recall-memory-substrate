@@ -9,6 +9,7 @@ export * from "./claude-integration.js";
 export * from "./codex-integration.js";
 export * from "./compile.js";
 export * from "./dag.js";
+export * from "./derivation.js";
 export * from "./federated-store.js";
 export * from "./firewall.js";
 export * from "./hyperedges.js";

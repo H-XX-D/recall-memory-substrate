@@ -102,3 +102,63 @@ test("watch programs use lastRun as baseline and derive witnesses only after a t
     store.close();
   }
 });
+
+test("re-tripping a watch program on the same before/after swing derives one cell, not two (deriveAdmit short-circuit)", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const watched = buildCell(
+      { kind: "obs", title: "Watched", body: "watched", confidence: 0.9, topics: ["gate"] },
+      { key: "aaaaaaaa-2222-2222-2222-222222222222" },
+    );
+    const program = buildCell(
+      {
+        kind: "prg",
+        title: "Gate watch repeat",
+        body: "watch gate members",
+        confidence: 0.9,
+        topics: ["gate"],
+        props: {
+          program: {
+            schemaVersion: "recall.program.v1",
+            operation: "watch",
+            target: { keys: [watched.key] },
+            params: { delta: 0.1, concernTarget: watched.key },
+          },
+        },
+      },
+      { key: "cccccccc-2222-2222-2222-222222222222" },
+    );
+    store.put(watched);
+    store.put(program);
+
+    runProgramCell(store, program.key, "2026-06-26T12:00:00.000Z", { derive: true }); // baseline (0.9), no trip
+
+    // The value oscillates 0.9 <-> 0.4 across three runs: run 2 (0.9 -> 0.4)
+    // and run 4 (0.9 -> 0.4) trip on the exact same previous/current/change,
+    // reproducing an identical witness output even though run.id and
+    // run.createdAt differ each time.
+    store.put({ ...watched, scores: { ...watched.scores, effective: 0.4 } });
+    const run2 = runProgramCell(store, program.key, "2026-06-26T12:01:00.000Z", { derive: true });
+    assert.equal(run2.run.output.tripped, true);
+    assert.equal(run2.derived?.accepted, true);
+    assert.equal(run2.derived?.duplicateOf, undefined);
+    const countAfterRun2 = store.stats().cells;
+
+    store.put({ ...watched, scores: { ...watched.scores, effective: 0.9 } });
+    const run3 = runProgramCell(store, program.key, "2026-06-26T12:02:00.000Z", { derive: true });
+    assert.equal(run3.run.output.tripped, true);
+
+    store.put({ ...watched, scores: { ...watched.scores, effective: 0.4 } });
+    const run4 = runProgramCell(store, program.key, "2026-06-26T12:03:00.000Z", { derive: true });
+    assert.equal(run4.run.output.tripped, true);
+    assert.equal(run4.run.output.current, run2.run.output.current);
+    assert.equal(run4.run.output.previous, run2.run.output.previous);
+    assert.equal(run4.derived?.accepted, true);
+    assert.equal(run4.derived?.duplicateOf, run2.derived?.cell?.key);
+
+    // Only run2's and run3's witnesses were newly admitted; run4 collided.
+    assert.equal(store.stats().cells, countAfterRun2 + 1);
+  } finally {
+    store.close();
+  }
+});

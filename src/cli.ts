@@ -15,6 +15,7 @@ import {
 } from "./adapters.js";
 import { migrate } from "./migrate.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
+import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { inspectCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
@@ -32,7 +33,7 @@ import {
 } from "./routing.js";
 import { validateProposal } from "./schema.js";
 import { SqliteStore } from "./store.js";
-import type { Store, WriteProposal } from "./types.js";
+import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 
 export const CLI_NAME = "recall-memory-substrate";
 export const CLI_VERSION = "0.7.0";
@@ -283,12 +284,28 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
     if (command === "dag" && subcommand === "analyze") {
       const id = args.command[2];
       if (!id) throw new Error("dag analyze requires an id");
-      return withReadStore(args, route, env, (store) => {
+      if (!args.derive) {
+        return withReadStore(args, route, env, (store) => {
+          const overlay = store.getDagOverlay(id);
+          if (!overlay) throw new Error(`Unknown dag overlay: ${id}`);
+          outJson(out, analyzeDagOverlay(overlay));
+          return 0;
+        });
+      }
+      const store = openWriteStore(route.dbPath);
+      try {
         const overlay = store.getDagOverlay(id);
         if (!overlay) throw new Error(`Unknown dag overlay: ${id}`);
-        outJson(out, analyzeDagOverlay(overlay));
+        const analysis = analyzeDagOverlay(overlay);
+        const now = options.now ?? new Date().toISOString();
+        const results = dagAnalysisToKeyedProposals(analysis, { project: route.slug ?? args.project }).map((kp) =>
+          deriveAdmit(store, kp.proposal, kp.key, now),
+        );
+        outJson(out, { analysis, derived: summarizeDerived(results) });
         return 0;
-      });
+      } finally {
+        store.close();
+      }
     }
 
     if (command === "operate" && (!subcommand || subcommand === "once")) {
@@ -411,6 +428,22 @@ function openWriteStore(dbPath: string): SqliteStore {
   return new SqliteStore(dbPath);
 }
 
+function summarizeDerived(results: AdmissionResult[]): {
+  accepted: number;
+  duplicates: number;
+  rejected: number;
+} {
+  let accepted = 0;
+  let duplicates = 0;
+  let rejected = 0;
+  for (const result of results) {
+    if (!result.accepted) rejected += 1;
+    else if (result.duplicateOf) duplicates += 1;
+    else accepted += 1;
+  }
+  return { accepted, duplicates, rejected };
+}
+
 function ensureDbParent(dbPath: string): void {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
 }
@@ -482,7 +515,7 @@ Commands:
   recall dag add --json overlay.json [--db path] [--project slug]
   recall dag show <id> [--db path] [--project slug]
   recall dag list [--limit 10] [--db path] [--project slug]
-  recall dag analyze <id> [--db path] [--project slug]
+  recall dag analyze <id> [--derive] [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]

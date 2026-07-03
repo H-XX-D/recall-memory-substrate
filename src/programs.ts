@@ -3,7 +3,7 @@
 // back on props.lastRun so watch/trend/drift have durable baseline state without
 // introducing a second persistence surface.
 import { randomUUID } from "node:crypto";
-import { admit } from "./admission.js";
+import { deriveAdmit, programRunDerivationKey } from "./derivation.js";
 import { selectField } from "./resolve.js";
 import type { AdmissionResult, Cell, Kind, Store, WriteProposal } from "./types.js";
 
@@ -135,7 +135,7 @@ export function runProgramCell(
   const proposal = opts.derive ? programRunToProposal(program, run) : undefined;
   return {
     run,
-    derived: proposal ? admit(proposal, { store, now }) : undefined,
+    derived: proposal ? deriveAdmit(store, proposal, programRunDerivationKey(run), now) : undefined,
   };
 }
 
