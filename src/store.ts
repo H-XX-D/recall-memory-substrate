@@ -3,6 +3,7 @@
 // edges table and are rehydrated on read.
 import type {
   Cell,
+  DagOverlay,
   Edge,
   Hyperedge,
   Kind,
@@ -10,6 +11,7 @@ import type {
   NeighborLink,
   Relation,
   SearchHit,
+  SemanticVector,
   Store,
   StoreStats,
 } from "./types.js";
@@ -139,6 +141,26 @@ export class SqliteStore implements Store {
   listHyperedges(limit = 100): Hyperedge[] {
     const rows = this.db.prepare(`SELECT * FROM hyperedges ORDER BY created_at DESC LIMIT ?`).all(limit) as Array<{ id: string; kind: string; title: string; members_json: string; metadata_json: string; created_at: string }>;
     return rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, members: JSON.parse(r.members_json), metadata: JSON.parse(r.metadata_json), createdAt: r.created_at }));
+  }
+
+  putSemanticVector(v: SemanticVector): void {
+    this.db.prepare(`INSERT OR REPLACE INTO semantic_index (node_id, backend, dims, vector_json, indexed_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(v.nodeId, v.backend, v.dims, JSON.stringify(v.vector), v.indexedAt);
+  }
+
+  getSemanticVector(nodeId: string): SemanticVector | undefined {
+    const r = this.db.prepare(`SELECT * FROM semantic_index WHERE node_id = ?`).get(nodeId) as { node_id: string; backend: string; dims: number; vector_json: string; indexed_at: string } | undefined;
+    return r ? { nodeId: r.node_id, backend: r.backend, dims: r.dims, vector: JSON.parse(r.vector_json), indexedAt: r.indexed_at } : undefined;
+  }
+
+  putDagOverlay(d: DagOverlay): void {
+    this.db.prepare(`INSERT OR REPLACE INTO dag_overlays (id, title, node_ids_json, edges_json, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(d.id, d.title, JSON.stringify(d.nodeIds), JSON.stringify(d.edges), JSON.stringify(d.metadata), d.createdAt);
+  }
+
+  listDagOverlays(limit = 100): DagOverlay[] {
+    const rows = this.db.prepare(`SELECT * FROM dag_overlays ORDER BY created_at DESC LIMIT ?`).all(limit) as Array<{ id: string; title: string; node_ids_json: string; edges_json: string; metadata_json: string; created_at: string }>;
+    return rows.map((r) => ({ id: r.id, title: r.title, nodeIds: JSON.parse(r.node_ids_json), edges: JSON.parse(r.edges_json), metadata: JSON.parse(r.metadata_json), createdAt: r.created_at }));
   }
 
   search(query: string, opts: { limit?: number } = {}): SearchHit[] {

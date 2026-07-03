@@ -36,5 +36,17 @@ export function openDb(path = ":memory:"): Db {
       members_json TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL
     )
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS semantic_index (
+      node_id TEXT PRIMARY KEY, backend TEXT NOT NULL, dims INTEGER NOT NULL,
+      vector_json TEXT NOT NULL, indexed_at TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dag_overlays (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, node_ids_json TEXT NOT NULL,
+      edges_json TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL
+    )
+  `);
   return db;
 }

@@ -121,3 +121,14 @@ test("store round-trips a hyperedge", () => {
   assert.equal(all[0]!.metadata.n, 1);
   store.close();
 });
+
+test("store round-trips a semantic vector and a dag overlay", () => {
+  const store = new SqliteStore(":memory:");
+  store.putSemanticVector({ nodeId: "a", backend: "hash", dims: 3, vector: [0.1, 0.2, 0.3], indexedAt: "2026-07-03T00:00:00Z" });
+  const v = store.getSemanticVector("a");
+  assert.equal(v?.dims, 3);
+  assert.deepEqual(v?.vector, [0.1, 0.2, 0.3]);
+  store.putDagOverlay({ id: "d1", title: "t", nodeIds: ["a"], edges: [{ source: "a", target: "b" }], metadata: {}, createdAt: "2026-07-03T00:00:00Z" });
+  assert.equal(store.listDagOverlays().length, 1);
+  store.close();
+});
