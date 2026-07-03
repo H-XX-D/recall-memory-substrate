@@ -5,7 +5,9 @@
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell } from "./cell-context.js";
 import { admit } from "./admission.js";
+import { semanticSearch } from "./semantic.js";
 import type { Store, WriteProposal } from "./types.js";
+import type { SqliteStore } from "./store.js";
 
 type JsonRpcId = string | number;
 export interface JsonRpcRequest {
@@ -31,6 +33,7 @@ export const TOOLS = [
   { name: "recall_compile", description: "Compile a budgeted context packet for a task.", inputSchema: { type: "object", properties: { task: { type: "string" }, words: { type: "number" } }, required: ["task"] } },
   { name: "recall_cell", description: "Expand one cell by id, prefix, handle, or address.", inputSchema: { type: "object", properties: { idOrAddress: { type: "string" } }, required: ["idOrAddress"] } },
   { name: "recall_write", description: "Admit a durable write through the admission gate.", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, topics: { type: "array" }, edges: { type: "array" } }, required: ["kind", "title", "body", "confidence"] } },
+  { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -103,6 +106,19 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
         warnings: r.warnings,
         attenuations: r.attenuations,
       });
+    }
+    case "recall_semantic": {
+      const query = String(args.query ?? "");
+      const limit = typeof args.limit === "number" ? args.limit : 10;
+      const minScore = typeof args.minScore === "number" ? args.minScore : undefined;
+      const hits = semanticSearch(query, store as SqliteStore, { limit, minScore }).map((h) => ({
+        key: h.cell.key,
+        handle: h.cell.handle,
+        title: h.cell.title,
+        score: round2(h.score),
+        backend: h.backend,
+      }));
+      return JSON.stringify(hits);
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

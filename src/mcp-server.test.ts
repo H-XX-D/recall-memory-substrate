@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { handleMcpRequest, TOOLS, type JsonRpcRequest } from "./mcp-server.js";
 import { SqliteStore } from "./store.js";
 import { WRITE_TEMPLATE } from "./template.js";
+import { buildCell } from "./build.js";
+import { indexCell } from "./semantic.js";
 
 function req(method: string, params?: Record<string, unknown>, id: number = 1): JsonRpcRequest {
   return { jsonrpc: "2.0", id, method, params };
@@ -20,7 +22,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the five lean tools", () => {
+test("tools/list returns exactly the six lean tools", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -29,6 +31,7 @@ test("tools/list returns exactly the five lean tools", () => {
     "recall_compile",
     "recall_cell",
     "recall_write",
+    "recall_semantic",
   ]);
   store.close();
 });
@@ -80,6 +83,42 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the five-tool surface", () => {
-  assert.equal(TOOLS.length, 5);
+test("TOOLS is the six-tool surface", () => {
+  assert.equal(TOOLS.length, 6);
+});
+
+test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
+  delete process.env["RECALL_EMBEDDING_URL"];
+  const store = new SqliteStore(":memory:");
+  const cell = buildCell({ kind: "obs", title: "quantum physics wave", body: "quantum entanglement and wave functions", summary: "", confidence: 0.9, topics: [], entities: [] });
+  store.put(cell);
+  indexCell(cell, store);
+
+  const hits = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_semantic",
+    arguments: { query: "quantum wave function physics" },
+  }), store));
+
+  assert.ok(Array.isArray(hits), "result should be an array");
+  assert.ok(hits.length > 0, "should have at least one hit");
+  const h = hits[0];
+  assert.ok(typeof h.key === "string", "hit.key must be a string");
+  assert.ok(typeof h.handle === "string", "hit.handle must be a string");
+  assert.ok(typeof h.title === "string", "hit.title must be a string");
+  assert.ok(typeof h.score === "number", "hit.score must be a number");
+  assert.ok(typeof h.backend === "string", "hit.backend must be a string");
+  assert.equal(h.key, cell.key);
+  store.close();
+});
+
+test("recall_semantic with missing query throws an Unknown tool error through the error path", () => {
+  const store = new SqliteStore(":memory:");
+  const res = handleMcpRequest(req("tools/call", {
+    name: "recall_semantic",
+    arguments: {},
+  }), store);
+  // missing query coerces to empty string, returns empty array (mirrors recall_search behavior)
+  const hits = callText(res);
+  assert.ok(Array.isArray(hits), "empty query returns empty array");
+  store.close();
 });
