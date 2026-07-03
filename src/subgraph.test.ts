@@ -230,3 +230,32 @@ test("subgraphCells: falls back to app-side filtering when the store lacks activ
   assert.equal(results[0]!.title, "a");
   store.close();
 });
+
+test("golden: equal updatedAt breaks ties on key ascending, identically on both paths", () => {
+  const store = new SqliteStore();
+  // Three cells share the exact same updatedAt; insertion order is deliberately
+  // scrambled relative to key order (dec-tie-charlie < dec-tie-mike < dec-tie-yankee)
+  // so a passing test can't be explained by insertion order or SQLite's
+  // unspecified tie order, only by the explicit key-ascending tie-break.
+  const tiedAt = "2026-01-01T00:00:00Z";
+  seedCell(store, "dec", "tie-yankee", { updatedAt: tiedAt });
+  seedCell(store, "dec", "tie-charlie", { updatedAt: tiedAt });
+  seedCell(store, "dec", "tie-mike", { updatedAt: tiedAt });
+  seedCell(store, "dec", "newer", { updatedAt: "2026-01-02T00:00:00Z" });
+
+  const expectedKeys = ["dec-newer", "dec-tie-charlie", "dec-tie-mike", "dec-tie-yankee"];
+
+  // Fast path: SqliteStore.activeWhere push-down (ORDER BY updated_at DESC, key ASC).
+  const fast = subgraphCells(store, {});
+  assert.deepEqual(fast.map((c) => c.key), expectedKeys);
+
+  // App-side fallback: same data, store shaped without activeWhere so
+  // subgraphCells sorts with sortNewestFirst's JS tie-break instead.
+  const plainStore = withoutActiveWhere(store);
+  const appSide = subgraphCells(plainStore, {});
+  assert.deepEqual(appSide.map((c) => c.key), expectedKeys);
+
+  // Both paths must agree on the full order, not just the key set.
+  assert.deepEqual(fast.map((c) => c.key), appSide.map((c) => c.key));
+  store.close();
+});

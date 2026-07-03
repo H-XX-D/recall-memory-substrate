@@ -56,8 +56,15 @@ function matchesTagFamilies(cell: Cell, filter: SubgraphFilter): boolean {
   );
 }
 
+// Newest updatedAt first; ties break on key ascending so this matches
+// SqliteStore.activeWhere's `ORDER BY updated_at DESC, key ASC` exactly,
+// keeping the SQL fast path and the app-side fallback path in agreement.
 function sortNewestFirst(cells: Cell[]): Cell[] {
-  return [...cells].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  return [...cells].sort((a, b) => {
+    const byDate = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+    if (byDate !== 0) return byDate;
+    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  });
 }
 
 // AND across families: kinds, project, since (all push-down-eligible) AND

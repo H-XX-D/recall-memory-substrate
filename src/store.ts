@@ -154,7 +154,10 @@ export class SqliteStore implements Store {
   // subgraph.ts feature-detects with "activeWhere" in store to take this fast
   // path instead of filtering store.active() app-side. Pushes status='active'
   // plus kind/project/since down into SQL against the real `kind` column and
-  // the indexed `project`/`updated_at` generated columns, newest-updated first.
+  // the indexed `project`/`updated_at` generated columns, newest-updated first,
+  // key ascending as a deterministic tie-break for equal updated_at values (SQLite
+  // gives no ordering guarantee among tied rows otherwise); sortNewestFirst in
+  // subgraph.ts applies the same tie-break so both paths agree.
   // LIMIT is applied only when the caller passes it: subgraphCells omits it
   // whenever tag families (topics/entities/lifecycle/quality/subject) are also
   // present, since app-side tag filtering after a SQL LIMIT would under-fill.
@@ -173,7 +176,7 @@ export class SqliteStore implements Store {
       clauses.push(`updated_at >= ?`);
       params.push(opts.since);
     }
-    let sql = `SELECT key, json FROM cells WHERE ${clauses.join(" AND ")} ORDER BY updated_at DESC`;
+    let sql = `SELECT key, json FROM cells WHERE ${clauses.join(" AND ")} ORDER BY updated_at DESC, key ASC`;
     if (opts.limit !== undefined) {
       sql += ` LIMIT ?`;
       params.push(opts.limit);
