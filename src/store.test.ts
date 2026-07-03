@@ -91,6 +91,30 @@ test("search returns active lexical hits from the store backend", () => {
   store.close();
 });
 
+// Golden regression: store.search must return identical hit keys after swapping
+// the private ftsMatchQuery helper to use buildFtsMatchQuery from retrieval.ts.
+test("golden: store.search returns same hits before and after buildFtsMatchQuery swap", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "dec", title: "py-sym:foo watchdog monitor", body: "circuit breaker", confidence: 0.9 }, { key: "cell-a" }));
+  store.put(buildCell({ kind: "obs", title: "tripwire sentinel loop", body: "alert pipeline", confidence: 0.8 }, { key: "cell-b" }));
+  store.put(buildCell({ kind: "obs", title: "banana orange", body: "fruit salad", confidence: 0.7 }, { key: "cell-c" }));
+
+  // Query 1: symbol-like token with punctuation
+  const hitsA = store.search("py-sym:foo");
+  assert.ok(hitsA.length >= 1, "should find at least one hit for py-sym:foo");
+  assert.ok(hitsA.some((h) => h.cell.key === "cell-a"), "cell-a must be in results for py-sym:foo");
+
+  // Query 2: multi-word
+  const hitsB = store.search("watchdog monitor");
+  assert.ok(hitsB.some((h) => h.cell.key === "cell-a"), "cell-a must be in results for watchdog monitor");
+
+  // Query 3: unrelated query should not surface fruit cell in top hit for watchdog
+  const hitsC = store.search("tripwire sentinel");
+  assert.ok(hitsC.some((h) => h.cell.key === "cell-b"), "cell-b must be in results for tripwire sentinel");
+
+  store.close();
+});
+
 test("stats reports cells, active cells, edges, and lexical indexing state", () => {
   const store = new SqliteStore(":memory:");
   store.put(buildCell({ kind: "obs", title: "A", body: "a", confidence: 0.7 }, { key: "aaaa" }));

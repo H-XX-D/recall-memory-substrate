@@ -21,5 +21,6 @@ export * from "./schema.js";
 export * from "./scores.js";
 export * from "./secrets.js";
 export * from "./semantic.js";
+export { buildFtsMatchQuery } from "./retrieval.js";
 export * from "./store.js";
 export * from "./types.js";

@@ -16,6 +16,7 @@ import type {
   StoreStats,
 } from "./types.js";
 import { openDb, type Db } from "./db.js";
+import { buildFtsMatchQuery } from "./retrieval.js";
 
 // Content fingerprint for dedup: kind + normalized title. Stable, not relational,
 // so it is safe to store and index (it is a content key, not derived graph state).
@@ -185,7 +186,7 @@ export class SqliteStore implements Store {
     const terms = searchTerms(query);
     if (limit <= 0 || terms.length === 0) return [];
     if (this.ftsEnabled) {
-      const match = ftsMatchQuery(terms);
+      const match = buildFtsMatchQuery(terms);
       if (match) {
         try {
           const rows = this.db
@@ -340,13 +341,6 @@ function indexTags(cell: Cell): string {
     ...(cell.tags.subject ?? []),
     ...cell.sourceRefs,
   ].join(" ");
-}
-
-function ftsMatchQuery(terms: string[]): string | null {
-  const phrases = terms
-    .filter((term) => /[a-z0-9]/.test(term))
-    .map((term) => `"${term.replaceAll('"', '""')}"`);
-  return phrases.length > 0 ? phrases.join(" OR ") : null;
 }
 
 function escapeLike(value: string): string {
