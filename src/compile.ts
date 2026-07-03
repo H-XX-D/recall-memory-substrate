@@ -22,6 +22,7 @@ export interface ContextPacket {
   relevantMemory: string[];
   activeBeliefs: string[];
   conflicts: string[];
+  dependencies: string[];
   risks: string[];
   tasks: string[];
   cellState: string[];
@@ -63,6 +64,7 @@ export function compileContext(
     relevantMemory: [],
     activeBeliefs: [],
     conflicts: [],
+    dependencies: [],
     risks: [],
     tasks: [],
     cellState: [],
@@ -80,6 +82,7 @@ export function compileContext(
     if (opts.includeConflicts !== false) {
       surfaceIncomingChallenges(packet, store, hit.cell, seenChallenges);
     }
+    surfaceDependencies(packet, store, hit.cell);
     surfaceLowTrust(packet, hit.cell);
     packet.wordCount = countPacketWords(packet);
     if (packet.wordCount >= budget) break;
@@ -100,6 +103,7 @@ export function formatContextPacket(packet: ContextPacket): string {
     section("relevant_memory", packet.relevantMemory),
     section("active_beliefs", packet.activeBeliefs),
     section("conflicts", packet.conflicts),
+    section("dependencies", packet.dependencies),
     section("risks", packet.risks),
     section("tasks", packet.tasks),
     section("cell_state", packet.cellState),
@@ -168,6 +172,24 @@ function surfaceIncomingChallenges(
   }
 }
 
+// depends_on is weight-0 (inert in the mass/score walks), so it never surfaces
+// through the challenge path. Surface it here as read-side context: what this
+// cell rests on, flagged when a dependency is no longer active (superseded/etc),
+// which is the signal that a plan is built on a retracted foundation.
+function surfaceDependencies(packet: ContextPacket, store: Store, cell: Cell): void {
+  for (const e of cell.edgesOut) {
+    if (e.relation !== "depends_on") continue;
+    const target = store.get(e.target) ?? store.getByHandle(e.target);
+    if (!target) continue;
+    const flag = target.status !== "active" ? ` [${target.status}]` : "";
+    pushUnique(
+      packet.dependencies,
+      `${trimWords(cell.title, 12)} depends_on ${trimWords(target.title, 12)}${flag} [depends_on:${cell.key}->${target.key}]`,
+    );
+    pushUnique(packet.expansionHandles, target.key);
+  }
+}
+
 function surfaceLowTrust(packet: ContextPacket, cell: Cell): void {
   const effectiveCollapsed = cell.scores.effective < cell.scores.conf * 0.5;
   if (!needsExpansion(cell) && !effectiveCollapsed) return;
@@ -206,6 +228,7 @@ function trimPacket(packet: ContextPacket, budget: number): void {
     | "tasks"
     | "risks"
     | "conflicts"
+    | "dependencies"
     | "staleOrLowTrust"
     | "suggestedNextActions"
     | "expansionHandles"
@@ -216,6 +239,7 @@ function trimPacket(packet: ContextPacket, budget: number): void {
     "tasks",
     "risks",
     "conflicts",
+    "dependencies",
     "staleOrLowTrust",
     "suggestedNextActions",
     "expansionHandles",
@@ -235,6 +259,7 @@ function countPacketWords(packet: ContextPacket): number {
     ...packet.relevantMemory,
     ...packet.activeBeliefs,
     ...packet.conflicts,
+    ...packet.dependencies,
     ...packet.risks,
     ...packet.tasks,
     ...packet.cellState,

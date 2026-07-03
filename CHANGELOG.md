@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 - 2026-07-03
+
+Wires the two under-used relation primitives to real behavior.
+
+- `depends_on` now surfaces in the compiled context packet under a `dependencies:` section, flagging any dependency whose target is no longer active (e.g. superseded), so a plan built on a retracted foundation is visible at read time. Previously `depends_on` was validated and stored but consumed by nothing.
+- Admission emits a non-blocking warning when a newly admitted cell depends on a target that is already superseded. The write still stands; the caller is told what it leaned on.
+- `inspectCell` now returns `derivedFrom` (what a cell was derived from) and `derivations` (what was derived from it), giving the `derived_from` provenance marker a reader.
+
 ## 0.5.1 - 2026-07-02
 
 - Fixes the build to remove `dist/` before compiling, so the published tarball no longer carries stale artifacts from the previous nested source layout. 0.5.0 was functional but shipped dead `dist/src/**` files.

@@ -104,3 +104,24 @@ test("compileContext marks review-required cells for expansion", () => {
   assert.ok(packet.staleOrLowTrust.some((line) => /requires_review/.test(line)));
   store.close();
 });
+
+test("compileContext surfaces a cell's depends_on dependency", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "obs", title: "postgres config", body: "db settings", confidence: 0.8 }, { key: "dep1" }));
+  store.put(buildCell({ kind: "dec", title: "watchdog rollout plan", body: "rests on the config", confidence: 0.8, edges: [{ relation: "depends_on", target: "dep1" }] }, { key: "down1" }));
+  const packet = compileContext(store, "watchdog rollout");
+  assert.ok(packet.dependencies.some((line) => /watchdog rollout/.test(line) && /postgres config/.test(line)));
+  assert.match(formatContextPacket(packet), /dependencies:/);
+  store.close();
+});
+
+test("compileContext flags a depends_on dependency that is superseded", () => {
+  const store = new SqliteStore(":memory:");
+  const dep = buildCell({ kind: "obs", title: "postgres config", body: "db settings", confidence: 0.8 }, { key: "dep1" });
+  dep.status = "superseded";
+  store.put(dep);
+  store.put(buildCell({ kind: "dec", title: "watchdog rollout plan", body: "rests on the config", confidence: 0.8, edges: [{ relation: "depends_on", target: "dep1" }] }, { key: "down1" }));
+  const packet = compileContext(store, "watchdog rollout");
+  assert.ok(packet.dependencies.some((line) => /superseded/.test(line)));
+  store.close();
+});

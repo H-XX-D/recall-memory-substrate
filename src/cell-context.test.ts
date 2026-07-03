@@ -69,3 +69,14 @@ test("resolveCell throws on an ambiguous id prefix", () => {
   assert.throws(() => resolveCell(store, "dead000"), /ambiguous/i);
   store.close();
 });
+
+test("inspectCell surfaces derived_from provenance in both directions", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "obs", title: "source", body: "s", confidence: 0.8 }, { key: "src1" }));
+  store.put(buildCell({ kind: "obs", title: "derived", body: "d", confidence: 0.8, edges: [{ relation: "derived_from", target: "src1" }] }, { key: "der1" }));
+  const derived = inspectCell(store, "der1");
+  assert.deepEqual(derived.derivedFrom, ["src1"]);
+  const source = inspectCell(store, "src1");
+  assert.deepEqual(source.derivations, ["der1"]);
+  store.close();
+});

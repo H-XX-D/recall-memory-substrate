@@ -78,6 +78,7 @@ export function admit(
       `calibration x${factor.toFixed(2)} -> effective ${cell.scores.effective.toFixed(2)}`,
     );
   }
+  const relWarnings: string[] = [];
 
   // R2: with a store, run the relational layer. Without one, behaves as R1.
   if (ctx.store) {
@@ -124,6 +125,17 @@ export function admit(
       }
     }
 
+    // depends_on is inert in the score walks by design, but a dependency that is
+    // no longer active means this cell rests on a retracted foundation. Non-blocking
+    // warning: the write still stands, the caller is told what it leaned on.
+    for (const e of cell.edgesOut) {
+      if (e.relation !== "depends_on") continue;
+      const t = store.get(e.target) ?? store.getByHandle(e.target);
+      if (t && t.status !== "active") {
+        relWarnings.push(`depends_on target is ${t.status}: ${t.key}`);
+      }
+    }
+
     // Recompute every evidential target's effective: contradiction pressure
     // sinks them, corroboration lifts them, now that this cell points at them.
     for (const e of cell.edgesOut) {
@@ -156,7 +168,7 @@ export function admit(
     accepted: true,
     cell,
     issues: [],
-    warnings: att.warnings,
+    warnings: [...att.warnings, ...relWarnings],
     attenuations,
   };
 }

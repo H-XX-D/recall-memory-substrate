@@ -22,7 +22,7 @@ export interface JsonRpcResponse {
 }
 
 const SERVER_NAME = "recall";
-const SERVER_VERSION = "0.5.1";
+const SERVER_VERSION = "0.5.2";
 const PROTOCOL_VERSION = "2024-11-05";
 
 export const TOOLS = [

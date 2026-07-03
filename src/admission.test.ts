@@ -135,3 +135,13 @@ test("admit accepts when every field differs from its template description", () 
   const r = admit({ kind: "dec", title: "real distinct title", body: "real distinct body content", confidence: 0.6 });
   assert.equal(r.accepted, true);
 });
+
+test("admit warns when a depends_on target is already superseded", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "obs", title: "old config", body: "v1", confidence: 0.8 }, { key: "oldc", store });
+  admit({ kind: "obs", title: "new config", body: "v2", confidence: 0.85, edges: [{ relation: "supersedes", target: "oldc" }] }, { key: "newc", store });
+  const r = admit({ kind: "dec", title: "plan", body: "rests on config", confidence: 0.8, edges: [{ relation: "depends_on", target: "oldc" }] }, { key: "plan1", store });
+  assert.equal(r.accepted, true);
+  assert.ok(r.warnings.some((w) => /depends_on/.test(w) && /superseded/.test(w)));
+  store.close();
+});

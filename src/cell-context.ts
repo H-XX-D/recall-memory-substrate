@@ -23,6 +23,8 @@ export interface CellContext {
   };
   incoming: NeighborLink[];
   outgoing: NeighborLink[];
+  derivedFrom: string[]; // keys this cell was derived_from (outgoing provenance)
+  derivations: string[]; // keys derived_from this cell (incoming provenance)
   expansionHandles: string[];
 }
 
@@ -33,6 +35,10 @@ export function inspectCell(store: Store, handle: string): CellContext {
   const neighbors = store.neighbors(cell.key);
   const incoming = neighbors.filter((link) => link.direction === "in");
   const outgoing = neighbors.filter((link) => link.direction === "out");
+  // derived_from is a provenance marker (weight 0, no score effect). Surface both
+  // directions so a caller can trace where a cell came from and what came from it.
+  const derivedFrom = outgoing.filter((l) => l.edge.relation === "derived_from").map((l) => l.cell.key);
+  const derivations = incoming.filter((l) => l.edge.relation === "derived_from").map((l) => l.cell.key);
   const expansionHandles = [...new Set(neighbors.map((link) => link.cell.key))];
   const requestedValue = parsed.path ? selectField(cell, parsed.path) : undefined;
   return {
@@ -57,6 +63,8 @@ export function inspectCell(store: Store, handle: string): CellContext {
     },
     incoming,
     outgoing,
+    derivedFrom,
+    derivations,
     expansionHandles,
   };
 }
