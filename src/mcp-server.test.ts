@@ -5,6 +5,7 @@ import { SqliteStore } from "./store.js";
 import { WRITE_TEMPLATE } from "./template.js";
 import { buildCell } from "./build.js";
 import { indexCell } from "./semantic.js";
+import { admit } from "./admission.js";
 
 function req(method: string, params?: Record<string, unknown>, id: number = 1): JsonRpcRequest {
   return { jsonrpc: "2.0", id, method, params };
@@ -22,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the six lean tools", () => {
+test("tools/list returns exactly the seven lean tools", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -32,6 +33,7 @@ test("tools/list returns exactly the six lean tools", () => {
     "recall_cell",
     "recall_write",
     "recall_semantic",
+    "recall_ref",
   ]);
   store.close();
 });
@@ -83,8 +85,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the six-tool surface", () => {
-  assert.equal(TOOLS.length, 6);
+test("TOOLS is the seven-tool surface", () => {
+  assert.equal(TOOLS.length, 7);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -120,5 +122,41 @@ test("recall_semantic with missing query throws an Unknown tool error through th
   // missing query coerces to empty string, returns empty array (mirrors recall_search behavior)
   const hits = callText(res);
   assert.ok(Array.isArray(hits), "empty query returns empty array");
+  store.close();
+});
+
+test("recall_ref resolves a handle#path reference to {resolved:true, value, handle, targetId}", () => {
+  const store = new SqliteStore(":memory:");
+  // Admit a cell so we have a known handle and a scores.effective value to address
+  const r = admit(
+    { kind: "obs", title: "ref tool test cell", body: "body content for ref test", confidence: 0.8, topics: [], entities: [] },
+    { store },
+  );
+  assert.equal(r.accepted, true);
+  const cell = r.cell!;
+  const handle = cell.handle;
+
+  const reference = `${handle}#scores.effective`;
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_ref",
+    arguments: { reference },
+  }), store));
+
+  assert.equal(out.resolved, true, "should resolve a known handle reference");
+  assert.equal(out.handle, handle, "handle must match");
+  assert.ok(typeof out.targetId === "string", "targetId must be a string");
+  assert.ok("value" in out, "value must be present on resolved reference");
+  store.close();
+});
+
+test("recall_ref returns {resolved:false} for an unresolvable reference without throwing", () => {
+  const store = new SqliteStore(":memory:");
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_ref",
+    arguments: { reference: "no-such-handle-xyz#scores.effective" },
+  }), store));
+
+  assert.equal(out.resolved, false, "should return resolved:false for unknown reference");
+  assert.ok(typeof out.targetId === "string", "targetId must be present");
   store.close();
 });

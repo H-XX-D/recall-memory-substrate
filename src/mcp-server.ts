@@ -6,6 +6,7 @@ import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell } from "./cell-context.js";
 import { admit } from "./admission.js";
 import { semanticSearch } from "./semantic.js";
+import { resolveCellReference, cellReferenceView } from "./references.js";
 import type { Store, WriteProposal } from "./types.js";
 import type { SqliteStore } from "./store.js";
 
@@ -34,6 +35,7 @@ export const TOOLS = [
   { name: "recall_cell", description: "Expand one cell by id, prefix, handle, or address.", inputSchema: { type: "object", properties: { idOrAddress: { type: "string" } }, required: ["idOrAddress"] } },
   { name: "recall_write", description: "Admit a durable write through the admission gate.", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, topics: { type: "array" }, edges: { type: "array" } }, required: ["kind", "title", "body", "confidence"] } },
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
+  { name: "recall_ref", description: "Resolve a cell reference (handle#field.path) to the addressed value.", inputSchema: { type: "object", properties: { reference: { type: "string" } }, required: ["reference"] } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -119,6 +121,15 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
         backend: h.backend,
       }));
       return JSON.stringify(hits);
+    }
+    case "recall_ref": {
+      const reference = String(args.reference ?? "");
+      const res = resolveCellReference(reference, store);
+      if (res.cell !== null) {
+        const view = cellReferenceView(res.cell, reference);
+        return JSON.stringify({ targetId: view.targetId, handle: view.handle, path: view.path, value: view.value, resolved: true });
+      }
+      return JSON.stringify({ targetId: res.targetId, resolved: false });
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

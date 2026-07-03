@@ -15,6 +15,7 @@ export * from "./netlist.js";
 export * from "./operator.js";
 export * from "./programs.js";
 export * from "./render.js";
+export * from "./references.js";
 export * from "./resolve.js";
 export * from "./routing.js";
 export * from "./schema.js";
