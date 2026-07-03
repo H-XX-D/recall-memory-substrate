@@ -39,6 +39,55 @@ test("mapNodeToCell builds a MAL cell losslessly", () => {
   assert.equal((cell.props._migrated as { cell_address?: string }).cell_address, "recall://cell/n1");
 });
 
+test("migrate tolerates legacy DB with only graph_nodes (no hyperedges/semantic_index)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "recall-mig-legacy-"));
+  const oldPath = join(dir, "legacy.sqlite3");
+  const old = new DatabaseSync(oldPath);
+  old.exec(`CREATE TABLE graph_nodes (id TEXT, cell_address TEXT, kind TEXT, title TEXT, body TEXT, summary TEXT, scope_json TEXT, tags_json TEXT, data_json TEXT, provenance_json TEXT, status TEXT, created_at TEXT, updated_at TEXT);`);
+  old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("x", null, "observation", "X", "xbody", null, null, null, null, null, "active", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+  old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("y", null, "decision", "Y", "ybody", null, null, null, null, null, "active", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+  old.close();
+
+  const target = new SqliteStore(":memory:");
+  // must not throw "no such table: graph_relations" or "no such table: hyperedges" etc.
+  let res: Awaited<ReturnType<typeof migrate>>;
+  assert.doesNotThrow(() => { res = migrate(oldPath, target, { apply: true }); });
+  assert.equal(res!.cells, 2);
+  assert.equal(res!.edges, 0);
+  assert.equal(res!.hyperedges, 0);
+  assert.equal(res!.semanticVectors, 0);
+  assert.equal(target.all().length, 2);
+  target.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("mapNodeToCell coerces non-array topics/entities to []", () => {
+  const row: OldNodeRow = {
+    id: "n2", cell_address: null, kind: "observation",
+    title: "array guard test", body: "",
+    summary: null, scope_json: null,
+    tags_json: JSON.stringify({ topics: "notarray", entities: 42 }),
+    data_json: null, provenance_json: null,
+    status: "active", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+  };
+  const cell = mapNodeToCell(row);
+  assert.deepEqual(cell.tags.topics, []);
+  assert.deepEqual(cell.tags.entities, []);
+});
+
+test("mapNodeToCell maps confidence value 0 to 0.01 not 0.5", () => {
+  const row: OldNodeRow = {
+    id: "n3", cell_address: null, kind: "observation",
+    title: "zero-conf test", body: "",
+    summary: null, scope_json: null, tags_json: null,
+    data_json: JSON.stringify({ confidence: { value: 0 } }),
+    provenance_json: null,
+    status: "active", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+  };
+  const cell = mapNodeToCell(row);
+  assert.equal(cell.scores.conf, 0.01);
+});
+
 test("mapRelationToEdge maps known relations and drops unknown", () => {
   assert.deepEqual(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "supports" }), { relation: "supports", source: "a", target: "b", weight: 1 });
   assert.equal(mapRelationToEdge({ source_id: "a", target_id: "b", kind: "supports" })!.weight, 1);

@@ -35,7 +35,11 @@ export function mapNodeToCell(row: OldNodeRow): Cell {
   const tags = parse(row.tags_json);
   const scope = parse(row.scope_json);
   const prov = parse(row.provenance_json);
-  const confidence = typeof conf.value === "number" && conf.value > 0 && conf.value <= 1 ? conf.value : 0.5;
+  const confidence = typeof conf.value === "number" && conf.value > 0 && conf.value <= 1
+    ? conf.value
+    : typeof conf.value === "number" && conf.value === 0
+      ? 0.01
+      : 0.5;
 
   // Start from a proposal so buildCell fills scores/handle/defaults, then
   // overwrite the identity/time/status/props fields that migration must preserve.
@@ -46,8 +50,8 @@ export function mapNodeToCell(row: OldNodeRow): Cell {
       body: row.body ?? "",
       confidence,
       summary: row.summary ?? undefined,
-      topics: (tags.topics as string[]) ?? [],
-      entities: (tags.entities as string[]) ?? [],
+      topics: Array.isArray(tags.topics) ? (tags.topics as string[]) : [],
+      entities: Array.isArray(tags.entities) ? (tags.entities as string[]) : [],
       sensitivity: (pol.sensitivity as "public" | "private" | "secret") ?? "private",
       project: (scope.project as string) ?? "default",
       tenant: (scope.tenant as string) ?? "default",
@@ -84,6 +88,11 @@ export interface MigrateResult {
   applied: boolean;
 }
 
+function tableExists(db: DatabaseSync, name: string): boolean {
+  const rows = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).all(name) as unknown as { name: string }[];
+  return rows.length > 0;
+}
+
 export function migrate(
   oldDbPath: string,
   target: SqliteStore,
@@ -96,7 +105,9 @@ export function migrate(
   };
 
   // Build edge map from relations so they can be attached to each cell before put().
-  const rels = db.prepare(`SELECT source_id, target_id, kind FROM graph_relations`).all() as unknown as OldRelationRow[];
+  const rels = tableExists(db, "graph_relations")
+    ? db.prepare(`SELECT source_id, target_id, kind FROM graph_relations`).all() as unknown as OldRelationRow[]
+    : [];
   const edgesBySource = new Map<string, Edge[]>();
   for (const r of rels) {
     const e = mapRelationToEdge(r);
@@ -117,7 +128,9 @@ export function migrate(
   }
 
   type HyperedgeRow = { id: string; kind: string; title: string; members_json: string; metadata_json: string; created_at: string };
-  const hes = db.prepare(`SELECT * FROM hyperedges`).all() as unknown as HyperedgeRow[];
+  const hes = tableExists(db, "hyperedges")
+    ? db.prepare(`SELECT * FROM hyperedges`).all() as unknown as HyperedgeRow[]
+    : [];
   for (const h of hes) {
     res.hyperedges++;
     if (apply) {
@@ -131,7 +144,9 @@ export function migrate(
   }
 
   type SemanticRow = { node_id: string; backend: string; dims: number; vector_json: string; indexed_at: string };
-  const vecs = db.prepare(`SELECT * FROM semantic_index`).all() as unknown as SemanticRow[];
+  const vecs = tableExists(db, "semantic_index")
+    ? db.prepare(`SELECT * FROM semantic_index`).all() as unknown as SemanticRow[]
+    : [];
   for (const v of vecs) {
     res.semanticVectors++;
     if (apply) {
