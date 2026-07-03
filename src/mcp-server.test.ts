@@ -624,3 +624,31 @@ test("recall_health returns a memory health report mirroring recall_status's sim
   assert.ok(typeof out.provenance === "object" && out.provenance !== null);
   store.close();
 });
+
+test("recall_compile inputSchema exposes health, inlineRefs, and refParams booleans", () => {
+  const compileTool = TOOLS.find((t) => t.name === "recall_compile")!;
+  const props = compileTool.inputSchema.properties as Record<string, { type: string }>;
+  assert.equal(props.health?.type, "boolean");
+  assert.equal(props.inlineRefs?.type, "boolean");
+  assert.equal(props.refParams?.type, "boolean");
+});
+
+test("recall_compile health:false suppresses the health compilerState line", () => {
+  const store = new SqliteStore(":memory:");
+  admit(
+    { kind: "bel", title: "compile fragile belief", body: "b", confidence: 0.4, uncertainty: 0.6, concern: 0.5, topics: [], entities: [] },
+    { store },
+  );
+  const withHealth = handleMcpRequest(req("tools/call", {
+    name: "recall_compile",
+    arguments: { task: "compile fragile" },
+  }), store)?.result as any;
+  assert.match(withHealth.content[0].text, /health=beliefs:/);
+
+  const withoutHealth = handleMcpRequest(req("tools/call", {
+    name: "recall_compile",
+    arguments: { task: "compile fragile", health: false },
+  }), store)?.result as any;
+  assert.ok(!/health=beliefs:/.test(withoutHealth.content[0].text), "health:false should suppress the health line");
+  store.close();
+});

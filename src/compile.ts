@@ -9,6 +9,14 @@ import {
   TASK_CONTEXT_KIND_FACTOR,
   type RankedHit,
 } from "./retrieval.js";
+import { analyzeMemory, type MemoryHealthReport } from "./analysis.js";
+import { programSpecFromCell, type ProgramSpec } from "./programs.js";
+import {
+  cellReferenceView,
+  parseCellReference,
+  previewReferenceValue,
+  resolveCellReference,
+} from "./references.js";
 
 export interface CompileResult {
   hits: SearchHit[];
@@ -20,6 +28,9 @@ export interface ContextCompileOptions {
   budgetWords?: number;
   includeConflicts?: boolean;
   includeNextActions?: boolean;
+  includeHealth?: boolean; // default true
+  inlineReferenceValues?: boolean; // default false
+  includeReferenceParameters?: boolean; // default false
 }
 
 export interface ContextPacket {
@@ -32,6 +43,9 @@ export interface ContextPacket {
   risks: string[];
   tasks: string[];
   cellState: string[];
+  standingPrograms: string[];
+  translatedReferences: string[];
+  referenceParameters: string[];
   staleOrLowTrust: string[];
   suggestedNextActions: string[];
   expansionHandles: string[];
@@ -91,6 +105,9 @@ export function compileContext(
     risks: [],
     tasks: [],
     cellState: [],
+    standingPrograms: [],
+    translatedReferences: [],
+    referenceParameters: [],
     staleOrLowTrust: [],
     suggestedNextActions: [],
     expansionHandles: [],
@@ -106,11 +123,22 @@ export function compileContext(
       surfaceIncomingChallenges(packet, store, hit.cell, seenChallenges);
     }
     surfaceDependencies(packet, store, hit.cell);
+    surfaceStandingPrograms(packet, store, hit.cell);
+    surfaceTranslatedReferences(packet, store, hit.cell, {
+      inlineReferenceValues: opts.inlineReferenceValues === true,
+      includeReferenceParameters: opts.includeReferenceParameters === true,
+    });
     // Surface challenged cells (effective < conf * 0.5) as low-trust, in
     // addition to the existing requiresReview / expiry checks.
     surfaceLowTrust(packet, hit.cell, hit.challenged);
     packet.wordCount = countPacketWords(packet);
     if (packet.wordCount >= budget) break;
+  }
+
+  // Health signals run analyzeMemory ONCE per compile (not per hit). It is
+  // O(active pool) and acceptable at the current scale.
+  if (opts.includeHealth !== false) {
+    surfaceHealth(packet, store, now, seenChallenges, opts.includeNextActions !== false);
   }
 
   if (opts.includeNextActions !== false && packet.suggestedNextActions.length === 0) {
@@ -132,6 +160,9 @@ export function formatContextPacket(packet: ContextPacket): string {
     section("risks", packet.risks),
     section("tasks", packet.tasks),
     section("cell_state", packet.cellState),
+    section("standing_programs", packet.standingPrograms),
+    section("translated_references", packet.translatedReferences),
+    section("reference_parameters", packet.referenceParameters),
     section("stale_or_low_trust", packet.staleOrLowTrust),
     section("suggested_next_actions", packet.suggestedNextActions),
     section("expansion_handles", packet.expansionHandles),
@@ -215,6 +246,170 @@ function surfaceDependencies(packet: ContextPacket, store: Store, cell: Cell): v
   }
 }
 
+// Standing programs (R3): for each program key the cell records in
+// cell.programs, resolve the prg cell and, when it carries a valid spec, render
+// what it guards. paramsSummary shows the operation's salient tuning knobs.
+function surfaceStandingPrograms(packet: ContextPacket, store: Store, cell: Cell): void {
+  for (const programKey of cell.programs) {
+    const program = store.get(programKey);
+    if (!program || program.status !== "active" || program.kind !== "prg") continue;
+    let spec: ProgramSpec | undefined;
+    try {
+      spec = programSpecFromCell(program);
+    } catch {
+      spec = undefined;
+    }
+    if (!spec) continue;
+    pushUnique(
+      packet.standingPrograms,
+      `${spec.operation}${paramsSummary(spec)} guards "${trimWords(program.title, 8)}" covering ${cell.kind}:${cell.key} [program:${program.handle}]`,
+    );
+  }
+}
+
+function paramsSummary(spec: ProgramSpec): string {
+  const params = spec.params ?? {};
+  switch (spec.operation) {
+    case "watch":
+    case "drift":
+      return `(delta ${numParam(params.delta, 0.15)})`;
+    case "quorum":
+      return `(k ${numParam(params.k, 2)}, minEff ${numParam(params.minEff, 0.7)})`;
+    case "trend":
+      return `(window ${numParam(params.window, 8)}, delta ${numParam(params.delta, 0.1)})`;
+    default:
+      return "";
+  }
+}
+
+function numParam(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+// The relation order in which translated references are walked. depends_on
+// first, then supports, contradicts, concerns.
+const TRANSLATED_RELATION_ORDER = ["depends_on", "supports", "contradicts", "concerns"] as const;
+const TRANSLATED_REFERENCE_CAP = 6;
+
+// Translated references (per fused hit): render each outgoing edge (in relation
+// order) as a resolved or unresolved reference line, capped at 6 with an
+// overflow line; then fold in any sourceRefs that carry a "#" path. With
+// includeReferenceParameters, resolved path references also emit a detailed
+// reference_parameters line.
+function surfaceTranslatedReferences(
+  packet: ContextPacket,
+  store: Store,
+  cell: Cell,
+  opts: { inlineReferenceValues: boolean; includeReferenceParameters: boolean },
+): void {
+  const ordered = [...cell.edgesOut].sort(
+    (a, b) => relationRank(a.relation) - relationRank(b.relation),
+  );
+  const lines: string[] = [];
+  for (const edge of ordered) {
+    if (relationRank(edge.relation) === TRANSLATED_RELATION_ORDER.length) continue;
+    const target = store.get(edge.target) ?? store.getByHandle(edge.target);
+    if (target) {
+      lines.push(
+        `${trimWords(cell.title, 12)} ${edge.relation} ${trimWords(target.title, 12)}; handle=${target.handle}`,
+      );
+      pushUnique(packet.expansionHandles, target.key);
+    } else {
+      lines.push(
+        `${trimWords(cell.title, 12)} ${edge.relation} unresolved reference ${edge.target} [${cell.key}->${edge.target}]`,
+      );
+    }
+  }
+
+  // Fold in any sourceRef that carries a "#" path, resolving via references.ts.
+  for (const ref of cell.sourceRefs) {
+    if (!ref.includes("#")) continue;
+    const parsed = parseCellReference(ref);
+    const resolved = resolveCellReference(ref, store);
+    if (!resolved.cell) continue;
+    const target = resolved.cell;
+    let line = `${trimWords(cell.title, 12)} ref ${trimWords(target.title, 12)}; handle=${target.handle}`;
+    if (parsed.path && opts.inlineReferenceValues) {
+      const view = cellReferenceView(target, ref);
+      line += `; value=${JSON.stringify(previewReferenceValue(view.value))}`;
+    }
+    lines.push(line);
+    pushUnique(packet.expansionHandles, target.key);
+
+    if (opts.includeReferenceParameters && parsed.path) {
+      const view = cellReferenceView(target, ref);
+      const v = view.value;
+      const valueKind = Array.isArray(v) ? "array" : v === null ? "null" : typeof v;
+      pushUnique(
+        packet.referenceParameters,
+        `${trimWords(cell.title, 12)} ref ${trimWords(target.title, 12)}; handle=${target.key}#${parsed.path}; value_kind=${valueKind}; value=${trimWords(String(JSON.stringify(previewReferenceValue(v))), 28)}; target_state=${target.kind}/${target.status}/conf:${round2(target.scores.conf)}`,
+      );
+    }
+  }
+
+  const capped = lines.slice(0, TRANSLATED_REFERENCE_CAP);
+  for (const line of capped) pushUnique(packet.translatedReferences, line);
+  if (lines.length > TRANSLATED_REFERENCE_CAP) {
+    pushUnique(
+      packet.translatedReferences,
+      `${trimWords(cell.title, 12)} has ${lines.length} more references; expand ${cell.key} for the rest`,
+    );
+  }
+}
+
+function relationRank(relation: string): number {
+  const idx = TRANSLATED_RELATION_ORDER.indexOf(relation as (typeof TRANSLATED_RELATION_ORDER)[number]);
+  return idx === -1 ? TRANSLATED_RELATION_ORDER.length : idx;
+}
+
+// Health signals: run analyzeMemory once and merge its top findings into the
+// existing packet sections. Contradictions dedup against the same challenge-key
+// set surfaceIncomingChallenges uses, so a health-sourced conflict never
+// duplicates one already surfaced from the graph walk.
+function surfaceHealth(
+  packet: ContextPacket,
+  store: Store,
+  now: Date,
+  seenChallenges: Set<string>,
+  includeNextActions: boolean,
+): void {
+  const report: MemoryHealthReport = analyzeMemory(store, now);
+  const pressured = report.beliefs.filter((b) => b.recommendation !== "trust").length;
+  packet.compilerState.push(
+    `health=beliefs:${pressured}, contradictions:${report.contradictions.length}, stale:${report.stale.length}, warnings:${report.criticalWarnings.length}`,
+  );
+
+  for (const belief of report.beliefs.filter((b) => b.recommendation !== "trust").slice(0, 6)) {
+    pushUnique(
+      packet.activeBeliefs,
+      `${trimWords(belief.title, 12)}: recommendation=${belief.recommendation}, confidence=${belief.conf}, contradiction=${belief.contradiction} [bel:${belief.key}]`,
+    );
+  }
+
+  for (const contradiction of report.contradictions.slice(0, 6)) {
+    const key = `${contradiction.relation}:${contradiction.sourceKey}->${contradiction.targetKey}`;
+    if (seenChallenges.has(key)) continue;
+    seenChallenges.add(key);
+    pushUnique(
+      packet.conflicts,
+      `${trimWords(contradiction.sourceTitle, 12)} ${contradiction.relation} ${trimWords(contradiction.targetTitle, 12)} [${key}]`,
+    );
+  }
+
+  for (const finding of report.stale.slice(0, 6)) {
+    pushUnique(
+      packet.staleOrLowTrust,
+      `${trimWords(finding.title, 12)}: ${finding.reason}; severity=${finding.severity} [stale:${finding.key}]`,
+    );
+  }
+
+  if (includeNextActions) {
+    for (const action of report.nextActions.slice(0, 4)) {
+      pushUnique(packet.suggestedNextActions, action);
+    }
+  }
+}
+
 function surfaceLowTrust(packet: ContextPacket, cell: Cell, challenged?: boolean): void {
   const effectiveCollapsed = challenged ?? cell.scores.effective < cell.scores.conf * 0.5;
   if (!needsExpansion(cell) && !effectiveCollapsed) return;
@@ -245,25 +440,30 @@ function pushUnique(lines: string[], line: string): void {
 }
 
 function trimPacket(packet: ContextPacket, budget: number): void {
+  // Trim order is load-bearing (legacy-verified): referenceParameters pops
+  // FIRST; conflicts is absent so it survives longest; standingPrograms is
+  // deliberately absent and is NEVER popped.
   const sections: (keyof Pick<
     ContextPacket,
+    | "referenceParameters"
     | "cellState"
+    | "translatedReferences"
     | "relevantMemory"
     | "activeBeliefs"
     | "tasks"
     | "risks"
-    | "conflicts"
     | "dependencies"
     | "staleOrLowTrust"
     | "suggestedNextActions"
     | "expansionHandles"
   >)[] = [
+    "referenceParameters",
     "cellState",
+    "translatedReferences",
     "relevantMemory",
     "activeBeliefs",
     "tasks",
     "risks",
-    "conflicts",
     "dependencies",
     "staleOrLowTrust",
     "suggestedNextActions",
@@ -288,6 +488,9 @@ function countPacketWords(packet: ContextPacket): number {
     ...packet.risks,
     ...packet.tasks,
     ...packet.cellState,
+    ...packet.standingPrograms,
+    ...packet.translatedReferences,
+    ...packet.referenceParameters,
     ...packet.staleOrLowTrust,
     ...packet.suggestedNextActions,
     ...packet.expansionHandles,

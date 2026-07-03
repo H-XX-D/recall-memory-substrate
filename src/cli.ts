@@ -67,6 +67,9 @@ interface ParsedArgs {
   apply: boolean;
   words: number;
   limit: number;
+  noHealth: boolean;
+  inlineRefs: boolean;
+  refParams: boolean;
 }
 
 interface Route {
@@ -204,7 +207,13 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
     if (command === "compile") {
       const objective = queryFrom(args, 1, "compile requires a task");
       return withReadStore(args, route, env, (store) => {
-        out(`${formatContextPacket(compileContext(store, objective, { budgetWords: args.words, limit: args.limit }))}\n`);
+        out(`${formatContextPacket(compileContext(store, objective, {
+          budgetWords: args.words,
+          limit: args.limit,
+          includeHealth: !args.noHealth,
+          inlineReferenceValues: args.inlineRefs,
+          includeReferenceParameters: args.refParams,
+        }))}\n`);
         return 0;
       });
     }
@@ -530,7 +539,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command: string[] = [];
-  const parsed: ParsedArgs = { command, derive: false, apply: false, words: 900, limit: 10 };
+  const parsed: ParsedArgs = { command, derive: false, apply: false, words: 900, limit: 10, noHealth: false, inlineRefs: false, refParams: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--db") parsed.db = requireValue(argv, ++i, arg);
@@ -544,6 +553,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--mode") parsed.mode = requireValue(argv, ++i, arg);
     else if (arg === "--derive") parsed.derive = true;
     else if (arg === "--apply") parsed.apply = true;
+    else if (arg === "--no-health") parsed.noHealth = true;
+    else if (arg === "--inline-refs") parsed.inlineRefs = true;
+    else if (arg === "--ref-params") parsed.refParams = true;
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--limit") parsed.limit = positiveInt(requireValue(argv, ++i, arg), arg);
     else command.push(arg);
@@ -690,7 +702,7 @@ Commands:
   recall project where
   recall where
   recall status [--db path] [--project slug]
-  recall compile "task" [--words 900] [--limit 10] [--db path] [--project slug]
+  recall compile "task" [--words 900] [--limit 10] [--no-health] [--inline-refs] [--ref-params] [--db path] [--project slug]
   recall search "query" [--limit 10] [--db path] [--project slug]
   recall cell show <key-or-handle> [--db path] [--project slug]
   recall hyperedge add --json edge.json [--db path] [--project slug]

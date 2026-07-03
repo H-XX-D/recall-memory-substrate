@@ -44,7 +44,7 @@ const PROTOCOL_VERSION = "2024-11-05";
 export const TOOLS = [
   { name: "recall_status", description: "Graph counts and lexical backend.", inputSchema: { type: "object", properties: {} } },
   { name: "recall_search", description: "Lexical search; returns id, kind, title, score.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
-  { name: "recall_compile", description: "Compile a budgeted context packet for a task.", inputSchema: { type: "object", properties: { task: { type: "string" }, words: { type: "number" } }, required: ["task"] } },
+  { name: "recall_compile", description: "Compile a budgeted context packet for a task.", inputSchema: { type: "object", properties: { task: { type: "string" }, words: { type: "number" }, health: { type: "boolean" }, inlineRefs: { type: "boolean" }, refParams: { type: "boolean" } }, required: ["task"] } },
   { name: "recall_cell", description: "Expand one cell by id, prefix, handle, or address.", inputSchema: { type: "object", properties: { idOrAddress: { type: "string" } }, required: ["idOrAddress"] } },
   { name: "recall_write", description: "Admit a durable write through the admission gate.", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, topics: { type: "array" }, edges: { type: "array" } }, required: ["kind", "title", "body", "confidence"] } },
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
@@ -106,7 +106,12 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
     case "recall_compile": {
       const task = String(args.task ?? args.objective ?? "");
       const words = typeof args.words === "number" ? args.words : 900;
-      return formatContextPacket(compileContext(store, task, { budgetWords: words }));
+      return formatContextPacket(compileContext(store, task, {
+        budgetWords: words,
+        includeHealth: args.health !== false,
+        inlineReferenceValues: args.inlineRefs === true,
+        includeReferenceParameters: args.refParams === true,
+      }));
     }
     case "recall_cell": {
       const ref = String(args.idOrAddress ?? args.id ?? "");
