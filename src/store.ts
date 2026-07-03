@@ -19,6 +19,7 @@ import { openDb, type Db } from "./db.js";
 import { buildFtsMatchQuery } from "./retrieval.js";
 import { normalizeHyperedgeMembers } from "./hyperedges.js";
 import type { ProgramRun } from "./programs.js";
+import type { StoredEvalRun } from "./evals.js";
 
 // Content fingerprint for dedup: kind + normalized title. Stable, not relational,
 // so it is safe to store and index (it is a content key, not derived graph state).
@@ -64,6 +65,12 @@ interface ProgramRunRow {
   operation: string;
   output_json: string;
   member_keys_json: string;
+  created_at: string;
+}
+interface EvalRunRow {
+  id: string;
+  name: string;
+  result_json: string;
   created_at: string;
 }
 
@@ -275,6 +282,34 @@ export class SqliteStore implements Store {
     return rows.map((r) => this.hydrateProgramRun(r));
   }
 
+  // Durable eval ledger, same convention as recordProgramRun: SqliteStore-only
+  // (NOT on the Store interface), feature-detected by callers with
+  // "recordEvalRun" in store before calling.
+  recordEvalRun(run: StoredEvalRun): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO eval_runs (id, name, result_json, created_at) VALUES (?, ?, ?, ?)`,
+      )
+      .run(run.id, run.name, JSON.stringify(run.result), run.createdAt);
+  }
+
+  // Prefix-tolerant via resolveStoredId, same convention as getProgramRun.
+  getEvalRun(id: string): StoredEvalRun | undefined {
+    const resolved = this.resolveStoredId("eval_runs", id);
+    if (resolved === null) return undefined;
+    const row = this.db.prepare(`SELECT * FROM eval_runs WHERE id = ?`).get(resolved) as
+      | EvalRunRow
+      | undefined;
+    return row ? this.hydrateEvalRun(row) : undefined;
+  }
+
+  listEvalRuns(limit = 20): StoredEvalRun[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM eval_runs ORDER BY created_at DESC LIMIT ?`)
+      .all(limit) as unknown as EvalRunRow[];
+    return rows.map((r) => this.hydrateEvalRun(r));
+  }
+
   search(query: string, opts: { limit?: number } = {}): SearchHit[] {
     const limit = opts.limit ?? 10;
     const terms = searchTerms(query);
@@ -450,6 +485,15 @@ export class SqliteStore implements Store {
       createdAt: row.created_at,
       memberKeys: JSON.parse(row.member_keys_json),
       output: JSON.parse(row.output_json),
+    };
+  }
+
+  private hydrateEvalRun(row: EvalRunRow): StoredEvalRun {
+    return {
+      id: row.id,
+      name: row.name,
+      result: JSON.parse(row.result_json),
+      createdAt: row.created_at,
     };
   }
 

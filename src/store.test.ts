@@ -408,3 +408,80 @@ test("listProgramRuns filters by programKey and orders newest-first with a defau
 
   store.close();
 });
+
+test("recordEvalRun then getEvalRun round-trips an exact id", () => {
+  const store = new SqliteStore(":memory:");
+  const result = {
+    name: "recall-default",
+    passed: true,
+    score: 1,
+    cases: [{ name: "kh", kind: "invariant" as const, passed: true, score: 1, details: {} }],
+    createdAt: "2026-07-03T00:00:00Z",
+  };
+  store.recordEvalRun({
+    id: "11111111-2222-3333-4444-555555555555",
+    name: "recall-default",
+    result,
+    createdAt: "2026-07-03T00:00:00Z",
+  });
+  const got = store.getEvalRun("11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.id, "11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.name, "recall-default");
+  assert.deepEqual(got?.result, result);
+  store.close();
+});
+
+test("getEvalRun resolves a unique prefix and returns undefined for an ambiguous or unknown one", () => {
+  const store = new SqliteStore(":memory:");
+  const result = {
+    name: "recall-default",
+    passed: true,
+    score: 1,
+    cases: [],
+    createdAt: "2026-07-03T00:00:00Z",
+  };
+  store.recordEvalRun({
+    id: "aaaaaaaa-2222-3333-4444-555555555555",
+    name: "recall-default",
+    result,
+    createdAt: "2026-07-03T00:00:00Z",
+  });
+  store.recordEvalRun({
+    id: "aaaaaaab-2222-3333-4444-555555555555",
+    name: "recall-default",
+    result,
+    createdAt: "2026-07-03T00:00:01Z",
+  });
+  const got = store.getEvalRun("aaaaaaaa");
+  assert.equal(got?.id, "aaaaaaaa-2222-3333-4444-555555555555");
+  assert.equal(store.getEvalRun("aaaaaaa"), undefined); // ambiguous prefix
+  assert.equal(store.getEvalRun("does-not-exist"), undefined);
+  store.close();
+});
+
+test("listEvalRuns orders newest-first with a default limit of 20", () => {
+  const store = new SqliteStore(":memory:");
+  const result = {
+    name: "recall-default",
+    passed: true,
+    score: 1,
+    cases: [],
+    createdAt: "2026-07-03T00:00:00Z",
+  };
+  for (let i = 0; i < 25; i += 1) {
+    store.recordEvalRun({
+      id: `run-${i}`,
+      name: "recall-default",
+      result,
+      createdAt: `2026-07-03T00:00:${String(i).padStart(2, "0")}Z`,
+    });
+  }
+  const all = store.listEvalRuns();
+  assert.equal(all.length, 20); // default limit
+  assert.equal(all[0]!.id, "run-24"); // newest first
+
+  const limited = store.listEvalRuns(3);
+  assert.deepEqual(limited.map((run) => run.id), ["run-24", "run-23", "run-22"]);
+
+  store.close();
+});

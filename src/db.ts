@@ -57,6 +57,12 @@ export function openDb(path = ":memory:"): Db {
   `);
   db.exec("CREATE INDEX IF NOT EXISTS idx_program_runs_program ON program_runs(program_key)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_program_runs_created ON program_runs(created_at)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS eval_runs (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_eval_runs_created ON eval_runs(created_at)");
   ensureGeneratedColumns(db);
   return db;
 }
