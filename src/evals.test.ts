@@ -8,6 +8,7 @@ import {
   runEvalAndDerive,
   runRecallEval,
 } from "./evals.js";
+import type { RecallEvalCase } from "./evals.js";
 import { buildCell } from "./build.js";
 import { SqliteStore } from "./store.js";
 import { indexCell } from "./semantic.js";
@@ -454,4 +455,17 @@ test("prefix-resolution invariant fails when the resolver returns a different ce
   const undefinedResult = runRecallEval(undefinedResolutionStore, suite);
   assert.equal(undefinedResult.cases[0]!.passed, false);
   assert.equal(undefinedResult.cases[0]!.details.resolvedKey, undefined);
+});
+
+test("runRecallEval throws a clear error for a case with an unrecognized kind", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const suite = {
+      name: "bad-kind",
+      cases: [{ name: "bad", kind: "serach", query: "q" } as unknown as RecallEvalCase],
+    };
+    assert.throws(() => runRecallEval(store, suite), /unknown eval case kind: serach/);
+  } finally {
+    store.close();
+  }
 });

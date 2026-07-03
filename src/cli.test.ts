@@ -763,6 +763,27 @@ test("eval run --json with a malformed suite throws a clear error", () => {
   }
 });
 
+test("eval run --json with an unrecognized case kind exits nonzero with a clear error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const suitePath = join(tmp, "bad-kind-suite.json");
+    writeFileSync(
+      suitePath,
+      JSON.stringify({
+        name: "x",
+        cases: [{ name: "bad", kind: "serach", query: "q" }],
+      }),
+    );
+
+    const result = capture(["eval", "run", "--json", suitePath, "--db", db]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /unknown eval case kind/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("eval show with an unknown id exits nonzero with a clear error", () => {
   const tmp = tempDir();
   try {

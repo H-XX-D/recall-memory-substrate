@@ -95,6 +95,12 @@ function runCase(store: Store, c: RecallEvalCase): RecallEvalCaseResult {
       return runCompileCase(store, c);
     case "invariant":
       return runInvariantCase(store, c);
+    default:
+      // Exhaustiveness guard: a custom suite (e.g. from the CLI's --json) can
+      // carry a case with an unrecognized kind (a typo like "serach"). Fail
+      // loudly here rather than falling through to undefined, which would
+      // surface as an opaque TypeError one line up in runRecallEval.
+      throw new Error("unknown eval case kind: " + String((c as { kind?: unknown }).kind));
   }
 }
 
