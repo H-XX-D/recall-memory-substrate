@@ -142,3 +142,14 @@ test("cellsCreatedSince filters and orders by the generated created_at column", 
   assert.deepEqual(recent.map((c) => c.key), ["n", "m"]); // DESC by created_at, old excluded
   store.close();
 });
+
+test("listSemanticVectorIds returns all stored node_ids", () => {
+  const store = new SqliteStore(":memory:");
+  const ts = "2026-07-03T00:00:00Z";
+  store.putSemanticVector({ nodeId: "id-a", backend: "cosine", dims: 2, vector: [0.1, 0.2], indexedAt: ts });
+  store.putSemanticVector({ nodeId: "id-b", backend: "cosine", dims: 2, vector: [0.3, 0.4], indexedAt: ts });
+  store.putSemanticVector({ nodeId: "id-c", backend: "cosine", dims: 2, vector: [0.5, 0.6], indexedAt: ts });
+  const ids = store.listSemanticVectorIds();
+  assert.deepEqual(ids.sort(), ["id-a", "id-b", "id-c"]);
+  store.close();
+});

@@ -201,7 +201,7 @@ export interface NeighborLink {
   direction: "out" | "in"; // out: this cell is the edge source; in: the target
 }
 
-export type LexicalBackend = "fts5-bm25" | "like" | "federated";
+export type LexicalBackend = "fts5-bm25" | "like" | "federated" | "cosine";
 
 export interface SearchHit {
   cell: Cell;
@@ -229,4 +229,7 @@ export interface Store {
   lexicalBackend(): LexicalBackend;
   stats(): StoreStats;
   close(): void;
+  putSemanticVector(v: SemanticVector): void;
+  getSemanticVector(nodeId: string): SemanticVector | undefined;
+  listSemanticVectorIds(): string[];
 }

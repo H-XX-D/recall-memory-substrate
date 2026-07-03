@@ -101,3 +101,52 @@ test("federated stats aggregate members and writes are blocked", () => {
     fed.close();
   }
 });
+
+test("federated putSemanticVector throws read-only error", () => {
+  const store = new SqliteStore(":memory:");
+  const fed = new FederatedReadStore([{ graph: "home", store, ownsStore: true }]);
+  try {
+    assert.throws(
+      () =>
+        fed.putSemanticVector({
+          nodeId: "x",
+          backend: "cosine",
+          dims: 2,
+          vector: [0.1, 0.2],
+          indexedAt: "2026-07-03T00:00:00Z",
+        }),
+      new RegExp(FEDERATED_READ_ONLY_MESSAGE),
+    );
+  } finally {
+    fed.close();
+  }
+});
+
+test("federated getSemanticVector resolves across members by prefixed key", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  const ts = "2026-07-03T00:00:00Z";
+  home.putSemanticVector({ nodeId: "node-1", backend: "cosine", dims: 2, vector: [0.1, 0.2], indexedAt: ts });
+  proj.putSemanticVector({ nodeId: "node-2", backend: "cosine", dims: 2, vector: [0.3, 0.4], indexedAt: ts });
+
+  const fed = new FederatedReadStore([
+    { graph: "home", store: home, ownsStore: true },
+    { graph: "proj", store: proj, ownsStore: true },
+  ]);
+  try {
+    const v1 = fed.getSemanticVector("home:node-1");
+    assert.equal(v1?.nodeId, "node-1");
+    assert.deepEqual(v1?.vector, [0.1, 0.2]);
+
+    const v2 = fed.getSemanticVector("proj:node-2");
+    assert.equal(v2?.nodeId, "node-2");
+    assert.deepEqual(v2?.vector, [0.3, 0.4]);
+
+    assert.equal(fed.getSemanticVector("home:node-2"), undefined);
+
+    const ids = fed.listSemanticVectorIds().sort();
+    assert.deepEqual(ids, ["home:node-1", "proj:node-2"]);
+  } finally {
+    fed.close();
+  }
+});

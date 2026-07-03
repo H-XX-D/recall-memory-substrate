@@ -5,7 +5,7 @@
 // accidentally mixing domains.
 import { existsSync } from "node:fs";
 import { SqliteStore } from "./store.js";
-import type { Cell, Edge, Kind, NeighborLink, SearchHit, Store, StoreStats } from "./types.js";
+import type { Cell, Edge, Kind, NeighborLink, SearchHit, SemanticVector, Store, StoreStats } from "./types.js";
 
 export const FEDERATED_READ_ONLY_MESSAGE =
   "federated read store is read-only; route writes to a home or project local";
@@ -105,6 +105,29 @@ export class FederatedReadStore implements Store {
         a.cell.key.localeCompare(b.cell.key),
     );
     return hits.slice(0, limit);
+  }
+
+  putSemanticVector(_v: SemanticVector): void {
+    throw new Error(FEDERATED_READ_ONLY_MESSAGE);
+  }
+
+  getSemanticVector(nodeId: string): SemanticVector | undefined {
+    const { graph, key } = decodeFederatedKey(nodeId);
+    if (graph !== undefined) {
+      const member = this.byGraph.get(graph);
+      return member ? member.store.getSemanticVector(key) : undefined;
+    }
+    for (const member of this.members) {
+      const v = member.store.getSemanticVector(nodeId);
+      if (v) return v;
+    }
+    return undefined;
+  }
+
+  listSemanticVectorIds(): string[] {
+    return this.members.flatMap((member) =>
+      member.store.listSemanticVectorIds().map((id) => encodeFederatedKey(member.graph, id)),
+    );
   }
 
   lexicalBackend(): "federated" {

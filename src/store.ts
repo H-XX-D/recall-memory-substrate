@@ -165,6 +165,11 @@ export class SqliteStore implements Store {
     return r ? { nodeId: r.node_id, backend: r.backend, dims: r.dims, vector: JSON.parse(r.vector_json), indexedAt: r.indexed_at } : undefined;
   }
 
+  listSemanticVectorIds(): string[] {
+    const rows = this.db.prepare(`SELECT node_id FROM semantic_index`).all() as Array<{ node_id: string }>;
+    return rows.map((r) => r.node_id);
+  }
+
   putDagOverlay(d: DagOverlay): void {
     this.db.prepare(`INSERT OR REPLACE INTO dag_overlays (id, title, node_ids_json, edges_json, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(d.id, d.title, JSON.stringify(d.nodeIds), JSON.stringify(d.edges), JSON.stringify(d.metadata), d.createdAt);
