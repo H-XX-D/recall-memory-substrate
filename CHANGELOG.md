@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - 2026-07-03
+
+Phase 1 of the subsystem port: store foundation + data migration. The MAL store gains the rich overlay tables and can read pre-0.6 memory.
+
+- Adds `hyperedges`, `semantic_index`, and `dag_overlays` tables to the store, with `putHyperedge`/`listHyperedges`, `putSemanticVector`/`getSemanticVector`, and `putDagOverlay`/`listDagOverlays` accessors.
+- Adds `recall migrate --from <old.sqlite3> [--apply] [--db <path>]`, a dry-run-first, one-shot migration from the legacy `graph_nodes` schema into the MAL `cells`/`edges` store. Cell-level lossless: any legacy field with no first-class MAL home is preserved under `cell.props._migrated`. The old database is opened read-only and never mutated.
+- Verified against a 1,184-cell store: cells, 1,159 relations, 5 hyperedges, and 1,184 semantic vectors migrate, and `recall compile` then sees the memory.
+
 ## 0.5.2 - 2026-07-03
 
 Wires the two under-used relation primitives to real behavior.
