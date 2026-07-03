@@ -31,5 +31,6 @@ export {
   type RankedHit,
   type MalLexicalCandidate,
 } from "./retrieval.js";
+export * from "./pages.js";
 export * from "./store.js";
 export * from "./types.js";
