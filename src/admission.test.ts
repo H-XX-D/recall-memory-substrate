@@ -145,3 +145,32 @@ test("admit warns when a depends_on target is already superseded", () => {
   assert.ok(r.warnings.some((w) => /depends_on/.test(w) && /superseded/.test(w)));
   store.close();
 });
+
+test("auto-index: admitted cell through SqliteStore has a semantic vector", () => {
+  const store = new SqliteStore(":memory:");
+  const r = admit({ kind: "dec", title: "indexed", body: "some content", confidence: 0.6 }, { key: "idx1", store });
+  assert.equal(r.accepted, true);
+  const vec = store.getSemanticVector("idx1");
+  assert.ok(vec !== undefined, "semantic vector must be defined after admit");
+  store.close();
+});
+
+test("auto-index: admit without a store does not crash and produces no vector error", () => {
+  const r = admit({ kind: "dec", title: "no store", body: "no store body", confidence: 0.6 }, { key: "ns1" });
+  assert.equal(r.accepted, true);
+  // no crash, no assertion about vectors (there is no store)
+});
+
+test("auto-index: dedup path does not double-write a semantic vector", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "dec", title: "dup", body: "dup body", confidence: 0.6 }, { key: "d1", store });
+  // second admit is a dedup no-op
+  const r2 = admit({ kind: "dec", title: "dup", body: "dup body", confidence: 0.6 }, { key: "d2", store });
+  assert.ok(r2.warnings.some((w) => /dedup/i.test(w)), "second admit should be a dedup");
+  // vector for d1 must still exist; no vector for d2 (dedup never reached final put)
+  const v1 = store.getSemanticVector("d1");
+  assert.ok(v1 !== undefined, "original cell vector must be defined");
+  const v2 = store.getSemanticVector("d2");
+  assert.equal(v2, undefined, "dedup no-op must not create a second vector");
+  store.close();
+});

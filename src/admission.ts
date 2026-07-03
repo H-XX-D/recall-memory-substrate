@@ -16,7 +16,8 @@ import { screenSecrets, attenuateConfidence } from "./firewall.js";
 import { buildCell } from "./build.js";
 import { effectiveConfidence } from "./scores.js";
 import { neighborMass } from "./mass.js";
-import { contentKey } from "./store.js";
+import { contentKey, SqliteStore } from "./store.js";
+import { indexCell } from "./semantic.js";
 import type { AdmissionResult, Store, ValidationIssue, WriteProposal } from "./types.js";
 
 export interface AdmitContext {
@@ -162,6 +163,9 @@ export function admit(
       challengeMass: mSelf.challengeMass,
     });
     store.put(cell);
+    if (store instanceof SqliteStore) {
+      indexCell(cell, store);
+    }
   }
 
   return {
