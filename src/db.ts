@@ -49,6 +49,14 @@ export function openDb(path = ":memory:"): Db {
       edges_json TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL
     )
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS program_runs (
+      id TEXT PRIMARY KEY, program_key TEXT NOT NULL, operation TEXT NOT NULL,
+      output_json TEXT NOT NULL, member_keys_json TEXT NOT NULL, created_at TEXT NOT NULL
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_program_runs_program ON program_runs(program_key)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_program_runs_created ON program_runs(created_at)");
   ensureGeneratedColumns(db);
   return db;
 }

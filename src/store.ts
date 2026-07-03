@@ -18,6 +18,7 @@ import type {
 import { openDb, type Db } from "./db.js";
 import { buildFtsMatchQuery } from "./retrieval.js";
 import { normalizeHyperedgeMembers } from "./hyperedges.js";
+import type { ProgramRun } from "./programs.js";
 
 // Content fingerprint for dedup: kind + normalized title. Stable, not relational,
 // so it is safe to store and index (it is a content key, not derived graph state).
@@ -55,6 +56,14 @@ interface HyperedgeRow {
   title: string;
   members_json: string;
   metadata_json: string;
+  created_at: string;
+}
+interface ProgramRunRow {
+  id: string;
+  program_key: string;
+  operation: string;
+  output_json: string;
+  member_keys_json: string;
   created_at: string;
 }
 
@@ -233,6 +242,39 @@ export class SqliteStore implements Store {
     return rows.map((r) => this.hydrateDagOverlay(r));
   }
 
+  // Durable run ledger for standing programs. SqliteStore-only (NOT on the Store
+  // interface): programs.ts feature-detects with "recordProgramRun" in store
+  // before calling, so runProgramCell keeps working against any plain Store.
+  recordProgramRun(run: ProgramRun): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO program_runs (id, program_key, operation, output_json, member_keys_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(run.id, run.programKey, run.operation, JSON.stringify(run.output), JSON.stringify(run.memberKeys), run.createdAt);
+  }
+
+  // Prefix-tolerant via resolveStoredId, same convention as getHyperedge/getDagOverlay.
+  getProgramRun(id: string): ProgramRun | undefined {
+    const resolved = this.resolveStoredId("program_runs", id);
+    if (resolved === null) return undefined;
+    const row = this.db.prepare(`SELECT * FROM program_runs WHERE id = ?`).get(resolved) as
+      | ProgramRunRow
+      | undefined;
+    return row ? this.hydrateProgramRun(row) : undefined;
+  }
+
+  listProgramRuns(opts: { programKey?: string; limit?: number } = {}): ProgramRun[] {
+    const limit = opts.limit ?? 20;
+    const rows = opts.programKey
+      ? (this.db
+          .prepare(`SELECT * FROM program_runs WHERE program_key = ? ORDER BY created_at DESC LIMIT ?`)
+          .all(opts.programKey, limit) as unknown as ProgramRunRow[])
+      : (this.db
+          .prepare(`SELECT * FROM program_runs ORDER BY created_at DESC LIMIT ?`)
+          .all(limit) as unknown as ProgramRunRow[]);
+    return rows.map((r) => this.hydrateProgramRun(r));
+  }
+
   search(query: string, opts: { limit?: number } = {}): SearchHit[] {
     const limit = opts.limit ?? 10;
     const terms = searchTerms(query);
@@ -397,6 +439,17 @@ export class SqliteStore implements Store {
       edges: JSON.parse(row.edges_json),
       metadata: JSON.parse(row.metadata_json),
       createdAt: row.created_at,
+    };
+  }
+
+  private hydrateProgramRun(row: ProgramRunRow): ProgramRun {
+    return {
+      id: row.id,
+      programKey: row.program_key,
+      operation: row.operation as ProgramRun["operation"],
+      createdAt: row.created_at,
+      memberKeys: JSON.parse(row.member_keys_json),
+      output: JSON.parse(row.output_json),
     };
   }
 

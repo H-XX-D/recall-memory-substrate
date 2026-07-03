@@ -330,3 +330,81 @@ test("listSemanticVectorIds returns all stored node_ids", () => {
   assert.deepEqual(ids.sort(), ["id-a", "id-b", "id-c"]);
   store.close();
 });
+
+test("recordProgramRun then getProgramRun round-trips an exact id", () => {
+  const store = new SqliteStore(":memory:");
+  store.recordProgramRun({
+    id: "11111111-2222-3333-4444-555555555555",
+    programKey: "prog-a",
+    operation: "watch",
+    createdAt: "2026-07-03T00:00:00Z",
+    memberKeys: ["m1", "m2"],
+    output: { operation: "watch", memberCount: 2, memberReferences: [] },
+  });
+  const got = store.getProgramRun("11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.id, "11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.programKey, "prog-a");
+  assert.equal(got?.operation, "watch");
+  assert.deepEqual(got?.memberKeys, ["m1", "m2"]);
+  store.close();
+});
+
+test("getProgramRun resolves a unique prefix and returns undefined for an ambiguous or unknown one", () => {
+  const store = new SqliteStore(":memory:");
+  store.recordProgramRun({
+    id: "aaaaaaaa-2222-3333-4444-555555555555",
+    programKey: "prog-a",
+    operation: "watch",
+    createdAt: "2026-07-03T00:00:00Z",
+    memberKeys: [],
+    output: { operation: "watch", memberCount: 0, memberReferences: [] },
+  });
+  store.recordProgramRun({
+    id: "aaaaaaab-2222-3333-4444-555555555555",
+    programKey: "prog-a",
+    operation: "watch",
+    createdAt: "2026-07-03T00:00:01Z",
+    memberKeys: [],
+    output: { operation: "watch", memberCount: 0, memberReferences: [] },
+  });
+  const got = store.getProgramRun("aaaaaaaa");
+  assert.equal(got?.id, "aaaaaaaa-2222-3333-4444-555555555555");
+  assert.equal(store.getProgramRun("aaaaaaa"), undefined); // ambiguous prefix
+  assert.equal(store.getProgramRun("does-not-exist"), undefined);
+  store.close();
+});
+
+test("listProgramRuns filters by programKey and orders newest-first with a default limit of 20", () => {
+  const store = new SqliteStore(":memory:");
+  for (let i = 0; i < 25; i += 1) {
+    store.recordProgramRun({
+      id: `run-a-${i}`,
+      programKey: "prog-a",
+      operation: "watch",
+      createdAt: `2026-07-03T00:00:${String(i).padStart(2, "0")}Z`,
+      memberKeys: [],
+      output: { operation: "watch", memberCount: 0, memberReferences: [] },
+    });
+  }
+  store.recordProgramRun({
+    id: "run-b-0",
+    programKey: "prog-b",
+    operation: "drift",
+    createdAt: "2026-07-03T00:01:00Z",
+    memberKeys: [],
+    output: { operation: "drift", memberCount: 0, memberReferences: [] },
+  });
+
+  const allProgA = store.listProgramRuns({ programKey: "prog-a" });
+  assert.equal(allProgA.length, 20); // default limit
+  assert.equal(allProgA[0]!.id, "run-a-24"); // newest first
+  assert.equal(allProgA.every((run) => run.programKey === "prog-a"), true);
+
+  const limited = store.listProgramRuns({ programKey: "prog-a", limit: 3 });
+  assert.deepEqual(limited.map((run) => run.id), ["run-a-24", "run-a-23", "run-a-22"]);
+
+  const onlyB = store.listProgramRuns({ programKey: "prog-b" });
+  assert.deepEqual(onlyB.map((run) => run.id), ["run-b-0"]);
+
+  store.close();
+});

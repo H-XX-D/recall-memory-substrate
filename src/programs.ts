@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { deriveAdmit, programRunDerivationKey } from "./derivation.js";
 import { selectField } from "./resolve.js";
 import type { AdmissionResult, Cell, Kind, Store, WriteProposal } from "./types.js";
+import type { SqliteStore } from "./store.js";
 
 export const PROGRAM_SCHEMA_VERSION = "recall.program.v1";
 
@@ -36,6 +37,8 @@ export interface ProgramTarget {
   entities?: string[];
   kinds?: Kind[];
   limit?: number;
+  hyperedge?: string;
+  role?: string;
 }
 
 export interface ProgramRun {
@@ -131,6 +134,10 @@ export function runProgramCell(
   const run = executeProgram(program, members, now, previousRun);
   persistProgramRun(store, program, run);
   attachProgramToMembers(store, program.key, members);
+  // lastRun on props stays the watch/drift/trend baseline; program_runs is
+  // separate durable history, SqliteStore-only, feature-detected so this keeps
+  // working against any plain Store implementation.
+  if ("recordProgramRun" in store) (store as SqliteStore).recordProgramRun(run);
 
   const proposal = opts.derive ? programRunToProposal(program, run) : undefined;
   return {
@@ -179,6 +186,23 @@ export function selectProgramMembers(store: Store, program: Cell, spec: ProgramS
     if (cell && cell.status === "active" && cell.key !== program.key) byKey.set(cell.key, cell);
   }
 
+  // Legacy quorum role filtering restored at the selection layer: members are
+  // filtered before execution (the legacy eligibleCount output is deliberately
+  // not ported). Prefix-tolerant via store.getHyperedge, same as hyperedge ids
+  // everywhere else.
+  if (target.hyperedge && "getHyperedge" in store) {
+    const hyperedge = store.getHyperedge(target.hyperedge);
+    if (hyperedge) {
+      for (const member of hyperedge.members) {
+        if (target.role && member.role !== target.role) continue;
+        const cell = store.get(member.key);
+        if (cell && cell.status === "active" && cell.kind !== "prg" && cell.key !== program.key) {
+          byKey.set(cell.key, cell);
+        }
+      }
+    }
+  }
+
   if (target.query) {
     for (const hit of store.search(target.query, { limit })) {
       if (hit.cell.kind !== "prg" && hit.cell.status === "active") byKey.set(hit.cell.key, hit.cell);
@@ -203,7 +227,15 @@ export function selectProgramMembers(store: Store, program: Cell, spec: ProgramS
     }
   }
 
-  if (byKey.size === 0 && !target.keys && !target.query && !target.topics && !target.entities && !target.kinds) {
+  if (
+    byKey.size === 0 &&
+    !target.keys &&
+    !target.query &&
+    !target.topics &&
+    !target.entities &&
+    !target.kinds &&
+    !target.hyperedge
+  ) {
     const programTopics = new Set(program.tags.topics);
     for (const cell of store.active()) {
       if (cell.kind === "prg" || cell.key === program.key) continue;
@@ -427,6 +459,8 @@ function executeDrift(
     memberValues,
     movers: movers.slice(0, 5),
   };
+  const concernTarget = typeof spec.params?.concernTarget === "string" ? spec.params.concernTarget : undefined;
+  if (concernTarget) out.concernTarget = concernTarget;
   if (movers[0]) out.topMover = movers[0];
   if (tripped) {
     const direction = change < 0 ? "fell" : "rose";
@@ -495,6 +529,10 @@ function executeTrend(
   const steps = series.slice(1).map((value, i) => round(value - series[i]!));
   const streak = trailingStreak(steps);
   const tripped = series.length >= 2 && (Math.abs(slope) >= delta || Math.abs(streak) >= streakThreshold);
+  const mid = Math.floor(series.length / 2);
+  const earlyHalf = series.slice(0, mid);
+  const lateHalf = series.slice(mid);
+  const acceleration = round(slopeOfHalf(lateHalf) - slopeOfHalf(earlyHalf));
   const out: ProgramOutput = {
     operation: "trend",
     memberCount: members.length,
@@ -506,6 +544,7 @@ function executeTrend(
     direction,
     streak,
     streakMagnitude: Math.abs(streak),
+    acceleration,
     delta,
     window,
     streakThreshold,
@@ -513,11 +552,18 @@ function executeTrend(
   };
   if (tripped) {
     out.witness = {
-      title: `Trend tripped: ${program.title} ${direction} (slope ${slope})`,
+      title: `Trend tripped: ${program.title} ${direction} (slope ${slope}, accel ${acceleration})`,
       summary: `Tracked ${measure} moved ${series[0]} -> ${series[series.length - 1]} over ${series.length} run(s).`,
     };
   }
   return out;
+}
+
+// slope over a half-series: (last - first) / (len - 1), 0 for len < 2. Feeds
+// trend's acceleration = slope(late half) - slope(early half).
+function slopeOfHalf(half: number[]): number {
+  if (half.length < 2) return 0;
+  return round((half[half.length - 1]! - half[0]!) / (half.length - 1));
 }
 
 function persistProgramRun(store: Store, program: Cell, run: ProgramRun): void {
@@ -555,6 +601,8 @@ function validateTarget(value: unknown): ProgramTarget {
     entities: optionalStringArray(target.entities, "target.entities"),
     kinds: optionalStringArray(target.kinds, "target.kinds") as Kind[] | undefined,
     limit: target.limit === undefined ? undefined : positiveInt(target.limit, 50),
+    hyperedge: typeof target.hyperedge === "string" ? target.hyperedge : undefined,
+    role: typeof target.role === "string" ? target.role : undefined,
   };
 }
 
