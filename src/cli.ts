@@ -16,6 +16,7 @@ import {
 import { migrate } from "./migrate.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
+import { runAndRecordEval, runEvalAndDerive, type RecallEvalSuite } from "./evals.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
@@ -382,6 +383,50 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    if (command === "eval" && subcommand === "run") {
+      const suite = args.jsonPath ? readEvalSuite(args) : undefined;
+      const store = openWriteStore(route.dbPath);
+      try {
+        const now = options.now ? new Date(options.now) : new Date();
+        if (args.derive) {
+          const { result, derived } = runEvalAndDerive(store, suite, now);
+          outJson(out, { ...result, derived: { accepted: derived.accepted, duplicateOf: derived.duplicateOf } });
+        } else {
+          const result = runAndRecordEval(store, suite, now);
+          outJson(out, result);
+        }
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "eval" && subcommand === "list") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (!("listEvalRuns" in store)) throw new Error("eval run history is unavailable on this store");
+        outJson(out, { runs: store.listEvalRuns(args.limit) });
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "eval" && subcommand === "show") {
+      const id = args.command[2];
+      if (!id) throw new Error("eval show requires an id");
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (!("getEvalRun" in store)) throw new Error("eval run history is unavailable on this store");
+        const run = store.getEvalRun(id);
+        if (!run) throw new Error(`Unknown eval run: ${id}`);
+        outJson(out, run);
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
     if (command === "operate" && (!subcommand || subcommand === "once")) {
       const store = openWriteStore(route.dbPath);
       try {
@@ -549,6 +594,24 @@ function readJsonValue(args: ParsedArgs, label: string): unknown {
   return readJsonFile(args.jsonPath, label);
 }
 
+// Minimal shape validation for a custom eval suite JSON payload: enough to
+// give a clear error before it reaches runRecallEval, not full schema
+// validation (case-kind validity is left to runRecallEval's own switch).
+function readEvalSuite(args: ParsedArgs): RecallEvalSuite {
+  const value = readJsonValue(args, "eval suite");
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("eval suite: expected an object with name and cases");
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.name !== "string" || !record.name) {
+    throw new Error("eval suite: name must be a non-empty string");
+  }
+  if (!Array.isArray(record.cases)) {
+    throw new Error("eval suite: cases must be an array");
+  }
+  return { name: record.name, cases: record.cases as RecallEvalSuite["cases"] };
+}
+
 function outJson(out: (text: string) => void, value: unknown): void {
   out(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -594,6 +657,9 @@ Commands:
   recall program list [--db path] [--project slug]
   recall program runs [<key-or-handle>] [--limit 20] [--db path] [--project slug]
   recall program show-run <id> [--db path] [--project slug]
+  recall eval run [--derive] [--json suite.json|-] [--db path] [--project slug]
+  recall eval list [--limit 10] [--db path] [--project slug]
+  recall eval show <id> [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]

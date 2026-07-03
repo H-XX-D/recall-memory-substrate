@@ -1,10 +1,11 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Fourteen tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Fifteen tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
 // recall_hyperedge_list, recall_dag_analyze, recall_program_run,
-// recall_program_runs. The daemon/operator tick runs from the Stop hook, not here.
+// recall_program_runs, recall_eval_run. The daemon/operator tick runs from the
+// Stop hook, not here.
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { admit } from "./admission.js";
@@ -16,6 +17,7 @@ import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { analyzeDagOverlay } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
 import { runProgramCell } from "./programs.js";
+import { runAndRecordEval, runEvalAndDerive } from "./evals.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 import type { SqliteStore } from "./store.js";
 
@@ -52,6 +54,7 @@ export const TOOLS = [
   { name: "recall_dag_analyze", description: "Analyze a DAG overlay for cycles and holonomy witnesses; with derive:true, admit keyed derived writes and report accepted/duplicate/rejected counts.", inputSchema: { type: "object", properties: { id: { type: "string" }, derive: { type: "boolean" } }, required: ["id"] } },
   { name: "recall_program_run", description: "Run a standing program cell by key or handle; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { key: { type: "string" }, derive: { type: "boolean" } }, required: ["key"] } },
   { name: "recall_program_runs", description: "List program run history, optionally filtered to one program key or handle.", inputSchema: { type: "object", properties: { key: { type: "string" }, limit: { type: "number" } } } },
+  { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -229,6 +232,27 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
           witness: run.output.witness?.title,
         })),
       );
+    }
+    case "recall_eval_run": {
+      const derive = args.derive === true;
+      const now = new Date();
+      if (derive) {
+        const { result, derived } = runEvalAndDerive(store, undefined, now);
+        return JSON.stringify({
+          name: result.name,
+          passed: result.passed,
+          score: result.score,
+          cases: result.cases.map((c) => ({ name: c.name, passed: c.passed })),
+          derived: { accepted: derived.accepted, duplicateOf: derived.duplicateOf },
+        });
+      }
+      const result = runAndRecordEval(store, undefined, now);
+      return JSON.stringify({
+        name: result.name,
+        passed: result.passed,
+        score: result.score,
+        cases: result.cases.map((c) => ({ name: c.name, passed: c.passed })),
+      });
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

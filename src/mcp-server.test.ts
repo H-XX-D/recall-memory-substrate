@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the fourteen-tool surface", () => {
+test("tools/list returns exactly the fifteen-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -41,6 +41,7 @@ test("tools/list returns exactly the fourteen-tool surface", () => {
     "recall_dag_analyze",
     "recall_program_run",
     "recall_program_runs",
+    "recall_eval_run",
   ]);
   store.close();
 });
@@ -92,8 +93,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the fourteen-tool surface", () => {
-  assert.equal(TOOLS.length, 14);
+test("TOOLS is the fifteen-tool surface", () => {
+  assert.equal(TOOLS.length, 15);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -541,5 +542,29 @@ test("recall_program_runs lists run history, optionally filtered by key, and res
     arguments: {},
   }), store));
   assert.equal(all.length, 2);
+  store.close();
+});
+
+test("recall_eval_run runs the default suite and returns parseable JSON with passed/score", () => {
+  const store = new SqliteStore(":memory:");
+  const out = callText(handleMcpRequest(req("tools/call", { name: "recall_eval_run", arguments: {} }), store));
+  assert.equal(out.name, "recall-default");
+  assert.equal(typeof out.passed, "boolean");
+  assert.equal(typeof out.score, "number");
+  assert.ok(Array.isArray(out.cases));
+  assert.ok(out.cases.every((c: any) => typeof c.name === "string" && typeof c.passed === "boolean"));
+  assert.equal(out.derived, undefined);
+  store.close();
+});
+
+test("recall_eval_run with derive:true reports a derived admission", () => {
+  const store = new SqliteStore(":memory:");
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_eval_run",
+    arguments: { derive: true },
+  }), store));
+  assert.equal(out.name, "recall-default");
+  assert.ok(out.derived);
+  assert.equal(out.derived.accepted, true);
   store.close();
 });

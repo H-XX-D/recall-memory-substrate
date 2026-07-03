@@ -676,6 +676,105 @@ test("program show-run with an unknown id exits nonzero with an error", () => {
   }
 });
 
+test("eval run prints the default suite result and records it, and eval list/show round-trip with a prefix", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+
+    const run = capture(["eval", "run", "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(run.code, 0, run.stderr);
+    const runJson = JSON.parse(run.stdout);
+    assert.equal(runJson.name, "recall-default");
+    assert.equal(typeof runJson.passed, "boolean");
+    assert.equal(typeof runJson.score, "number");
+    assert.ok(Array.isArray(runJson.cases));
+    assert.equal(runJson.derived, undefined);
+
+    const list = capture(["eval", "list", "--db", db]);
+    assert.equal(list.code, 0, list.stderr);
+    const listJson = JSON.parse(list.stdout);
+    assert.equal(listJson.runs.length, 1);
+    assert.equal(listJson.runs[0].name, "recall-default");
+
+    const runId = listJson.runs[0].id as string;
+    const prefix = runId.slice(0, 8);
+    const shown = capture(["eval", "show", prefix, "--db", db]);
+    assert.equal(shown.code, 0, shown.stderr);
+    const shownJson = JSON.parse(shown.stdout);
+    assert.equal(shownJson.id, runId);
+    assert.equal(shownJson.name, "recall-default");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("eval run --derive routes through runEvalAndDerive and reports a derived admission", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+
+    const run = capture(["eval", "run", "--derive", "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(run.code, 0, run.stderr);
+    const runJson = JSON.parse(run.stdout);
+    assert.equal(runJson.name, "recall-default");
+    assert.ok(runJson.derived);
+    assert.equal(runJson.derived.accepted, true);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("eval run --json runs a custom one-case suite", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const suitePath = join(tmp, "suite.json");
+    writeFileSync(
+      suitePath,
+      JSON.stringify({
+        name: "custom-smoke",
+        cases: [{ name: "search-smoke", kind: "search", query: "recall", minResults: 0 }],
+      }),
+    );
+
+    const run = capture(["eval", "run", "--json", suitePath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(run.code, 0, run.stderr);
+    const runJson = JSON.parse(run.stdout);
+    assert.equal(runJson.name, "custom-smoke");
+    assert.equal(runJson.cases.length, 1);
+    assert.equal(runJson.cases[0].name, "search-smoke");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("eval run --json with a malformed suite throws a clear error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const suitePath = join(tmp, "bad-suite.json");
+    writeFileSync(suitePath, JSON.stringify({ cases: "not-an-array" }));
+
+    const result = capture(["eval", "run", "--json", suitePath, "--db", db]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /suite/i);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("eval show with an unknown id exits nonzero with a clear error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const result = capture(["eval", "show", "no-such-run", "--db", db]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /no-such-run/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 function capture(
   argv: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; now?: string } = {},
