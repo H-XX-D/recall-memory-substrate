@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import type { Cell } from "./types.js";
+import type { SqliteStore } from "./store.js";
 
 export interface EmbeddingRecord {
   backend: string;
@@ -135,4 +137,16 @@ function hash(text: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function indexCell(cell: Cell, store: SqliteStore): void {
+  const text = textForEmbedding([cell.title, cell.summary, cell.body, ...cell.tags.topics, ...cell.tags.entities]);
+  const rec = embedTextRecord(text);
+  store.putSemanticVector({
+    nodeId: cell.key,
+    backend: rec.backend,
+    dims: rec.dims,
+    vector: rec.vector,
+    indexedAt: new Date().toISOString(),
+  });
 }

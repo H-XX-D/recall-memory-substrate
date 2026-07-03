@@ -7,7 +7,10 @@ import {
   embedTextRecord,
   textForEmbedding,
   embedText,
+  indexCell,
 } from "./semantic.js";
+import { buildCell } from "./build.js";
+import { SqliteStore } from "./store.js";
 
 describe("hashEmbedding", () => {
   it("is deterministic: same text yields identical vector", () => {
@@ -125,5 +128,26 @@ describe("textForEmbedding", () => {
   it("JSON.stringify non-string parts", () => {
     const result = textForEmbedding(["text", { key: "val" }]);
     assert.strictEqual(result, 'text\n{"key":"val"}');
+  });
+});
+
+describe("indexCell", () => {
+  it("indexes a cell into store with dims matching vector length and backend hash:v1", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const cell = buildCell({
+      kind: "obs",
+      title: "Test observation",
+      body: "This is a test cell body",
+      summary: "A brief summary",
+      confidence: 0.8,
+      topics: ["testing", "semantic"],
+      entities: ["cell", "index"],
+    });
+    const store = new SqliteStore(":memory:");
+    indexCell(cell, store);
+    const vec = store.getSemanticVector(cell.key);
+    assert.ok(vec, "semantic vector should exist");
+    assert.strictEqual(vec.backend, "hash:v1");
+    assert.strictEqual(vec.dims, vec.vector.length);
   });
 });
