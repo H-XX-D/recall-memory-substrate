@@ -248,3 +248,71 @@ test("compileContext: budget/word-count trimming still bounds the packet", () =>
 
   store.close();
 });
+
+// ---------------------------------------------------------------------------
+// BM25 sign-convention test: lexical score is the SOLE discriminator
+// ---------------------------------------------------------------------------
+// This test isolates the bm25 sign bug: two cells with identical kind, degree,
+// effective-confidence, and updatedAt, but one mentions the query term far more
+// often (higher BM25 score from the store). Under the OLD (negated) convention
+// store.search() returns a POSITIVE score that fuseCandidates then negates to
+// NEGATIVE, making Math.max(m, -c.bm25) produce 0 for every candidate and
+// zeroing the lexical term. The cell order then falls through to the tiebreak
+// (updatedAt tie -> key lexicographic), which is not the relevance order.
+// Under the CORRECT (non-negated) convention, the higher-BM25 cell ranks first.
+test("fuseCandidates via compile: higher BM25 cell ranks above lower BM25 cell when all other factors are equal", () => {
+  const store = new SqliteStore(":memory:");
+
+  // "hot" repeats the query term many times in a short doc (high term frequency,
+  // high BM25) and has exactly the same kind/confidence/updatedAt as "cold".
+  const ts = "2026-01-15T00:00:00.000Z";
+  store.put(
+    buildCell(
+      {
+        kind: "obs",
+        title: "zircon zircon zircon zircon zircon",
+        body: "zircon zircon zircon",
+        confidence: 0.7,
+      },
+      { key: "hot", now: ts },
+    ),
+  );
+
+  // "cold" mentions the term once (low BM25) but has same kind/conf/updatedAt.
+  store.put(
+    buildCell(
+      {
+        kind: "obs",
+        title: "zircon mention",
+        body: "unrelated words here to dilute the term frequency significantly",
+        confidence: 0.7,
+      },
+      { key: "cold", now: ts },
+    ),
+  );
+
+  // compileContext goes through fuseCandidates; compile() skips fusion and goes
+  // straight to store.search(), so we must use compileContext to exercise the bug.
+  const packet = compileContext(store, "zircon", { limit: 5 });
+
+  const memLines = packet.relevantMemory;
+  const hotIdx = memLines.findIndex((l) => /obs:hot/.test(l));
+  const coldIdx = memLines.findIndex((l) => /obs:cold/.test(l));
+
+  assert.ok(hotIdx !== -1, "hot should be in relevantMemory");
+  assert.ok(coldIdx !== -1, "cold should be in relevantMemory");
+
+  // The high-frequency cell must rank first. Under the zeroed-lexical bug the
+  // lexical term collapses to 0 for every candidate (because -c.bm25 <= 0
+  // when c.bm25 is already positive from store.search), so bestBm25 becomes 0
+  // and normalizedLexical is always 0. Both cells tie on every other factor
+  // (same kind, degree, effective, recency). The sort then falls through to the
+  // tiebreak: updatedAt tie -> key lexicographic. "cold" < "hot", so "cold"
+  // would land at index 0 under the bug, not "hot".
+  assert.ok(
+    hotIdx < coldIdx,
+    `expected hot (idx ${hotIdx}, high BM25) to rank before cold (idx ${coldIdx})`,
+  );
+
+  store.close();
+});

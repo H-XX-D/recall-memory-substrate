@@ -10,6 +10,7 @@ Phase 2 of the subsystem port: retrieval and compile richness. Semantic search, 
 - Adds `src/references.ts`: cell-reference parsing/resolution and field-path addressing over a cell (`resolveCellReference`, `cellReferenceView`, `selectCellPath`), plus a `recall_ref` MCP tool.
 - Adds `src/pages.ts`: curated named views over the graph by kind (`getRecallPage`, `buildPageIndex`), plus a `recall_page` MCP tool.
 - Verified against the migrated 1,184-cell store: semantic search, fused compile ordering, and pages all return sensible results.
+- Note: migrated (pre-0.7) stores carry old-model embedding vectors that the dims-guard skips, so semantic search returns few or no hits until embeddings are backfilled (loop over `store.active()` calling `indexCell`).
 
 ## 0.6.1 - 2026-07-03
 

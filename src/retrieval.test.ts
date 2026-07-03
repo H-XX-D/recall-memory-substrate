@@ -129,7 +129,9 @@ function makeCandidate(
   }
   return {
     cell,
-    bm25: overrides.bm25 ?? -5,
+    // bm25 is non-negative, larger = better (matches store.search() convention).
+    // store.search() already negates the raw FTS5 rank via Math.max(0, -row.rank).
+    bm25: overrides.bm25 ?? 5,
     degree: overrides.degree ?? 0,
   };
 }
@@ -138,17 +140,21 @@ describe("fuseCandidates", () => {
   const NOW = new Date("2026-06-01T00:00:00.000Z");
 
   it("equal bm25 but higher degree and higher effective ranks first", () => {
-    const low = makeCandidate({ bm25: -5, degree: 1, effective: 0.3 });
-    const high = makeCandidate({ bm25: -5, degree: 10, effective: 0.9 });
+    // bm25 convention: non-negative, larger = better (same as store.search() output).
+    const low = makeCandidate({ bm25: 5, degree: 1, effective: 0.3 });
+    const high = makeCandidate({ bm25: 5, degree: 10, effective: 0.9 });
     const results = fuseCandidates([low, high], 10, NOW);
     assert.equal(results[0]!.cell.key, high.cell.key, "higher degree+effective should rank first");
   });
 
   it("ref-kind stub with saturated bm25 sinks below a dec with lower bm25 once TASK_CONTEXT_KIND_FACTOR applies", () => {
-    // ref gets factor 0.15 so its lexical term is squashed
-    const ref = makeCandidate({ kind: "ref", bm25: -10, degree: 0, effective: 0.8 });
-    // dec has a lower bm25 score (weaker match) but full lexical weight
-    const dec = makeCandidate({ kind: "dec", bm25: -5, degree: 0, effective: 0.8 });
+    // ref gets factor 0.15 so its lexical term is squashed even though its bm25
+    // is higher (10 vs 5). In positive convention: larger = better match.
+    // ref is the saturated stub (high bm25 = 10); dec has a weaker bm25 (5)
+    // but full lexical weight (factor 1). After factor: ref lexical = 0.15,
+    // dec lexical = 0.5. dec should win.
+    const ref = makeCandidate({ kind: "ref", bm25: 10, degree: 0, effective: 0.8 });
+    const dec = makeCandidate({ kind: "dec", bm25: 5, degree: 0, effective: 0.8 });
     const results = fuseCandidates([ref, dec], 10, NOW, {
       kindLexicalFactor: TASK_CONTEXT_KIND_FACTOR,
     });
@@ -157,21 +163,21 @@ describe("fuseCandidates", () => {
 
   it("challenged is true when effective < conf * 0.5", () => {
     // conf = 0.8, effective = 0.3 => 0.3 < 0.4 => challenged
-    const candidate = makeCandidate({ confidence: 0.8, effective: 0.3, bm25: -5 });
+    const candidate = makeCandidate({ confidence: 0.8, effective: 0.3, bm25: 5 });
     const results = fuseCandidates([candidate], 10, NOW);
     assert.equal(results[0]!.challenged, true);
   });
 
   it("challenged is false when effective >= conf * 0.5", () => {
     // conf = 0.8, effective = 0.5 => 0.5 >= 0.4 => not challenged
-    const candidate = makeCandidate({ confidence: 0.8, effective: 0.5, bm25: -5 });
+    const candidate = makeCandidate({ confidence: 0.8, effective: 0.5, bm25: 5 });
     const results = fuseCandidates([candidate], 10, NOW);
     assert.equal(results[0]!.challenged, false);
   });
 
   it("equal everything else, more-recent updatedAt ranks first", () => {
-    const older = makeCandidate({ bm25: -5, degree: 0, updatedAt: "2026-01-01T00:00:00.000Z" });
-    const newer = makeCandidate({ bm25: -5, degree: 0, updatedAt: "2026-05-01T00:00:00.000Z" });
+    const older = makeCandidate({ bm25: 5, degree: 0, updatedAt: "2026-01-01T00:00:00.000Z" });
+    const newer = makeCandidate({ bm25: 5, degree: 0, updatedAt: "2026-05-01T00:00:00.000Z" });
     const results = fuseCandidates([older, newer], 10, NOW);
     assert.equal(results[0]!.cell.key, newer.cell.key, "newer updatedAt should rank first");
   });
@@ -183,8 +189,9 @@ describe("fuseCandidates", () => {
   });
 
   it("returns up to the limit", () => {
+    // bm25 convention: non-negative, larger = better.
     const candidates = Array.from({ length: 5 }, (_, i) =>
-      makeCandidate({ bm25: -(i + 1), degree: i })
+      makeCandidate({ bm25: i + 1, degree: i })
     );
     const results = fuseCandidates(candidates, 3, NOW);
     assert.equal(results.length, 3);
@@ -194,6 +201,28 @@ describe("fuseCandidates", () => {
     const c = makeCandidate({ bm25: 0, degree: 5, effective: 0.7 });
     const results = fuseCandidates([c], 10, NOW);
     assert.ok(Number.isFinite(results[0]!.score), "score should be finite");
+  });
+
+  it("higher bm25 ranks first when everything else is equal (proves lexical normalization is live)", () => {
+    // Both candidates have identical kind, degree, effective, confidence, updatedAt.
+    // The ONLY difference is bm25. Higher bm25 should produce a higher normalized
+    // lexical term and rank first. This test would fail under the old negated
+    // convention because -c.bm25 would be negative for positive inputs, collapsing
+    // bestBm25 to 0 and zeroing the lexical term for all candidates.
+    // Key choice is deliberate: "zebra" > "alpha" so key tiebreak would put "alpha"
+    // first if scores tied, confirming the result is NOT from the tiebreak.
+    const ts = "2026-03-01T00:00:00.000Z";
+    const strong = makeCandidate({ bm25: 10, degree: 0, effective: 0.7, updatedAt: ts, key: "zebra" });
+    const weak = makeCandidate({ bm25: 2, degree: 0, effective: 0.7, updatedAt: ts, key: "alpha" });
+    const results = fuseCandidates([weak, strong], 10, NOW);
+    assert.equal(results[0]!.cell.key, "zebra", "higher bm25 (zebra) should rank first despite key tiebreak ordering alpha first");
+  });
+
+  it("guard: NaN updatedAt does not produce a NaN score (recency fallback)", () => {
+    const ts = "not-a-date";
+    const c = makeCandidate({ bm25: 5, degree: 0, effective: 0.7, updatedAt: ts });
+    const results = fuseCandidates([c], 10, NOW);
+    assert.ok(Number.isFinite(results[0]!.score), "score should be finite even with invalid updatedAt");
   });
 });
 

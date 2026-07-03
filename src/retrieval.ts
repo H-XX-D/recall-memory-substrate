@@ -55,9 +55,11 @@ export function buildFtsMatchQuery(terms: string[]): string | null {
 // ---------------------------------------------------------------------------
 
 /**
- * A lexical search candidate ready for fusion scoring. bm25 is the raw FTS5
- * bm25() value (lower/more-negative = better match). degree is the combined
- * in+out edge count for the cell in the graph.
+ * A lexical search candidate ready for fusion scoring. bm25 is the lexical
+ * relevance score as produced by store.search(): non-negative, larger = better.
+ * This matches the FTS5 path which computes Math.max(0, -row.rank) and the LIKE
+ * fallback which returns a positive CASE-WHEN sum. degree is the combined in+out
+ * edge count for the cell in the graph.
  */
 export interface MalLexicalCandidate {
   cell: Cell;
@@ -101,10 +103,10 @@ const RECENCY_HALF_LIFE_DAYS = 30;
  *   score = lexical + degreePrior + effectivePrior + recencyPrior
  *
  * where:
- *   lexical       = normalizedBm25 * (kindLexicalFactor[kind] ?? 1)
- *   degreePrior   = 0.25 * log1p(degree) / log1p(maxDegreeInBatch)
+ *   lexical        = (c.bm25 / bestBm25) * (kindLexicalFactor[kind] ?? 1)
+ *   degreePrior    = 0.25 * log1p(degree) / log1p(maxDegreeInBatch)
  *   effectivePrior = 0.15 * cell.scores.effective
- *   recencyPrior  = 0.1 * exp(-ageDays / 30)
+ *   recencyPrior   = 0.1 * exp(-ageDays / 30)
  */
 export function fuseCandidates(
   candidates: MalLexicalCandidate[],
@@ -114,18 +116,16 @@ export function fuseCandidates(
 ): RankedHit[] {
   if (candidates.length === 0) return [];
 
-  // bm25 from FTS5 is negative (lower = better). Negate to get positive relevance.
-  const bestBm25 = candidates.reduce(
-    (best, c) => Math.max(best, -c.bm25),
-    0
-  );
+  // Fix 1: bm25 is already non-negative, larger = better (store.search() convention).
+  // Do not negate: just find the max and normalize directly.
+  const bestBm25 = candidates.reduce((m, c) => Math.max(m, c.bm25), 0);
 
   const maxDegree = candidates.reduce((m, c) => Math.max(m, c.degree), 0);
 
   const kindFactor = options?.kindLexicalFactor;
 
   const scored = candidates.map((c) => {
-    const normalizedLexical = bestBm25 > 0 ? Math.max(0, -c.bm25) / bestBm25 : 0;
+    const normalizedLexical = bestBm25 > 0 ? c.bm25 / bestBm25 : 0;
     const lexical = normalizedLexical * (kindFactor?.[c.cell.kind] ?? 1);
 
     const degreePrior =
@@ -135,10 +135,12 @@ export function fuseCandidates(
 
     const effectivePrior = CONFIDENCE_WEIGHT * c.cell.scores.effective;
 
-    const ageDays = Math.max(
-      0,
-      (now.getTime() - Date.parse(c.cell.updatedAt)) / 86_400_000
-    );
+    // Fix 2: guard against unparseable updatedAt (NaN from Date.parse).
+    // Fall back to now so a cell with a bad timestamp gets recencyPrior ~= 0.1
+    // (age 0 days) rather than a NaN score that poisons the entire candidate.
+    const t = Date.parse(c.cell.updatedAt);
+    const ms = Number.isNaN(t) ? now.getTime() : t;
+    const ageDays = Math.max(0, (now.getTime() - ms) / 86_400_000);
     const recencyPrior = RECENCY_WEIGHT * Math.exp(-ageDays / RECENCY_HALF_LIFE_DAYS);
 
     const score = lexical + degreePrior + effectivePrior + recencyPrior;
