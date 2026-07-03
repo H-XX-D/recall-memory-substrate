@@ -1,12 +1,12 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Twelve tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Fourteen tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
-// recall_hyperedge_list, recall_dag_analyze. The daemon/operator tick runs from
-// the Stop hook, not here.
+// recall_hyperedge_list, recall_dag_analyze, recall_program_run,
+// recall_program_runs. The daemon/operator tick runs from the Stop hook, not here.
 import { compileContext, formatContextPacket } from "./compile.js";
-import { inspectCell } from "./cell-context.js";
+import { inspectCell, resolveCell } from "./cell-context.js";
 import { admit } from "./admission.js";
 import { semanticSearch } from "./semantic.js";
 import { resolveCellReference, cellReferenceView } from "./references.js";
@@ -15,6 +15,7 @@ import type { PageName, PageFilter } from "./pages.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { analyzeDagOverlay } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
+import { runProgramCell } from "./programs.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 import type { SqliteStore } from "./store.js";
 
@@ -49,6 +50,8 @@ export const TOOLS = [
   { name: "recall_hyperedge_show", description: "Expand one hyperedge by id.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
   { name: "recall_hyperedge_list", description: "List hyperedges, optionally filtered to those containing a given cell.", inputSchema: { type: "object", properties: { limit: { type: "number" }, forCell: { type: "string" } } } },
   { name: "recall_dag_analyze", description: "Analyze a DAG overlay for cycles and holonomy witnesses; with derive:true, admit keyed derived writes and report accepted/duplicate/rejected counts.", inputSchema: { type: "object", properties: { id: { type: "string" }, derive: { type: "boolean" } }, required: ["id"] } },
+  { name: "recall_program_run", description: "Run a standing program cell by key or handle; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { key: { type: "string" }, derive: { type: "boolean" } }, required: ["key"] } },
+  { name: "recall_program_runs", description: "List program run history, optionally filtered to one program key or handle.", inputSchema: { type: "object", properties: { key: { type: "string" }, limit: { type: "number" } } } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -192,6 +195,40 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       const now = new Date().toISOString();
       const results = dagAnalysisToKeyedProposals(analysis).map((kp) => deriveAdmit(store, kp.proposal, kp.key, now));
       return JSON.stringify({ analysis, derived: summarizeDerived(results) });
+    }
+    case "recall_program_run": {
+      const key = String(args.key ?? "");
+      const program = resolveCell(store, key);
+      if (!program) return JSON.stringify({ error: `unknown program: ${key}` });
+      const now = new Date().toISOString();
+      const { run, derived } = runProgramCell(store, program, now, { derive: args.derive === true });
+      return JSON.stringify({
+        id: run.id,
+        operation: run.operation,
+        tripped: run.output.tripped,
+        witness: run.output.witness?.title,
+        derived: derived
+          ? { accepted: derived.accepted, duplicateOf: derived.duplicateOf }
+          : undefined,
+      });
+    }
+    case "recall_program_runs": {
+      if (!("listProgramRuns" in store)) {
+        return JSON.stringify({ error: "program run history is unavailable on this store" });
+      }
+      const key = typeof args.key === "string" ? args.key : undefined;
+      const programKey = key ? resolveCell(store, key)?.key : undefined;
+      if (key && !programKey) return JSON.stringify({ error: `unknown program: ${key}` });
+      const limit = typeof args.limit === "number" ? args.limit : undefined;
+      const runs = (store as SqliteStore).listProgramRuns({ programKey, limit });
+      return JSON.stringify(
+        runs.map((run) => ({
+          id: run.id,
+          operation: run.operation,
+          tripped: run.output.tripped,
+          witness: run.output.witness?.title,
+        })),
+      );
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

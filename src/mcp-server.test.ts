@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the twelve-tool surface", () => {
+test("tools/list returns exactly the fourteen-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -39,6 +39,8 @@ test("tools/list returns exactly the twelve-tool surface", () => {
     "recall_hyperedge_show",
     "recall_hyperedge_list",
     "recall_dag_analyze",
+    "recall_program_run",
+    "recall_program_runs",
   ]);
   store.close();
 });
@@ -90,8 +92,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the twelve-tool surface", () => {
-  assert.equal(TOOLS.length, 12);
+test("TOOLS is the fourteen-tool surface", () => {
+  assert.equal(TOOLS.length, 14);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -350,5 +352,194 @@ test("recall_hyperedge_list returns hyperedges and respects limit", () => {
   }), store));
   assert.equal(forCell.length, 2);
   assert.ok(forCell.every((h: any) => h.members.some((m: any) => m.key === memberKey)));
+  store.close();
+});
+
+test("recall_program_run runs a seeded score program and returns a compact JSON summary", () => {
+  const store = new SqliteStore(":memory:");
+  const member = buildCell(
+    { kind: "obs", title: "program mcp member", body: "a cell scored by a program", confidence: 0.8, topics: ["program"] },
+    { key: "aaaaaaaa-2222-2222-2222-222222222222" },
+  );
+  const program = buildCell(
+    {
+      kind: "prg",
+      title: "mcp score program",
+      body: "score program members",
+      confidence: 0.9,
+      topics: ["program"],
+      props: {
+        program: {
+          schemaVersion: "recall.program.v1",
+          operation: "score",
+          target: { keys: [member.key] },
+        },
+      },
+    },
+    { key: "bbbbbbbb-2222-2222-2222-222222222222" },
+  );
+  store.put(member);
+  store.put(program);
+
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_run",
+    arguments: { key: program.key },
+  }), store));
+  assert.equal(out.operation, "score");
+  assert.ok(typeof out.id === "string", "run id must be a string");
+  assert.equal(out.tripped, undefined);
+  assert.equal(out.witness, undefined);
+  assert.equal(out.derived, undefined);
+  store.close();
+});
+
+test("recall_program_run with derive:true on a tripped watch program reports duplicateOf/accepted", () => {
+  const store = new SqliteStore(":memory:");
+  const watched = buildCell(
+    { kind: "obs", title: "program mcp watched", body: "watched by an mcp program", confidence: 0.9, topics: ["program"] },
+    { key: "aaaaaaaa-3333-3333-3333-333333333333" },
+  );
+  const program = buildCell(
+    {
+      kind: "prg",
+      title: "mcp watch program",
+      body: "watch program members",
+      confidence: 0.9,
+      topics: ["program"],
+      props: {
+        program: {
+          schemaVersion: "recall.program.v1",
+          operation: "watch",
+          target: { keys: [watched.key] },
+          params: { delta: 0.1, concernTarget: watched.key },
+        },
+      },
+    },
+    { key: "bbbbbbbb-3333-3333-3333-333333333333" },
+  );
+  store.put(watched);
+  store.put(program);
+
+  const baseline = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_run",
+    arguments: { key: program.key, derive: true },
+  }), store));
+  assert.equal(baseline.tripped, false);
+  assert.equal(baseline.derived, undefined);
+
+  store.put({ ...watched, scores: { ...watched.scores, effective: 0.4 } });
+
+  const tripped = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_run",
+    arguments: { key: program.key, derive: true },
+  }), store));
+  assert.equal(tripped.tripped, true);
+  assert.ok(typeof tripped.witness === "string", "witness title must be a string");
+  assert.equal(tripped.derived.accepted, true);
+  assert.equal(tripped.derived.duplicateOf, undefined);
+  store.close();
+});
+
+test("recall_program_run with derive:true short-circuits an identical replay via duplicateOf", () => {
+  const store = new SqliteStore(":memory:");
+  const member = buildCell(
+    { kind: "obs", title: "program mcp emit member", body: "a cell observed by an emit_witness program", confidence: 0.8, topics: ["program"] },
+    { key: "aaaaaaaa-5555-5555-5555-555555555555" },
+  );
+  const program = buildCell(
+    {
+      kind: "prg",
+      title: "mcp emit witness program",
+      body: "emit witness on members",
+      confidence: 0.9,
+      topics: ["program"],
+      props: {
+        program: {
+          schemaVersion: "recall.program.v1",
+          operation: "emit_witness",
+          target: { keys: [member.key] },
+        },
+      },
+    },
+    { key: "bbbbbbbb-5555-5555-5555-555555555555" },
+  );
+  store.put(member);
+  store.put(program);
+
+  const first = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_run",
+    arguments: { key: program.key, derive: true },
+  }), store));
+  assert.equal(first.derived.accepted, true);
+  assert.equal(first.derived.duplicateOf, undefined);
+
+  const second = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_run",
+    arguments: { key: program.key, derive: true },
+  }), store));
+  assert.equal(second.derived.accepted, true);
+  assert.ok(typeof second.derived.duplicateOf === "string", "duplicateOf must name the original cell");
+  store.close();
+});
+
+test("recall_program_run with an unknown key returns a clear error payload, not a throw", () => {
+  const store = new SqliteStore(":memory:");
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_run",
+    arguments: { key: "no-such-program" },
+  }), store));
+  assert.ok(typeof out.error === "string", "error must be a string");
+  assert.ok(out.error.includes("no-such-program"), "error must name the bad key");
+  store.close();
+});
+
+test("recall_program_runs lists run history, optionally filtered by key, and respects limit", () => {
+  const store = new SqliteStore(":memory:");
+  const member = buildCell(
+    { kind: "obs", title: "program mcp runs member", body: "a cell scored across runs", confidence: 0.8, topics: ["program"] },
+    { key: "aaaaaaaa-4444-4444-4444-444444444444" },
+  );
+  const program = buildCell(
+    {
+      kind: "prg",
+      title: "mcp runs program",
+      body: "score program members across runs",
+      confidence: 0.9,
+      topics: ["program"],
+      props: {
+        program: {
+          schemaVersion: "recall.program.v1",
+          operation: "score",
+          target: { keys: [member.key] },
+        },
+      },
+    },
+    { key: "bbbbbbbb-4444-4444-4444-444444444444" },
+  );
+  store.put(member);
+  store.put(program);
+
+  callText(handleMcpRequest(req("tools/call", { name: "recall_program_run", arguments: { key: program.key } }), store));
+  callText(handleMcpRequest(req("tools/call", { name: "recall_program_run", arguments: { key: program.key } }), store));
+
+  const filtered = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_runs",
+    arguments: { key: program.key },
+  }), store));
+  assert.ok(Array.isArray(filtered), "result should be an array");
+  assert.equal(filtered.length, 2);
+  assert.ok(filtered.every((r: any) => r.operation === "score"));
+
+  const limited = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_runs",
+    arguments: { key: program.key, limit: 1 },
+  }), store));
+  assert.equal(limited.length, 1);
+
+  const all = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_program_runs",
+    arguments: {},
+  }), store));
+  assert.equal(all.length, 2);
   store.close();
 });

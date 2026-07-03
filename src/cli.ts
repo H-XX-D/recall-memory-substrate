@@ -17,10 +17,11 @@ import { migrate } from "./migrate.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
-import { inspectCell } from "./cell-context.js";
+import { inspectCell, resolveCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { FederatedReadStore } from "./federated-store.js";
 import { runOperatorCycle } from "./operator.js";
+import { runProgramCell } from "./programs.js";
 import { serializeGraph, parseNetlist, loadNetlist, type LoadMode } from "./netlist.js";
 import {
   homeDbPath,
@@ -308,6 +309,79 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    if (command === "program" && subcommand === "run") {
+      const target = args.command[2];
+      if (!target) throw new Error("program run requires a key or handle");
+      const store = openWriteStore(route.dbPath);
+      try {
+        const program = resolveCell(store, target);
+        if (!program) throw new Error(`unknown program: ${target}`);
+        const now = options.now ?? new Date().toISOString();
+        const { run, derived } = runProgramCell(store, program, now, { derive: args.derive });
+        outJson(out, {
+          run,
+          derived: derived ? { accepted: derived.accepted, duplicateOf: derived.duplicateOf } : undefined,
+        });
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "program" && subcommand === "list") {
+      return withReadStore(args, route, env, (store) => {
+        const programs = store
+          .active()
+          .filter((cell) => cell.kind === "prg" && cell.props.program !== undefined)
+          .map((cell) => {
+            const spec = cell.props.program as { operation?: string; description?: string };
+            return {
+              key: cell.key,
+              handle: cell.handle,
+              operation: spec?.operation,
+              description: spec?.description,
+              runCount: typeof cell.props.runCount === "number" ? cell.props.runCount : 0,
+            };
+          });
+        outJson(out, { programs });
+        return 0;
+      });
+    }
+
+    if (command === "program" && subcommand === "runs") {
+      const target = args.command[2];
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (!("listProgramRuns" in store)) throw new Error("program run history is unavailable on this store");
+        let programKey: string | undefined;
+        if (target) {
+          const program = resolveCell(store, target);
+          if (!program) throw new Error(`unknown program: ${target}`);
+          programKey = program.key;
+        }
+        const runs = store.listProgramRuns({ programKey, limit: args.limit });
+        outJson(out, { runs });
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "program" && subcommand === "show-run") {
+      const id = args.command[2];
+      if (!id) throw new Error("program show-run requires an id");
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (!("getProgramRun" in store)) throw new Error("program run history is unavailable on this store");
+        const run = store.getProgramRun(id);
+        if (!run) throw new Error(`Unknown program run: ${id}`);
+        outJson(out, run);
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
     if (command === "operate" && (!subcommand || subcommand === "once")) {
       const store = openWriteStore(route.dbPath);
       try {
@@ -516,6 +590,10 @@ Commands:
   recall dag show <id> [--db path] [--project slug]
   recall dag list [--limit 10] [--db path] [--project slug]
   recall dag analyze <id> [--derive] [--db path] [--project slug]
+  recall program run <key-or-handle> [--derive] [--db path] [--project slug]
+  recall program list [--db path] [--project slug]
+  recall program runs [<key-or-handle>] [--limit 20] [--db path] [--project slug]
+  recall program show-run <id> [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]

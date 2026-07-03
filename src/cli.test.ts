@@ -505,6 +505,177 @@ test("dag show with an unknown id exits nonzero with an error", () => {
   }
 });
 
+test("program run over a seeded prg cell prints the run, records history, and program runs/show-run see it", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const memberPath = join(tmp, "member.json");
+    writeFileSync(
+      memberPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "program member cell",
+        body: "A cell scored by a standing program.",
+        confidence: 0.8,
+        topics: ["program"],
+      }),
+    );
+    const member = capture(["admit", "--json", memberPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(member.code, 0, member.stderr);
+    const memberKey = JSON.parse(member.stdout).cell.key as string;
+
+    const programPath = join(tmp, "program.json");
+    writeFileSync(
+      programPath,
+      JSON.stringify({
+        kind: "prg",
+        title: "cli score program",
+        body: "score program members",
+        confidence: 0.9,
+        topics: ["program"],
+        props: {
+          program: {
+            schemaVersion: "recall.program.v1",
+            operation: "score",
+            description: "scores the member cell",
+            target: { keys: [memberKey] },
+          },
+        },
+      }),
+    );
+    const program = capture(["admit", "--json", programPath, "--db", db], { now: "2026-06-26T12:00:01.000Z" });
+    assert.equal(program.code, 0, program.stderr);
+    const programJson = JSON.parse(program.stdout).cell;
+    const programKey = programJson.key as string;
+    const programHandle = programJson.handle as string;
+
+    const run = capture(["program", "run", programKey, "--db", db], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(run.code, 0, run.stderr);
+    const runJson = JSON.parse(run.stdout);
+    assert.equal(runJson.run.operation, "score");
+    assert.equal(runJson.run.programKey, programKey);
+    assert.equal(runJson.derived, undefined);
+
+    const list = capture(["program", "list", "--db", db]);
+    assert.equal(list.code, 0, list.stderr);
+    const listJson = JSON.parse(list.stdout);
+    assert.equal(listJson.programs.length, 1);
+    assert.equal(listJson.programs[0].key, programKey);
+    assert.equal(listJson.programs[0].handle, programHandle);
+    assert.equal(listJson.programs[0].operation, "score");
+    assert.equal(listJson.programs[0].description, "scores the member cell");
+    assert.equal(listJson.programs[0].runCount, 1);
+
+    const runs = capture(["program", "runs", programKey, "--db", db]);
+    assert.equal(runs.code, 0, runs.stderr);
+    const runsJson = JSON.parse(runs.stdout);
+    assert.equal(runsJson.runs.length, 1);
+    assert.equal(runsJson.runs[0].id, runJson.run.id);
+
+    const runsAll = capture(["program", "runs", "--db", db]);
+    assert.equal(runsAll.code, 0, runsAll.stderr);
+    assert.equal(JSON.parse(runsAll.stdout).runs.length, 1);
+
+    // show-run resolves a prefix of the run id
+    const prefix = (runJson.run.id as string).slice(0, 8);
+    const shown = capture(["program", "show-run", prefix, "--db", db]);
+    assert.equal(shown.code, 0, shown.stderr);
+    assert.equal(JSON.parse(shown.stdout).id, runJson.run.id);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("program run resolves by handle and supports --derive", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const watchedPath = join(tmp, "watched.json");
+    writeFileSync(
+      watchedPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "watched program member",
+        body: "A cell watched by a standing program.",
+        confidence: 0.9,
+        topics: ["program"],
+      }),
+    );
+    const watched = capture(["admit", "--json", watchedPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(watched.code, 0, watched.stderr);
+    const watchedKey = JSON.parse(watched.stdout).cell.key as string;
+
+    const programPath = join(tmp, "watch-program.json");
+    writeFileSync(
+      programPath,
+      JSON.stringify({
+        kind: "prg",
+        title: "cli watch program",
+        body: "watch program members",
+        confidence: 0.9,
+        topics: ["program"],
+        props: {
+          program: {
+            schemaVersion: "recall.program.v1",
+            operation: "watch",
+            target: { keys: [watchedKey] },
+            params: { delta: 0.1, concernTarget: watchedKey },
+          },
+        },
+      }),
+    );
+    const program = capture(["admit", "--json", programPath, "--db", db], { now: "2026-06-26T12:00:01.000Z" });
+    assert.equal(program.code, 0, program.stderr);
+    const programHandle = JSON.parse(program.stdout).cell.handle as string;
+
+    const baseline = capture(["program", "run", programHandle, "--db", db], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(baseline.code, 0, baseline.stderr);
+    assert.equal(JSON.parse(baseline.stdout).run.output.tripped, false);
+
+    // Drop the watched cell's effective score to trip the watch on the next run.
+    const dbHandle = new DatabaseSync(db);
+    dbHandle
+      .prepare(`UPDATE cells SET json = json_set(json, '$.scores.effective', 0.2) WHERE key = ?`)
+      .run(watchedKey);
+    dbHandle.close();
+
+    const tripped = capture(["program", "run", programHandle, "--derive", "--db", db], {
+      now: "2026-06-26T12:02:00.000Z",
+    });
+    assert.equal(tripped.code, 0, tripped.stderr);
+    const trippedJson = JSON.parse(tripped.stdout);
+    assert.equal(trippedJson.run.output.tripped, true);
+    assert.equal(trippedJson.derived.accepted, true);
+    assert.equal(trippedJson.derived.duplicateOf, undefined);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("program run with an unknown key exits nonzero with a clear error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const result = capture(["program", "run", "no-such-program", "--db", db]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /no-such-program/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("program show-run with an unknown id exits nonzero with an error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const result = capture(["program", "show-run", "no-such-run", "--db", db]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /no-such-run/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 function capture(
   argv: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; now?: string } = {},
