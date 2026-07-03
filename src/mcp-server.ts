@@ -1,12 +1,15 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Lean tool set: the five the
-// model actually uses. The daemon/operator tick runs from the Stop hook, not here.
+// stdio readline loop is thin glue in mcp-cli.ts. Eight tools: recall_status,
+// recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
+// recall_ref, recall_page. The daemon/operator tick runs from the Stop hook, not here.
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell } from "./cell-context.js";
 import { admit } from "./admission.js";
 import { semanticSearch } from "./semantic.js";
 import { resolveCellReference, cellReferenceView } from "./references.js";
+import { getRecallPage } from "./pages.js";
+import type { PageName, PageFilter } from "./pages.js";
 import type { Store, WriteProposal } from "./types.js";
 import type { SqliteStore } from "./store.js";
 
@@ -36,6 +39,7 @@ export const TOOLS = [
   { name: "recall_write", description: "Admit a durable write through the admission gate.", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, topics: { type: "array" }, edges: { type: "array" } }, required: ["kind", "title", "body", "confidence"] } },
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
   { name: "recall_ref", description: "Resolve a cell reference (handle#field.path) to the addressed value.", inputSchema: { type: "object", properties: { reference: { type: "string" } }, required: ["reference"] } },
+  { name: "recall_page", description: "Return a curated kind-filtered page view (reflections, objectives, workbench, witnesses, handoffs, team-metrics, agent-profile, user-profile, index).", inputSchema: { type: "object", properties: { name: { type: "string" }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } }, required: ["name"] } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -130,6 +134,23 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
         return JSON.stringify({ targetId: view.targetId, handle: view.handle, path: view.path, value: view.value, resolved: true });
       }
       return JSON.stringify({ targetId: res.targetId, resolved: false });
+    }
+    case "recall_page": {
+      const pageName = String(args.name ?? "");
+      const validNames: PageName[] = [
+        "index", "reflections", "objectives", "workbench", "witnesses",
+        "handoffs", "team-metrics", "agent-profile", "user-profile",
+      ];
+      if (!validNames.includes(pageName as PageName)) {
+        return JSON.stringify({ error: `unknown page: ${pageName}` });
+      }
+      const filter: PageFilter = {};
+      if (typeof args.project === "string") filter.project = args.project;
+      if (Array.isArray(args.topics)) filter.topics = args.topics as string[];
+      if (typeof args.since === "string") filter.since = args.since;
+      if (typeof args.limit === "number") filter.limit = args.limit;
+      const page = getRecallPage(pageName as PageName, store, filter);
+      return JSON.stringify(page);
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

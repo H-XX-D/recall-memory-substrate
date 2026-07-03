@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the seven lean tools", () => {
+test("tools/list returns exactly the eight lean tools", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -34,6 +34,7 @@ test("tools/list returns exactly the seven lean tools", () => {
     "recall_write",
     "recall_semantic",
     "recall_ref",
+    "recall_page",
   ]);
   store.close();
 });
@@ -85,8 +86,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the seven-tool surface", () => {
-  assert.equal(TOOLS.length, 7);
+test("TOOLS is the eight-tool surface", () => {
+  assert.equal(TOOLS.length, 8);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -158,5 +159,36 @@ test("recall_ref returns {resolved:false} for an unresolvable reference without 
 
   assert.equal(out.resolved, false, "should return resolved:false for unknown reference");
   assert.ok(typeof out.targetId === "string", "targetId must be present");
+  store.close();
+});
+
+test("recall_page reflections returns a page with only ref-kind cells", () => {
+  const store = new SqliteStore(":memory:");
+  // Seed a ref cell (reflections page) and an obs cell (should be excluded).
+  admit({ kind: "ref", title: "A reflection", body: "some reflection body", confidence: 0.7, topics: [], entities: [] }, { store });
+  admit({ kind: "obs", title: "An observation", body: "some observation body", confidence: 0.8, topics: [], entities: [] }, { store });
+
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_page",
+    arguments: { name: "reflections" },
+  }), store));
+
+  assert.equal(out.name, "reflections", "page name must match");
+  assert.ok(typeof out.summary === "string", "summary must be a string");
+  assert.ok(Array.isArray(out.cells), "cells must be an array");
+  assert.ok(out.cells.length >= 1, "should have at least one cell");
+  assert.ok(out.cells.every((c: any) => c.kind === "ref"), "all cells must be ref-kind");
+  store.close();
+});
+
+test("recall_page with unknown name returns a clear error object without throwing", () => {
+  const store = new SqliteStore(":memory:");
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_page",
+    arguments: { name: "no-such-page" },
+  }), store));
+
+  assert.ok(typeof out.error === "string", "error must be a string");
+  assert.ok(out.error.includes("no-such-page"), "error must name the bad page");
   store.close();
 });
