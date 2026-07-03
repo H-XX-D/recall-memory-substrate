@@ -195,6 +195,58 @@ test("analyzeMemory: inactive (superseded) neighbor cells are excluded from beli
   }
 });
 
+test("analyzeMemory: planningPressure and its weighted-sum components match a hand-computed exact value", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    // Belief anchors: conf 0.6, uncertainty 0.4, concern 0.3.
+    const belief = putBelief(store, "b500", {
+      scores: { conf: 0.6, uncertainty: 0.4, concern: 0.3, sourceQuality: 0.6, actorCalibration: 1, effective: 0.6, currencyC0: 1, currency: 1, salienceSeed: 0.5, salience: 0.5 },
+    });
+
+    // supports source: origin daemon + checked -> trustMultiplier = probability(1.0) = 1.
+    // weight = probability(0.5 * 1) = 0.5
+    putSource(store, "s500", belief.key, "supports", {
+      scores: { conf: 0.7, uncertainty: 0.2, concern: 0.1, sourceQuality: 0.7, actorCalibration: 1, effective: 0.5, currencyC0: 1, currency: 1, salienceSeed: 0.5, salience: 0.5 },
+      provenance: provenance({ origin: "daemon", producedBy: "actor-support", verification: "checked" }),
+    });
+
+    // contradicts source: origin human + checked -> trustMultiplier = probability(1.15) = 1 (clamped).
+    // weight = probability(0.4 * 1) = 0.4
+    putSource(store, "s501", belief.key, "contradicts", {
+      scores: { conf: 0.7, uncertainty: 0.2, concern: 0.1, sourceQuality: 0.7, actorCalibration: 1, effective: 0.4, currencyC0: 1, currency: 1, salienceSeed: 0.5, salience: 0.5 },
+      provenance: provenance({ origin: "human", producedBy: "actor-contra", verification: "checked" }),
+    });
+
+    // concerns source: origin connector + unverified -> trustMultiplier = probability(0.8 - 0.12) = 0.68.
+    // weight = probability(0.6 * 0.68) = probability(0.408) = 0.408
+    putSource(store, "s502", belief.key, "concerns", {
+      scores: { conf: 0.7, uncertainty: 0.2, concern: 0.1, sourceQuality: 0.7, actorCalibration: 1, effective: 0.6, currencyC0: 1, currency: 1, salienceSeed: 0.5, salience: 0.5 },
+      provenance: provenance({ origin: "connector", producedBy: "actor-concern", verification: "unverified" }),
+    });
+
+    const report = analyzeMemory(store);
+    const pressure = report.beliefs.find((b) => b.key === belief.key);
+    assert.ok(pressure, "belief pressure entry missing");
+
+    // Weighted sums (round3 of weight = probability(effective * trustMultiplier)),
+    // pinned individually so the multiplication order is verified cheaply.
+    assert.equal(pressure!.support, 0.5);
+    assert.equal(pressure!.contradiction, 0.4);
+    assert.equal(pressure!.concernPressure, 0.408);
+
+    // planningPressure = probability(
+    //   (concern + contradiction*0.25 + concernPressure*0.15) * (uncertainty + contradiction*0.1)
+    // )
+    // = probability((0.3 + 0.4*0.25 + 0.408*0.15) * (0.4 + 0.4*0.1))
+    // = probability((0.3 + 0.1 + 0.0612) * (0.4 + 0.04))
+    // = probability(0.4612 * 0.44)
+    // = probability(0.20292800000000003)
+    assert.equal(pressure!.planningPressure, 0.20292800000000003);
+  } finally {
+    store.close();
+  }
+});
+
 // --- StaleFinding ---
 
 test("analyzeMemory: an expired cell (policy.expiresAt in the past) is stale with severity 1", () => {
@@ -376,6 +428,104 @@ test("analyzeMemory: a contradicts/concerns edge to an inactive target is not re
     const report = analyzeMemory(store);
     const finding = report.contradictions.find((c) => c.sourceKey === source.key);
     assert.equal(finding, undefined);
+  } finally {
+    store.close();
+  }
+});
+
+test("analyzeMemory: contradicts/concerns severities match hand-computed exact values, including the concern-0 fallback branches", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const targetA = buildCell({ kind: "bel", title: "target A", body: "b", confidence: 0.7 }, { key: "sev001" });
+    const targetB = buildCell({ kind: "bel", title: "target B", body: "b", confidence: 0.7 }, { key: "sev002" });
+    const targetC = buildCell({ kind: "bel", title: "target C", body: "b", confidence: 0.7 }, { key: "sev003" });
+    const targetD = buildCell({ kind: "bel", title: "target D", body: "b", confidence: 0.7 }, { key: "sev004" });
+    store.put(targetA);
+    store.put(targetB);
+    store.put(targetC);
+    store.put(targetD);
+
+    // contradicts, normal branch: conf 0.5, concern 0.7 -> max(0.5, 0.7) = 0.7
+    const contraNormal = buildCell(
+      {
+        kind: "obs",
+        title: "contradicts normal",
+        body: "b",
+        confidence: 0.5,
+        concern: 0.7,
+        edges: [{ relation: "contradicts", target: targetA.key, weight: -1 }],
+      },
+      { key: "sev010" },
+    );
+    contraNormal.scores.conf = 0.5;
+    contraNormal.scores.concern = 0.7;
+    store.put(contraNormal);
+
+    // contradicts, fallback branch: concern 0 (falsy) -> concern || 0.5 = 0.5; conf 0.3 -> max(0.3, 0.5) = 0.5
+    const contraFallback = buildCell(
+      {
+        kind: "obs",
+        title: "contradicts fallback",
+        body: "b",
+        confidence: 0.3,
+        edges: [{ relation: "contradicts", target: targetB.key, weight: -1 }],
+      },
+      { key: "sev011" },
+    );
+    contraFallback.scores.conf = 0.3;
+    contraFallback.scores.concern = 0;
+    store.put(contraFallback);
+
+    // concerns, normal branch: concern 0.65 -> concern || 0.4 = 0.65
+    const concernNormal = buildCell(
+      {
+        kind: "obs",
+        title: "concerns normal",
+        body: "b",
+        confidence: 0.6,
+        edges: [{ relation: "concerns", target: targetC.key, weight: -0.5 }],
+      },
+      { key: "sev012" },
+    );
+    concernNormal.scores.concern = 0.65;
+    store.put(concernNormal);
+
+    // concerns, fallback branch: concern 0 (falsy) -> concern || 0.4 = 0.4
+    const concernFallback = buildCell(
+      {
+        kind: "obs",
+        title: "concerns fallback",
+        body: "b",
+        confidence: 0.6,
+        edges: [{ relation: "concerns", target: targetD.key, weight: -0.5 }],
+      },
+      { key: "sev013" },
+    );
+    concernFallback.scores.concern = 0;
+    store.put(concernFallback);
+
+    const report = analyzeMemory(store);
+
+    const findContra = (sourceKey: string) =>
+      report.contradictions.find((c) => c.sourceKey === sourceKey && c.relation === "contradicts");
+    const findConcern = (sourceKey: string) =>
+      report.contradictions.find((c) => c.sourceKey === sourceKey && c.relation === "concerns");
+
+    const fContraNormal = findContra(contraNormal.key);
+    assert.ok(fContraNormal, "expected contradicts finding (normal branch)");
+    assert.equal(fContraNormal!.severity, 0.7);
+
+    const fContraFallback = findContra(contraFallback.key);
+    assert.ok(fContraFallback, "expected contradicts finding (fallback branch)");
+    assert.equal(fContraFallback!.severity, 0.5);
+
+    const fConcernNormal = findConcern(concernNormal.key);
+    assert.ok(fConcernNormal, "expected concerns finding (normal branch)");
+    assert.equal(fConcernNormal!.severity, 0.65);
+
+    const fConcernFallback = findConcern(concernFallback.key);
+    assert.ok(fConcernFallback, "expected concerns finding (fallback branch)");
+    assert.equal(fConcernFallback!.severity, 0.4);
   } finally {
     store.close();
   }
