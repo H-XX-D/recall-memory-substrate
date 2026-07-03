@@ -271,6 +271,140 @@ test("hyperedge show with an unknown id exits nonzero with an error", () => {
   }
 });
 
+test("dag add from stdin JSON then show/list/analyze round-trip", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const nodeAPath = join(tmp, "node-a.json");
+    const nodeBPath = join(tmp, "node-b.json");
+    writeFileSync(
+      nodeAPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "dag node a",
+        body: "First node in the overlay.",
+        confidence: 0.8,
+        topics: ["dag"],
+      }),
+    );
+    writeFileSync(
+      nodeBPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "dag node b",
+        body: "Second node in the overlay.",
+        confidence: 0.8,
+        topics: ["dag"],
+      }),
+    );
+    const nodeA = capture(["admit", "--json", nodeAPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(nodeA.code, 0, nodeA.stderr);
+    const nodeAKey = JSON.parse(nodeA.stdout).cell.key as string;
+    const nodeB = capture(["admit", "--json", nodeBPath, "--db", db], { now: "2026-06-26T12:00:01.000Z" });
+    assert.equal(nodeB.code, 0, nodeB.stderr);
+    const nodeBKey = JSON.parse(nodeB.stdout).cell.key as string;
+
+    const overlayPath = join(tmp, "overlay.json");
+    writeFileSync(
+      overlayPath,
+      JSON.stringify({
+        title: "cli dag overlay",
+        nodeIds: [nodeAKey, nodeBKey],
+        edges: [{ source: nodeAKey, target: nodeBKey, label: "leads_to" }],
+      }),
+    );
+
+    const added = capture(["dag", "add", "--json", overlayPath, "--db", db], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(added.code, 0, added.stderr);
+    const addedJson = JSON.parse(added.stdout);
+    assert.equal(addedJson.title, "cli dag overlay");
+    assert.deepEqual(addedJson.nodeIds, [nodeAKey, nodeBKey]);
+    const overlayId = addedJson.id as string;
+
+    const shown = capture(["dag", "show", overlayId, "--db", db]);
+    assert.equal(shown.code, 0, shown.stderr);
+    assert.equal(JSON.parse(shown.stdout).id, overlayId);
+
+    // stdin form: --json -
+    const stdinInput = JSON.stringify({ title: "second overlay", nodeIds: [nodeAKey], edges: [] });
+    const stdinAdd = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "cli.ts"), "dag", "add", "--json", "-", "--db", db],
+      { input: stdinInput, encoding: "utf8" },
+    );
+    assert.equal(stdinAdd.status, 0, stdinAdd.stderr);
+    assert.equal(JSON.parse(stdinAdd.stdout).title, "second overlay");
+
+    const list = capture(["dag", "list", "--limit", "1", "--db", db]);
+    assert.equal(list.code, 0, list.stderr);
+    const listJson = JSON.parse(list.stdout);
+    assert.equal(listJson.dagOverlays.length, 1);
+
+    const listAll = capture(["dag", "list", "--db", db]);
+    assert.equal(JSON.parse(listAll.stdout).dagOverlays.length, 2);
+
+    const analyzed = capture(["dag", "analyze", overlayId, "--db", db]);
+    assert.equal(analyzed.code, 0, analyzed.stderr);
+    const analysis = JSON.parse(analyzed.stdout);
+    assert.equal(analysis.overlayId, overlayId);
+    assert.equal(analysis.isDag, true);
+    assert.deepEqual(analysis.topologicalOrder, [nodeAKey, nodeBKey]);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dag add rejects a cyclic overlay and exits nonzero", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const nodeAPath = join(tmp, "node-a.json");
+    writeFileSync(
+      nodeAPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "cycle node a",
+        body: "Node that will form a cycle.",
+        confidence: 0.8,
+        topics: ["dag"],
+      }),
+    );
+    const nodeA = capture(["admit", "--json", nodeAPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(nodeA.code, 0, nodeA.stderr);
+    const nodeAKey = JSON.parse(nodeA.stdout).cell.key as string;
+
+    const overlayPath = join(tmp, "cyclic-overlay.json");
+    writeFileSync(
+      overlayPath,
+      JSON.stringify({
+        title: "cyclic overlay",
+        nodeIds: [nodeAKey],
+        edges: [
+          { source: nodeAKey, target: nodeAKey },
+        ],
+      }),
+    );
+
+    const added = capture(["dag", "add", "--json", overlayPath, "--db", db]);
+    assert.equal(added.code, 1);
+    assert.match(added.stderr, new RegExp(nodeAKey));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dag show with an unknown id exits nonzero with an error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const result = capture(["dag", "show", "no-such-id", "--db", db]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /no-such-id/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 function capture(
   argv: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; now?: string } = {},

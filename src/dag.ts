@@ -1,4 +1,5 @@
-import type { DagOverlay, DagOverlayEdge } from "./types.js";
+import { randomUUID } from "node:crypto";
+import type { DagOverlay, DagOverlayEdge, Store } from "./types.js";
 
 // Witness that a node pair is reachable via structurally different paths
 // (different edge-label signatures). This is a signal, not a defect: it
@@ -149,4 +150,55 @@ function findCycles(nodes: string[], outgoing: Map<string, DagOverlayEdge[]>): s
     visit(node);
   }
   return cycles;
+}
+
+// A thin write proposal for a dag overlay: nodeIds and edge endpoints may be
+// bare cell key or handle strings; both are resolved before the write lands.
+export interface DagOverlayInput {
+  id?: string;
+  title: string;
+  nodeIds: string[];
+  edges: DagOverlay["edges"];
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+// Builds and persists a DagOverlay from a thin input. Every nodeId and edge
+// endpoint is resolved against the store (by key, falling back to handle) so
+// an overlay can never point at a cell that does not exist; the first
+// unresolved reference is named in the thrown error to make the bad
+// reference easy to find. A cyclic candidate overlay is rejected at insert
+// (legacy behavior): analyzeDagOverlay runs first and, when the candidate is
+// not a DAG, the cycles are listed in the thrown message.
+export function addDagOverlay(store: Store, input: DagOverlayInput, now?: string): DagOverlay {
+  const resolve = (ref: string): string => {
+    const cell = store.get(ref) ?? store.getByHandle(ref);
+    if (!cell) throw new Error(`dag overlay reference not found: ${ref}`);
+    return cell.key;
+  };
+
+  const nodeIds = input.nodeIds.map(resolve);
+  const edges: DagOverlayEdge[] = input.edges.map((edge) => ({
+    ...edge,
+    source: resolve(edge.source),
+    target: resolve(edge.target),
+  }));
+
+  const candidate: DagOverlay = {
+    id: input.id ?? randomUUID(),
+    title: input.title,
+    nodeIds,
+    edges,
+    metadata: input.metadata ?? {},
+    createdAt: input.createdAt ?? now ?? new Date().toISOString(),
+  };
+
+  const analysis = analyzeDagOverlay(candidate);
+  if (!analysis.isDag) {
+    const cycles = analysis.cycles.map((cycle) => cycle.join(" -> ")).join("; ");
+    throw new Error(`dag overlay is cyclic: ${cycles}`);
+  }
+
+  store.putDagOverlay(candidate);
+  return candidate;
 }

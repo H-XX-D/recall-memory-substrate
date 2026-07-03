@@ -14,6 +14,7 @@ import {
   readJsonFile,
 } from "./adapters.js";
 import { migrate } from "./migrate.js";
+import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { inspectCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
@@ -250,6 +251,46 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       });
     }
 
+    if (command === "dag" && subcommand === "add") {
+      const input = readJsonValue(args, "dag add") as DagOverlayInput;
+      const store = openWriteStore(route.dbPath);
+      try {
+        outJson(out, addDagOverlay(store, input, options.now));
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "dag" && subcommand === "show") {
+      const id = args.command[2];
+      if (!id) throw new Error("dag show requires an id");
+      return withReadStore(args, route, env, (store) => {
+        const overlay = store.getDagOverlay(id);
+        if (!overlay) throw new Error(`Unknown dag overlay: ${id}`);
+        outJson(out, overlay);
+        return 0;
+      });
+    }
+
+    if (command === "dag" && subcommand === "list") {
+      return withReadStore(args, route, env, (store) => {
+        outJson(out, { dagOverlays: store.listDagOverlays(args.limit) });
+        return 0;
+      });
+    }
+
+    if (command === "dag" && subcommand === "analyze") {
+      const id = args.command[2];
+      if (!id) throw new Error("dag analyze requires an id");
+      return withReadStore(args, route, env, (store) => {
+        const overlay = store.getDagOverlay(id);
+        if (!overlay) throw new Error(`Unknown dag overlay: ${id}`);
+        outJson(out, analyzeDagOverlay(overlay));
+        return 0;
+      });
+    }
+
     if (command === "operate" && (!subcommand || subcommand === "once")) {
       const store = openWriteStore(route.dbPath);
       try {
@@ -438,6 +479,10 @@ Commands:
   recall hyperedge add --json edge.json [--db path] [--project slug]
   recall hyperedge show <id> [--db path] [--project slug]
   recall hyperedge list [--limit 10] [--db path] [--project slug]
+  recall dag add --json overlay.json [--db path] [--project slug]
+  recall dag show <id> [--db path] [--project slug]
+  recall dag list [--limit 10] [--db path] [--project slug]
+  recall dag analyze <id> [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]

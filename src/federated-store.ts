@@ -5,7 +5,7 @@
 // accidentally mixing domains.
 import { existsSync } from "node:fs";
 import { SqliteStore } from "./store.js";
-import type { Cell, Edge, Hyperedge, HyperedgeMember, Kind, NeighborLink, SearchHit, SemanticVector, Store, StoreStats } from "./types.js";
+import type { Cell, DagOverlay, Edge, Hyperedge, HyperedgeMember, Kind, NeighborLink, SearchHit, SemanticVector, Store, StoreStats } from "./types.js";
 
 export const FEDERATED_READ_ONLY_MESSAGE =
   "federated read store is read-only; route writes to a home or project local";
@@ -172,6 +172,33 @@ export class FederatedReadStore implements Store {
     return all.slice(0, limit);
   }
 
+  putDagOverlay(_d: DagOverlay): void {
+    throw new Error(FEDERATED_READ_ONLY_MESSAGE);
+  }
+
+  getDagOverlay(id: string): DagOverlay | undefined {
+    const { graph, key } = decodeFederatedKey(id);
+    if (graph !== undefined) {
+      const member = this.byGraph.get(graph);
+      const overlay = member ? member.store.getDagOverlay(key) : undefined;
+      return overlay && member ? prefixDagOverlay(member.graph, overlay) : undefined;
+    }
+
+    for (const member of this.members) {
+      const overlay = member.store.getDagOverlay(id);
+      if (overlay) return prefixDagOverlay(member.graph, overlay);
+    }
+    return undefined;
+  }
+
+  listDagOverlays(limit = 100): DagOverlay[] {
+    const all = this.members.flatMap((member) =>
+      member.store.listDagOverlays(limit).map((d) => prefixDagOverlay(member.graph, d)),
+    );
+    all.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+    return all.slice(0, limit);
+  }
+
   lexicalBackend(): "federated" {
     return "federated";
   }
@@ -269,4 +296,16 @@ function prefixHyperedge(graph: string, hyperedge: Hyperedge): Hyperedge {
 
 function prefixHyperedgeMember(graph: string, member: HyperedgeMember): HyperedgeMember {
   return { ...member, key: prefixBare(graph, member.key) };
+}
+
+function prefixDagOverlay(graph: string, overlay: DagOverlay): DagOverlay {
+  return {
+    ...overlay,
+    nodeIds: overlay.nodeIds.map((nodeId) => prefixBare(graph, nodeId)),
+    edges: overlay.edges.map((edge) => ({
+      ...edge,
+      source: prefixBare(graph, edge.source),
+      target: prefixBare(graph, edge.target),
+    })),
+  };
 }

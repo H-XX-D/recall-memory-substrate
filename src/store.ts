@@ -216,9 +216,21 @@ export class SqliteStore implements Store {
       .run(d.id, d.title, JSON.stringify(d.nodeIds), JSON.stringify(d.edges), JSON.stringify(d.metadata), d.createdAt);
   }
 
+  // Prefix-tolerant via resolveStoredId, a deliberate upgrade over legacy
+  // exact-only lookup: a unique id prefix resolves the same way getHyperedge
+  // resolves one.
+  getDagOverlay(id: string): DagOverlay | undefined {
+    const resolved = this.resolveStoredId("dag_overlays", id);
+    if (resolved === null) return undefined;
+    const row = this.db.prepare(`SELECT * FROM dag_overlays WHERE id = ?`).get(resolved) as
+      | { id: string; title: string; node_ids_json: string; edges_json: string; metadata_json: string; created_at: string }
+      | undefined;
+    return row ? this.hydrateDagOverlay(row) : undefined;
+  }
+
   listDagOverlays(limit = 100): DagOverlay[] {
     const rows = this.db.prepare(`SELECT * FROM dag_overlays ORDER BY created_at DESC LIMIT ?`).all(limit) as Array<{ id: string; title: string; node_ids_json: string; edges_json: string; metadata_json: string; created_at: string }>;
-    return rows.map((r) => ({ id: r.id, title: r.title, nodeIds: JSON.parse(r.node_ids_json), edges: JSON.parse(r.edges_json), metadata: JSON.parse(r.metadata_json), createdAt: r.created_at }));
+    return rows.map((r) => this.hydrateDagOverlay(r));
   }
 
   search(query: string, opts: { limit?: number } = {}): SearchHit[] {
@@ -365,6 +377,24 @@ export class SqliteStore implements Store {
       kind: row.kind,
       title: row.title,
       members: normalizeHyperedgeMembers(JSON.parse(row.members_json)),
+      metadata: JSON.parse(row.metadata_json),
+      createdAt: row.created_at,
+    };
+  }
+
+  private hydrateDagOverlay(row: {
+    id: string;
+    title: string;
+    node_ids_json: string;
+    edges_json: string;
+    metadata_json: string;
+    created_at: string;
+  }): DagOverlay {
+    return {
+      id: row.id,
+      title: row.title,
+      nodeIds: JSON.parse(row.node_ids_json),
+      edges: JSON.parse(row.edges_json),
       metadata: JSON.parse(row.metadata_json),
       createdAt: row.created_at,
     };

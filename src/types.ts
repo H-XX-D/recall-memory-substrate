@@ -253,4 +253,7 @@ export interface Store {
   getHyperedge(id: string): Hyperedge | undefined;
   listHyperedges(limit?: number): Hyperedge[];
   hyperedgesForCell(key: string, limit?: number): Hyperedge[];
+  putDagOverlay(d: DagOverlay): void;
+  getDagOverlay(id: string): DagOverlay | undefined;
+  listDagOverlays(limit?: number): DagOverlay[];
 }

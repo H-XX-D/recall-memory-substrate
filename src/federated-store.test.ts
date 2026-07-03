@@ -298,3 +298,85 @@ test("federated getSemanticVector resolves across members by prefixed key", () =
     fed.close();
   }
 });
+
+test("federated putDagOverlay throws FEDERATED_READ_ONLY_MESSAGE", () => {
+  const home = new SqliteStore(":memory:");
+  const fed = new FederatedReadStore([{ graph: "home", store: home, ownsStore: true }]);
+  try {
+    assert.throws(
+      () => fed.putDagOverlay({ id: "d1", title: "t", nodeIds: [], edges: [], metadata: {}, createdAt: "2026-07-03T00:00:00Z" }),
+      new RegExp(FEDERATED_READ_ONLY_MESSAGE),
+    );
+  } finally {
+    fed.close();
+  }
+});
+
+test("federated getDagOverlay decodes a prefixed id, queries the owning member, and prefixes nodeIds/edges", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.putDagOverlay({
+    id: "d-home", title: "home overlay",
+    nodeIds: ["aaaa", "bbbb"],
+    edges: [{ source: "aaaa", target: "bbbb", label: "leads_to" }],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  proj.putDagOverlay({
+    id: "d-proj", title: "proj overlay",
+    nodeIds: ["cccc"],
+    edges: [],
+    metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+
+  const fed = new FederatedReadStore([
+    { graph: "home", store: home, ownsStore: true },
+    { graph: "proj", store: proj, ownsStore: true },
+  ]);
+  try {
+    const routed = fed.getDagOverlay("proj:d-proj");
+    assert.equal(routed?.id, "d-proj");
+    assert.deepEqual(routed?.nodeIds, ["proj:cccc"]);
+
+    const scanned = fed.getDagOverlay("d-home");
+    assert.equal(scanned?.id, "d-home");
+    assert.deepEqual(scanned?.nodeIds, ["home:aaaa", "home:bbbb"]);
+    assert.deepEqual(scanned?.edges, [{ source: "home:aaaa", target: "home:bbbb", label: "leads_to" }]);
+
+    assert.equal(fed.getDagOverlay("does-not-exist"), undefined);
+    assert.equal(fed.getDagOverlay("nope:zzzz"), undefined);
+  } finally {
+    fed.close();
+  }
+});
+
+test("federated listDagOverlays fans out, prefixes nodeIds/edges, and merges newest-first", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.putDagOverlay({
+    id: "d-home", title: "home overlay",
+    nodeIds: ["aaaa"], edges: [],
+    metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  proj.putDagOverlay({
+    id: "d-proj", title: "proj overlay",
+    nodeIds: ["bbbb"], edges: [],
+    metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+
+  const fed = new FederatedReadStore([
+    { graph: "home", store: home, ownsStore: true },
+    { graph: "proj", store: proj, ownsStore: true },
+  ]);
+  try {
+    const all = fed.listDagOverlays();
+    assert.deepEqual(all.map((d) => d.id), ["d-proj", "d-home"]); // newest-first by createdAt
+    const projOverlay = all.find((d) => d.id === "d-proj")!;
+    assert.deepEqual(projOverlay.nodeIds, ["proj:bbbb"]);
+
+    const limited = fed.listDagOverlays(1);
+    assert.equal(limited.length, 1);
+    assert.equal(limited[0]!.id, "d-proj");
+  } finally {
+    fed.close();
+  }
+});

@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeDagOverlay } from "./dag.js";
+import { addDagOverlay, analyzeDagOverlay } from "./dag.js";
+import { buildCell } from "./build.js";
+import { SqliteStore } from "./store.js";
 import type { DagOverlay } from "./types.js";
 
 function overlay(partial: Partial<DagOverlay>): DagOverlay {
@@ -130,4 +132,102 @@ test("analyzeDagOverlay: adjacency unions nodeIds with edge endpoints", () => {
   const result = analyzeDagOverlay(ov);
   assert.equal(result.isDag, true);
   assert.deepEqual(result.topologicalOrder, ["a", "b"]);
+});
+
+test("addDagOverlay resolves handles to keys for nodeIds and edge endpoints, and persists", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "A", body: "b", confidence: 0.8 }, { key: "aaaa" });
+  const b = buildCell({ kind: "obs", title: "B", body: "b", confidence: 0.7 }, { key: "bbbb" });
+  store.put(a);
+  store.put(b);
+
+  const ov = addDagOverlay(store, {
+    title: "handle overlay",
+    nodeIds: [a.handle, "bbbb"],
+    edges: [{ source: a.handle, target: "bbbb", label: "leads_to" }],
+  }, "2026-07-03T00:00:00Z");
+
+  assert.ok(ov.id);
+  assert.equal(ov.title, "handle overlay");
+  assert.deepEqual(ov.nodeIds, ["aaaa", "bbbb"]);
+  assert.deepEqual(ov.edges, [{ source: "aaaa", target: "bbbb", label: "leads_to" }]);
+  assert.equal(ov.createdAt, "2026-07-03T00:00:00Z");
+
+  const persisted = store.getDagOverlay(ov.id);
+  assert.deepEqual(persisted, ov);
+  store.close();
+});
+
+test("addDagOverlay rejects a cyclic input, listing the cycle in the thrown message", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "A", body: "b", confidence: 0.8 }, { key: "aaaa" });
+  const b = buildCell({ kind: "obs", title: "B", body: "b", confidence: 0.7 }, { key: "bbbb" });
+  store.put(a);
+  store.put(b);
+
+  assert.throws(
+    () =>
+      addDagOverlay(store, {
+        title: "cyclic overlay",
+        nodeIds: ["aaaa", "bbbb"],
+        edges: [
+          { source: "aaaa", target: "bbbb" },
+          { source: "bbbb", target: "aaaa" },
+        ],
+      }),
+    /aaaa.*bbbb.*aaaa/,
+  );
+  store.close();
+});
+
+test("addDagOverlay throws naming the first unresolved node", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "A", body: "b", confidence: 0.8 }, { key: "aaaa" });
+  store.put(a);
+
+  assert.throws(
+    () =>
+      addDagOverlay(store, {
+        title: "bad overlay",
+        nodeIds: ["aaaa", "ghost-node"],
+        edges: [],
+      }),
+    /ghost-node/,
+  );
+  store.close();
+});
+
+test("addDagOverlay throws naming the first unresolved edge endpoint", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "A", body: "b", confidence: 0.8 }, { key: "aaaa" });
+  store.put(a);
+
+  assert.throws(
+    () =>
+      addDagOverlay(store, {
+        title: "bad overlay",
+        nodeIds: ["aaaa"],
+        edges: [{ source: "aaaa", target: "ghost-target" }],
+      }),
+    /ghost-target/,
+  );
+  store.close();
+});
+
+test("addDagOverlay honors an explicit id and metadata", () => {
+  const store = new SqliteStore(":memory:");
+  const a = buildCell({ kind: "dec", title: "A", body: "b", confidence: 0.8 }, { key: "aaaa" });
+  store.put(a);
+
+  const ov = addDagOverlay(store, {
+    id: "custom-id",
+    title: "t",
+    nodeIds: ["aaaa"],
+    edges: [],
+    metadata: { note: "x" },
+  });
+
+  assert.equal(ov.id, "custom-id");
+  assert.equal(ov.metadata.note, "x");
+  store.close();
 });

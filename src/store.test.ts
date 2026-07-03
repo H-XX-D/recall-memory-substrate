@@ -268,6 +268,48 @@ test("store round-trips a semantic vector and a dag overlay", () => {
   store.close();
 });
 
+test("getDagOverlay resolves an exact id", () => {
+  const store = new SqliteStore(":memory:");
+  store.putDagOverlay({
+    id: "11111111-2222-3333-4444-555555555555", title: "t",
+    nodeIds: ["a"], edges: [], metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  const got = store.getDagOverlay("11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.id, "11111111-2222-3333-4444-555555555555");
+  store.close();
+});
+
+test("getDagOverlay resolves a unique 8-char prefix", () => {
+  const store = new SqliteStore(":memory:");
+  store.putDagOverlay({
+    id: "11111111-2222-3333-4444-555555555555", title: "t",
+    nodeIds: ["a"], edges: [], metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  const got = store.getDagOverlay("11111111");
+  assert.equal(got?.id, "11111111-2222-3333-4444-555555555555");
+  store.close();
+});
+
+test("getDagOverlay returns undefined for an ambiguous prefix", () => {
+  const store = new SqliteStore(":memory:");
+  store.putDagOverlay({
+    id: "aaaaaaaa-2222-3333-4444-555555555555", title: "t1",
+    nodeIds: [], edges: [], metadata: {}, createdAt: "2026-07-03T00:00:00Z",
+  });
+  store.putDagOverlay({
+    id: "aaaaaaab-2222-3333-4444-555555555555", title: "t2",
+    nodeIds: [], edges: [], metadata: {}, createdAt: "2026-07-03T00:00:01Z",
+  });
+  assert.equal(store.getDagOverlay("aaaaaaa"), undefined);
+  store.close();
+});
+
+test("getDagOverlay returns undefined for an unknown id", () => {
+  const store = new SqliteStore(":memory:");
+  assert.equal(store.getDagOverlay("does-not-exist"), undefined);
+  store.close();
+});
+
 test("cellsCreatedSince filters and orders by the generated created_at column", () => {
   const store = new SqliteStore(":memory:");
   store.put(buildCell({ kind: "obs", title: "old", body: "x", confidence: 0.7 }, { key: "o", now: "2026-01-01T00:00:00Z" }));
