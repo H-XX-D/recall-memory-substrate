@@ -437,6 +437,32 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    if (command === "operate" && subcommand === "list") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (!("listOperatorRuns" in store)) throw new Error("operator run history is unavailable on this store");
+        outJson(out, { runs: store.listOperatorRuns(args.limit) });
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "operate" && subcommand === "show") {
+      const id = args.command[2];
+      if (!id) throw new Error("operate show requires an id");
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (!("getOperatorRun" in store)) throw new Error("operator run history is unavailable on this store");
+        const run = store.getOperatorRun(id);
+        if (!run) throw new Error(`Unknown operator run: ${id}`);
+        outJson(out, run);
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
     if (command === "render") {
       const store = openWriteStore(route.dbPath);
       try {
@@ -661,6 +687,8 @@ Commands:
   recall eval list [--limit 10] [--db path] [--project slug]
   recall eval show <id> [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
+  recall operate list [--limit 20] [--db path] [--project slug]
+  recall operate show <id> [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]
   recall export [--db path] [--project slug]

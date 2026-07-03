@@ -485,3 +485,87 @@ test("listEvalRuns orders newest-first with a default limit of 20", () => {
 
   store.close();
 });
+
+test("recordOperatorRun then getOperatorRun round-trips an exact id", () => {
+  const store = new SqliteStore(":memory:");
+  store.recordOperatorRun({
+    id: "11111111-2222-3333-4444-555555555555",
+    status: "ran",
+    summary: "ticked 2; programs 1; derived 1",
+    result: { ticked: 2, programRuns: 1, derivedAccepted: 1 },
+    createdAt: "2026-07-03T00:00:00Z",
+  });
+  const got = store.getOperatorRun("11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.id, "11111111-2222-3333-4444-555555555555");
+  assert.equal(got?.status, "ran");
+  assert.equal(got?.summary, "ticked 2; programs 1; derived 1");
+  assert.deepEqual(got?.result, { ticked: 2, programRuns: 1, derivedAccepted: 1 });
+  store.close();
+});
+
+test("getOperatorRun resolves a unique prefix and returns undefined for an ambiguous or unknown one", () => {
+  const store = new SqliteStore(":memory:");
+  store.recordOperatorRun({
+    id: "aaaaaaaa-2222-3333-4444-555555555555",
+    status: "ran",
+    summary: "ticked 0; programs 0; derived 0",
+    result: { ticked: 0, programRuns: 0, derivedAccepted: 0 },
+    createdAt: "2026-07-03T00:00:00Z",
+  });
+  store.recordOperatorRun({
+    id: "aaaaaaab-2222-3333-4444-555555555555",
+    status: "ran",
+    summary: "ticked 0; programs 0; derived 0",
+    result: { ticked: 0, programRuns: 0, derivedAccepted: 0 },
+    createdAt: "2026-07-03T00:00:01Z",
+  });
+  const got = store.getOperatorRun("aaaaaaaa");
+  assert.equal(got?.id, "aaaaaaaa-2222-3333-4444-555555555555");
+  assert.equal(store.getOperatorRun("aaaaaaa"), undefined); // ambiguous prefix
+  assert.equal(store.getOperatorRun("does-not-exist"), undefined);
+  store.close();
+});
+
+test("listOperatorRuns orders newest-first with a default limit of 20", () => {
+  const store = new SqliteStore(":memory:");
+  for (let i = 0; i < 25; i += 1) {
+    store.recordOperatorRun({
+      id: `run-${i}`,
+      status: "ran",
+      summary: "ticked 0; programs 0; derived 0",
+      result: { ticked: 0, programRuns: 0, derivedAccepted: 0 },
+      createdAt: `2026-07-03T00:00:${String(i).padStart(2, "0")}Z`,
+    });
+  }
+  const all = store.listOperatorRuns();
+  assert.equal(all.length, 20); // default limit
+  assert.equal(all[0]!.id, "run-24"); // newest first
+
+  const limited = store.listOperatorRuns(3);
+  assert.deepEqual(limited.map((run) => run.id), ["run-24", "run-23", "run-22"]);
+
+  store.close();
+});
+
+test("recordOperatorRun prunes the ledger to the keep cap, newest surviving", () => {
+  const store = new SqliteStore(":memory:");
+  for (let i = 0; i < 12; i += 1) {
+    store.recordOperatorRun(
+      {
+        id: `run-${i}`,
+        status: "ran",
+        summary: "ticked 0; programs 0; derived 0",
+        result: { ticked: 0, programRuns: 0, derivedAccepted: 0 },
+        createdAt: `2026-07-03T00:00:${String(i).padStart(2, "0")}Z`,
+      },
+      10,
+    );
+  }
+  const all = store.listOperatorRuns(20);
+  assert.equal(all.length, 10);
+  assert.deepEqual(
+    all.map((run) => run.id),
+    ["run-11", "run-10", "run-9", "run-8", "run-7", "run-6", "run-5", "run-4", "run-3", "run-2"],
+  );
+  store.close();
+});

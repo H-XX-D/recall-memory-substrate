@@ -126,6 +126,49 @@ test("operate once runs the R3 operator cycle from the CLI", () => {
     assert.equal(operatedJson.programs.runs.length, 1);
     assert.equal(operatedJson.programs.derived[0].accepted, true);
     assert.equal(operatedJson.stats.after.activeCells, 3);
+    assert.ok(operatedJson.ledger?.id);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("operate list/show round-trip a ledger row written by operate once, with prefix resolution", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+
+    const operated = capture(["operate", "once", "--db", db], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(operated.code, 0, operated.stderr);
+    const operatedJson = JSON.parse(operated.stdout);
+    const runId = operatedJson.ledger.id as string;
+
+    const list = capture(["operate", "list", "--db", db]);
+    assert.equal(list.code, 0, list.stderr);
+    const listJson = JSON.parse(list.stdout);
+    assert.equal(listJson.runs.length, 1);
+    assert.equal(listJson.runs[0].id, runId);
+    assert.equal(listJson.runs[0].status, "ran");
+
+    const prefix = runId.slice(0, 8);
+    const shown = capture(["operate", "show", prefix, "--db", db]);
+    assert.equal(shown.code, 0, shown.stderr);
+    const shownJson = JSON.parse(shown.stdout);
+    assert.equal(shownJson.id, runId);
+    assert.equal(shownJson.status, "ran");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("operate show with an unknown id exits nonzero with a clear error", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    capture(["operate", "once", "--db", db], { now: "2026-06-26T12:01:00.000Z" });
+
+    const shown = capture(["operate", "show", "does-not-exist", "--db", db]);
+    assert.notEqual(shown.code, 0);
+    assert.match(shown.stderr, /Unknown operator run/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

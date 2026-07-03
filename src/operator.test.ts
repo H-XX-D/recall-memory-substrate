@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { runOperatorCycle, tick } from "./operator.js";
 import { SqliteStore } from "./store.js";
 import { buildCell } from "./build.js";
+import type { Cell, Store } from "./types.js";
 
 test("tick decays currency from updatedAt by the stability tau", () => {
   const store = new SqliteStore(":memory:");
@@ -89,4 +90,97 @@ test("runOperatorCycle ticks and runs standing programs with derived witnesses",
   } finally {
     store.close();
   }
+});
+
+test("runOperatorCycle records a ledger row against SqliteStore and returns its id", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const watched = buildCell(
+      { kind: "obs", title: "Watched", body: "watched", confidence: 0.9, topics: ["gate"] },
+      { key: "aaaaaaaa-2222-2222-2222-222222222222" },
+    );
+    const program = buildCell(
+      {
+        kind: "prg",
+        title: "Gate witness",
+        body: "always emit a witness",
+        confidence: 0.9,
+        topics: ["gate"],
+        props: {
+          program: {
+            schemaVersion: "recall.program.v1",
+            operation: "emit_witness",
+            target: { keys: [watched.key] },
+          },
+        },
+      },
+      { key: "cccccccc-2222-2222-2222-222222222222" },
+    );
+    store.put(watched);
+    store.put(program);
+
+    const result = runOperatorCycle(store, "2026-06-26T12:00:00.000Z", { derive: true });
+    assert.ok(result.ledger?.id);
+
+    const stored = store.getOperatorRun(result.ledger!.id);
+    assert.equal(stored?.status, "ran");
+    assert.equal(stored?.summary, "ticked 2; programs 1; derived 1");
+    assert.deepEqual(stored?.result, {
+      ticked: 2,
+      programRuns: 1,
+      derivedAccepted: 1,
+      stats: result.stats.after,
+    });
+  } finally {
+    store.close();
+  }
+});
+
+// Store-typed double (no SqliteStore-only methods behind it): a plain Store
+// implementation must still cycle, with ledger left undefined.
+function bareStoreWithCells(cells: Cell[]): Store {
+  const byKey = new Map(cells.map((c) => [c.key, c]));
+  return {
+    put: (cell) => { byKey.set(cell.key, cell); },
+    get: (key) => byKey.get(key),
+    getByHandle: (handle) => [...byKey.values()].find((c) => c.handle === handle),
+    all: () => [...byKey.values()],
+    active: () => [...byKey.values()].filter((c) => c.status === "active"),
+    neighbors: () => [],
+    findByContentKey: () => undefined,
+    search: () => [],
+    lexicalBackend: () => "like",
+    stats: () => ({
+      cells: byKey.size,
+      activeCells: [...byKey.values()].filter((c) => c.status === "active").length,
+      edges: 0,
+      indexedCells: byKey.size,
+      lexicalBackend: "like",
+    }),
+    close: () => {},
+    putSemanticVector: () => {},
+    getSemanticVector: () => undefined,
+    listSemanticVectorIds: () => [],
+    putHyperedge: () => {},
+    getHyperedge: () => undefined,
+    listHyperedges: () => [],
+    hyperedgesForCell: () => [],
+    putDagOverlay: () => {},
+    getDagOverlay: () => undefined,
+    listDagOverlays: () => [],
+  };
+}
+
+test("runOperatorCycle against a bare Store double still cycles, with ledger left undefined", () => {
+  const watched = buildCell(
+    { kind: "obs", title: "Watched", body: "watched", confidence: 0.9 },
+    { key: "aaaaaaaa-2222-2222-2222-222222222222" },
+  );
+  const store = bareStoreWithCells([watched]);
+  assert.equal("recordOperatorRun" in store, false);
+
+  const result = runOperatorCycle(store, "2026-06-26T12:00:00.000Z");
+  assert.equal(result.status, "ran");
+  assert.equal(result.ticked, 1);
+  assert.equal(result.ledger, undefined);
 });

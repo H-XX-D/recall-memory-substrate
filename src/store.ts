@@ -20,6 +20,7 @@ import { buildFtsMatchQuery } from "./retrieval.js";
 import { normalizeHyperedgeMembers } from "./hyperedges.js";
 import type { ProgramRun } from "./programs.js";
 import type { StoredEvalRun } from "./evals.js";
+import type { OperatorRun } from "./operator.js";
 
 // Content fingerprint for dedup: kind + normalized title. Stable, not relational,
 // so it is safe to store and index (it is a content key, not derived graph state).
@@ -70,6 +71,13 @@ interface ProgramRunRow {
 interface EvalRunRow {
   id: string;
   name: string;
+  result_json: string;
+  created_at: string;
+}
+interface OperatorRunRow {
+  id: string;
+  status: string;
+  summary: string;
   result_json: string;
   created_at: string;
 }
@@ -310,6 +318,42 @@ export class SqliteStore implements Store {
     return rows.map((r) => this.hydrateEvalRun(r));
   }
 
+  // Durable operator-tick ledger, same convention as recordProgramRun/recordEvalRun:
+  // SqliteStore-only (NOT on the Store interface), feature-detected by callers with
+  // "recordOperatorRun" in store. The Stop hook fires a cycle on every turn (best
+  // effort), so rows are pruned to `keep` newest immediately after insert to keep
+  // the ledger bounded; 1000 covers weeks of turns.
+  recordOperatorRun(run: OperatorRun, keep = 1000): OperatorRun {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO operator_runs (id, status, summary, result_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(run.id, run.status, run.summary, JSON.stringify(run.result), run.createdAt);
+    this.db
+      .prepare(
+        `DELETE FROM operator_runs WHERE id NOT IN (SELECT id FROM operator_runs ORDER BY created_at DESC LIMIT ?)`,
+      )
+      .run(keep);
+    return run;
+  }
+
+  // Prefix-tolerant via resolveStoredId, same convention as getProgramRun/getEvalRun.
+  getOperatorRun(id: string): OperatorRun | undefined {
+    const resolved = this.resolveStoredId("operator_runs", id);
+    if (resolved === null) return undefined;
+    const row = this.db.prepare(`SELECT * FROM operator_runs WHERE id = ?`).get(resolved) as
+      | OperatorRunRow
+      | undefined;
+    return row ? this.hydrateOperatorRun(row) : undefined;
+  }
+
+  listOperatorRuns(limit = 20): OperatorRun[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM operator_runs ORDER BY created_at DESC LIMIT ?`)
+      .all(limit) as unknown as OperatorRunRow[];
+    return rows.map((r) => this.hydrateOperatorRun(r));
+  }
+
   search(query: string, opts: { limit?: number } = {}): SearchHit[] {
     const limit = opts.limit ?? 10;
     const terms = searchTerms(query);
@@ -492,6 +536,16 @@ export class SqliteStore implements Store {
     return {
       id: row.id,
       name: row.name,
+      result: JSON.parse(row.result_json),
+      createdAt: row.created_at,
+    };
+  }
+
+  private hydrateOperatorRun(row: OperatorRunRow): OperatorRun {
+    return {
+      id: row.id,
+      status: row.status as "ran",
+      summary: row.summary,
       result: JSON.parse(row.result_json),
       createdAt: row.created_at,
     };

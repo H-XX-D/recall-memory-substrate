@@ -3,10 +3,12 @@
 // never compounds) and recomputes effective from current neighbor masses. Pinned
 // cells are exempt from currency decay. Computed from a pre-tick snapshot of
 // neighbor effectives, then written, so a tick is order-independent.
+import { randomUUID } from "node:crypto";
 import type { AdmissionResult, Cell, Stability, Store, StoreStats } from "./types.js";
 import { currency, effectiveConfidence } from "./scores.js";
 import { neighborMass } from "./mass.js";
 import { runStandingPrograms, type ProgramRun } from "./programs.js";
+import type { SqliteStore } from "./store.js";
 
 export interface OperatorCycleOptions {
   derive?: boolean;
@@ -26,6 +28,20 @@ export interface OperatorCycleResult {
     before: StoreStats;
     after: StoreStats;
   };
+  ledger?: { id: string };
+}
+
+// The operator run ledger. status is the literal "ran" only, deliberately: MAL
+// has no lease machinery here (unlike program/eval runs elsewhere), because the
+// tick is idempotent by design (decay anchors to cell.updatedAt, not "time since
+// last tick"), so concurrent or repeated cycles are always safe and there is
+// nothing for a "skipped" status to report.
+export interface OperatorRun {
+  id: string;
+  status: "ran";
+  summary: string;
+  result: Record<string, unknown>;
+  createdAt: string;
 }
 
 const TAU_DAYS: Record<Stability, number> = {
@@ -81,7 +97,13 @@ export function runOperatorCycle(
   const ticked = tick(store, now);
   const programsEnabled = opts.programs ?? true;
   const programs = programsEnabled ? runStandingPrograms(store, now, { derive: opts.derive }) : { runs: [], derived: [] };
-  return {
+  const after = store.stats();
+  // A duplicate re-derivation still has accepted true (it short-circuited onto
+  // the existing cell), so derivedAccepted counts non-duplicate accepted results
+  // only: accepted && !duplicateOf. Otherwise the count would double-report
+  // witnesses that were already recorded on an earlier cycle.
+  const derivedAccepted = programs.derived.filter((d) => d.accepted && !d.duplicateOf).length;
+  const result: OperatorCycleResult = {
     status: "ran",
     createdAt: now,
     ticked,
@@ -92,7 +114,18 @@ export function runOperatorCycle(
     },
     stats: {
       before,
-      after: store.stats(),
+      after,
     },
   };
+  if ("recordOperatorRun" in store) {
+    const run = (store as SqliteStore).recordOperatorRun({
+      id: randomUUID(),
+      status: "ran",
+      summary: `ticked ${ticked}; programs ${programs.runs.length}; derived ${derivedAccepted}`,
+      result: { ticked, programRuns: programs.runs.length, derivedAccepted, stats: after },
+      createdAt: now,
+    });
+    result.ledger = { id: run.id };
+  }
+  return result;
 }
