@@ -142,3 +142,29 @@ test("migrate copies nodes, relations, hyperedges, and semantic vectors", () => 
   target.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("migrate copies dag_overlays, mapping legacy from/to edges to source/target", () => {
+  const dir = mkdtempSync(join(tmpdir(), "recall-mig-dag-"));
+  const oldPath = join(dir, "old.sqlite3");
+  const old = new DatabaseSync(oldPath);
+  old.exec(`CREATE TABLE graph_nodes (id TEXT, cell_address TEXT, kind TEXT, title TEXT, body TEXT, summary TEXT, scope_json TEXT, tags_json TEXT, data_json TEXT, provenance_json TEXT, status TEXT, created_at TEXT, updated_at TEXT);
+    CREATE TABLE dag_overlays (id TEXT, title TEXT, node_ids_json TEXT, edges_json TEXT, metadata_json TEXT, created_at TEXT);`);
+  old.prepare(`INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("a", null, "observation", "A", "abody", null, null, null, null, null, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+  old.prepare(`INSERT INTO dag_overlays VALUES (?,?,?,?,?,?)`).run(
+    "ov1", "legacy overlay",
+    JSON.stringify(["a", "b"]),
+    JSON.stringify([{ from: "a", to: "b", label: "supports", weight: 0.9 }]),
+    JSON.stringify({}), "2026-06-01T00:00:00Z",
+  );
+  old.close();
+
+  const target = new SqliteStore(":memory:");
+  const res = migrate(oldPath, target, { apply: true });
+  assert.equal(res.dagOverlays, 1);
+  const overlays = target.listDagOverlays();
+  assert.equal(overlays.length, 1);
+  assert.equal(overlays[0]!.id, "ov1");
+  assert.deepEqual(overlays[0]!.edges[0], { source: "a", target: "b", label: "supports", weight: 0.9 });
+  target.close();
+  rmSync(dir, { recursive: true, force: true });
+});

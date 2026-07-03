@@ -162,6 +162,25 @@ export function migrate(
     }
   }
 
+  type LegacyDagOverlayEdge = { from: string; to: string; label?: string; weight?: number };
+  type DagOverlayRow = { id: string; title: string; node_ids_json: string; edges_json: string; metadata_json: string; created_at: string };
+  const overlays = tableExists(db, "dag_overlays")
+    ? db.prepare(`SELECT * FROM dag_overlays`).all() as unknown as DagOverlayRow[]
+    : [];
+  for (const o of overlays) {
+    res.dagOverlays++;
+    if (apply) {
+      const legacyEdges = JSON.parse(o.edges_json) as LegacyDagOverlayEdge[];
+      target.putDagOverlay({
+        id: o.id, title: o.title,
+        nodeIds: JSON.parse(o.node_ids_json) as string[],
+        edges: legacyEdges.map((e) => ({ source: e.from, target: e.to, label: e.label, weight: e.weight })),
+        metadata: JSON.parse(o.metadata_json) as Record<string, unknown>,
+        createdAt: o.created_at,
+      });
+    }
+  }
+
   db.close();
   return res;
 }

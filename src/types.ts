@@ -76,11 +76,18 @@ export interface SemanticVector {
   indexedAt: string;
 }
 
+export interface DagOverlayEdge {
+  source: string;
+  target: string;
+  label?: string;
+  weight?: number;
+}
+
 export interface DagOverlay {
   id: string;
   title: string;
   nodeIds: string[];
-  edges: { source: string; target: string }[];
+  edges: DagOverlayEdge[];
   metadata: Record<string, unknown>;
   createdAt: string;
 }
