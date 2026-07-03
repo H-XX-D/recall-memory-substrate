@@ -201,7 +201,7 @@ export interface NeighborLink {
   direction: "out" | "in"; // out: this cell is the edge source; in: the target
 }
 
-export type LexicalBackend = "fts5-bm25" | "like" | "federated" | "cosine";
+export type LexicalBackend = "fts5-bm25" | "like" | "federated" | "cosine" | "fused";
 
 export interface SearchHit {
   cell: Cell;
