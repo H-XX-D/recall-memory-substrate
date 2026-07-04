@@ -98,8 +98,9 @@ carries a fingerprint and a source tag.
   content. If a record's fingerprint has changed (its content changed) but
   its source tag matches a prior import, the new version supersedes the
   prior cell instead of creating an unrelated duplicate.
-- Independently, if a record's title and body match an already-active cell
-  by content, the import reports it as a content duplicate and skips,
+- Independently, if a record's kind and title match an already-active cell
+  (titles compare case- and whitespace-insensitively) and its body matches
+  that cell exactly, the import reports it as a content duplicate and skips,
   regardless of fingerprint or source tag.
 
 All adapters clamp bodies to 32 KiB and reject input files over 128 MiB.
@@ -236,8 +237,9 @@ What happens on a rerun depends on what changed at the source:
   several reimports of a record that keeps changing, this produces a
   supersede chain: each new version points back at the version it replaced,
   and only the newest version is active.
-- Same content, different identity: if the new record's title and body match
-  an already-active cell by content alone, it is reported as a content
+- Same content, different identity: if the new record's kind and title match
+  an already-active cell (titles compare case- and whitespace-insensitively)
+  and its body matches that cell exactly, it is reported as a content
   duplicate and skipped, even though its source tag or fingerprint differ.
 
 You can rerun the same import command as often as you like (a cron job, a
@@ -247,8 +249,9 @@ daily sync) and it will only ever add what actually changed.
 
 **Why did a record skip as a content duplicate?**
 
-Its title and body matched an already-active cell exactly, regardless of
-where it came from. This catches the same memory arriving from two
+Its kind and title matched an already-active cell (titles compare with case
+and whitespace folded) and its body matched exactly, regardless of where it
+came from. This catches the same memory arriving from two
 different sources (or two different import runs with different identity
 tags) without creating a second cell for it.
 
@@ -259,3 +262,5 @@ v1 archive, has no semantic vectors. Semantic vectors are not rebuilt
 automatically. Run `recall reindex --project my-project` (or pass
 `--reindex` on `recall import archive --apply`) to rebuild the semantic
 index from the cells now in the store.
+
+Next: `docs/overview.md` for how the whole system fits together.

@@ -4,21 +4,24 @@
 memory cells stored in SQLite, admitted through schema and firewall checks,
 compiled into compact context packets, and organized into per-project stores.
 Every verb accepts `--db <path>` to point at a specific SQLite file, or
-`--project <slug>` to route by project slug. If neither is given, Recall
-resolves a route in this order: an explicit `--db`, then `--project <slug>`,
-then the deepest registered project whose root contains the current
-directory, and otherwise the home store at `~/.recall/db/home.sqlite3`. The
-`RECALL_DB` environment variable overrides all of that and points every verb
-at one file directly.
+`--project <slug>` to route by project slug. Recall resolves a route in this
+order: an explicit `--db`, then `--project <slug>`, then the `RECALL_DB`
+environment variable, then the deepest registered project whose root
+contains the current directory, and otherwise the home store at
+`~/.recall/db/home.sqlite3`. `RECALL_DB` is consulted only when neither flag
+is passed; a flag always wins. The whole `~/.recall` tree (home store,
+project registry, service logs) relocates with the `RECALL_HOME`
+environment variable.
 
 Run `recall` with no arguments (or `recall help`) to print the full command
 list. Run `recall version` to print the CLI name and version as JSON.
 
 ## Projects and routing
 
-**`recall project init`** registers the current directory (or `--root path`)
-as a project in the central registry at `~/.recall/db/registry.sqlite3`. Each
-project gets its own SQLite file under `~/.recall/db/`.
+**`recall project init`** (alias: **`recall init`**) registers the current
+directory (or `--root path`) as a project in the central registry at
+`~/.recall/db/registry.sqlite3`. Each project gets its own SQLite file under
+`~/.recall/db/`.
 
 ```sh
 recall project init --slug my-project --root .
@@ -46,9 +49,16 @@ recall project where --project my-project
 ## Reading
 
 These verbs open a store read-only when possible. When routing resolves to
-the home scope with no explicit `--db` or `--project`, `status`, `storage`,
-`compile`, `search`, and `cell show` read across a federation of every local
-graph (home plus every registered project) rather than just the home file.
+the home scope with no explicit `--db` or `--project`, the read verbs span a
+federation of every local graph (home plus every registered project) rather
+than just the home file: `compile`, `search`, `cell show`, `diff`, `deltas`,
+`health` (without `--derive`), `hyperedge show`, `hyperedge list`,
+`dag show`, `dag list`, `dag analyze` (without `--derive`), and
+`program list`. `status` and `storage` always open the single routed store.
+
+Three read surfaces exist only over MCP and have no CLI verb: semantic
+search (`recall_semantic`), curated pages (`recall_page`), and tag-composed
+subgraph queries (`recall_subgraph`). See `docs/mcp.md`.
 
 **`recall status`** prints the CLI name and version, the resolved route, and
 store statistics (cell counts, active/superseded breakdown, and similar
@@ -58,9 +68,10 @@ summary figures).
 recall status --project my-project
 ```
 
-**`recall storage`** prints lower-level storage statistics for the resolved
-database (page counts, byte sizes, and related figures used to gauge disk
-footprint).
+**`recall storage`** prints storage statistics for the resolved database:
+`databasePath`, `databaseBytes` (including the `-wal` and `-shm` sidecar
+files), per-table row counts, `averageCellBytes`, and `maximumCell` (the
+largest cell's key, handle, title, and byte size).
 
 ```sh
 recall storage --project my-project
@@ -122,10 +133,13 @@ header. A populated summary looks like:
 
 **`recall deltas <cell|topic> [--topic] [--csv]`** prints the numeric value
 series for a cell's supersede lineage, or for every reading tagged with a
-topic when `--topic` is set. JSON by default (rows of timestamp, value,
-delta, key, title); `--csv` emits `timestamp,value,delta,key,title` for
+topic when `--topic` is set. JSON by default (rows carrying `at`, `value`,
+`delta`, `key`, `title`); `--csv` emits `timestamp,value,delta,key,title` for
 spreadsheets and plotting. Cells record a reading through the proposal's
-`value` field; superseding the prior reading extends the series.
+`value` field; superseding the prior reading extends the series. The CLI
+always prints the full series: the generic `--limit` flag has no effect on
+this verb. The MCP counterpart, `recall_deltas`, does accept a `limit`
+(default 1000 newest rows).
 
 **`recall cell show <key-or-handle>`** inspects a single cell: full content,
 footprint (word and byte counts, tag counts, edge counts), incoming and
@@ -168,13 +182,17 @@ A proposal has this shape:
 `hyp`, `prg` (decision, observation, belief, task, objective, risk,
 reference, verification, hypothesis, program). `title` and `body` are
 required strings; `confidence` is a number in `(0, 1]`. Optional fields
-include `owner`, `project`, `tenant`, `topics`, `entities`, `lifecycle`,
+include `owner`, `project`, `tenant`, `summary` (a short one-line summary),
+`topics`, `entities`, `lifecycle`,
 `quality`, `subject`, `sourceRefs`, `uncertainty`, `concern`, `operation`
 (`create`, `update`, `supersede`, `link`, `annex`), `origin` (`human`, `llm`,
 `daemon`, `connector`, `program`, `external`), `verification` (`unverified`,
 `checked`, `tested`, `external`), `sensitivity` (`public`, `private`,
 `secret`), `stability` (`ephemeral`, `volatile`, `stable`), `expiresAt`,
-`reverifyAfter`, `flags`, `props`, `value` (a finite number this cell measures; supersede the prior reading and the lineage forms the delta series readable with `recall deltas`), `programs` (existing prg cell keys or handles that should watch the cell), and `hyperedges` (memberships to join in existing bundles, each `{id, role, weight}`). Membership targets must exist or the write is rejected, the same contract as edge targets.
+`reverifyAfter`, `flags` (an object of booleans `{annexed, locked, pinned,
+requiresReview, allowBackgroundUse}`; `pinned` resists decay), `props` (a
+structured object payload; on a `prg` cell, `props.program` carries the
+standing-program spec, see Programs and evals), `value` (a finite number this cell measures; supersede the prior reading and the lineage forms the delta series readable with `recall deltas`), `programs` (existing prg cell keys or handles that should watch the cell), and `hyperedges` (memberships to join in existing bundles, each `{id, role, weight}`). Membership targets must exist or the write is rejected, the same contract as edge targets.
 
 Edges are directed and signed: `relation` must be one of `supports`,
 `contradicts`, `concerns`, `depends_on`, `supersedes`, `derived_from`, with
@@ -187,9 +205,15 @@ weight must be `0`.
 schema without writing anything. Prints `{ ok, issues }` and exits 0 if
 valid, 1 if not. Pass `-` to read the proposal from stdin.
 
-**`recall admit --json proposal.json`** validates, screens for secrets, and
+**`recall admit --json proposal.json`** (alias: **`recall write-propose`**)
+validates, screens for secrets, and
 if accepted, writes the cell. Prints the admission result (accepted cell, or
-issues/warnings if rejected) and exits 0 if accepted, 1 if rejected.
+issues/warnings if rejected) and exits 0 if accepted, 1 if rejected. Pass
+`-` to read the proposal from stdin. A proposal built from the write
+template must replace every field's instruction text: admission rejects any
+field whose submitted value still equals its template description (the
+fill-or-reject rule the write gate's re-injected template relies on; see
+`docs/integrations.md`).
 
 On an accepted write, the printed result also carries a `guidance` object,
 computed against the store at admit time and never persisted:
@@ -199,6 +223,10 @@ computed against the store at admit time and never persisted:
   suggested relation (`supports`, `supersedes`, or `depends_on`), its
   lexical score, and a reason. The cell itself, cells it already links, and
   `prg` cells are excluded.
+- `matchingPrograms`: up to five existing standing programs whose target
+  already selects the new cell, each `{ key, handle, title, operation }`, so
+  the writer knows what will watch the cell without asking. Naming a program
+  in the proposal's `programs` field makes the attachment durable.
 - `kindHint` (optional): present when an `obs` or `dec` cell's text reads
   like an open action, an unconfirmed claim, or a hazard, naming the kind
   (`tsk`, `bel` or `hyp`, `rsk`) that would put it in the matching compile
@@ -268,8 +296,74 @@ recall dag analyze dag_1 --derive --project my-project
 ## Programs and evals
 
 A program is a standing, deterministic, no-model check stored as a `prg`
-cell (operations include scoring, witness emission, tag projection, drift
-and trend watches, quorum checks, and simple reflex/allocation rules).
+cell. The spec lives at `props.program` on the cell, so a program is written
+with an ordinary `recall admit`:
+
+```json
+{
+  "kind": "prg",
+  "title": "watch program: storage",
+  "body": "Trips when the average effective confidence of storage cells moves.",
+  "confidence": 0.6,
+  "topics": ["recall-programs"],
+  "props": {
+    "program": {
+      "schemaVersion": "recall.program.v1",
+      "operation": "watch",
+      "description": "watch storage confidence",
+      "target": { "topics": ["storage"] },
+      "params": { "delta": 0.2 }
+    }
+  }
+}
+```
+
+`schemaVersion` must be exactly `recall.program.v1`. `operation` is one of
+`score`, `emit_witness`, `tag_projection`, `watch`, `drift`, `quorum`,
+`trend`, `reflex`, `allocate`. `description` is optional.
+
+`target` selects the member cells the operation runs over. Its fields
+compose: `keys` (cell keys or handles), `query` (a lexical search),
+`topics`, `entities`, `kinds`, `hyperedge` (a hyperedge id, optionally
+narrowed to one member `role`), and `limit` (default 50, capping the final
+member set). When no `target` is given, members come from the program cell's
+own outgoing edges; if it has none, the program's own topics select members
+(and a program with no topics selects every active non-program cell). When a
+`target` is given, the program's outgoing edges still add their targets on
+top of the selection.
+
+`params` depend on the operation:
+
+- `watch` and `drift`: `delta` (trip threshold, default 0.15), `measure`
+  (default `effective_confidence`), and `concernTarget` (a cell the derived
+  witness attaches a `concerns` edge to).
+- `trend`: `window` (series length, default 8), `delta` (slope threshold,
+  default 0.1), `streak` (consecutive same-direction steps, default 3), and
+  `measure`.
+- `quorum`: `k` (approvals required, default 2), `minEff` (minimum effective
+  confidence to count as approving, default 0.7), and `distinctActors`
+  (default true: approvals must come from distinct producers).
+- `reflex`: `personality`, a uint32 read as a 32-entry truth table (lut5)
+  over five fixed boolean inputs, in order: effective < 0.5, currency < 0.5,
+  `requiresReview`, `pinned`, `annexed`.
+- `allocate`: `limit` (selection size, default 8). Per-cell factors are read
+  from each member's `props.work` (`impact`, `uncertainty`, `concern`,
+  `dependencyWeight`, `reversibility`, `novelty`, `cost`); a factor missing
+  there falls back to the cell's live scores or a fixed default.
+- `tag_projection`: `family` (the tag family to project, default `topics`).
+- `position` (reserved, any operation): orders programs within an operator
+  tick. Non-negative integers sort from the start (default 0); negative
+  values count from the end (`-1` runs last).
+
+`measure` accepts `member_count`, `effective_confidence`, or a dotted field
+path over the cell (for example `scores.concern`).
+
+Witness behavior varies by operation: `quorum` and `emit_witness` produce a
+witness on every run; `watch`, `drift`, and `trend` only when tripped;
+`reflex` when any member fired; `allocate` when the selected set changed;
+`score` and `tag_projection` never produce one.
+
+The program verbs:
 
 - `recall program run <key-or-handle>`: runs one program cell and records
   the run. Add `--derive` to admit the run's output as a derived cell.
@@ -293,7 +387,11 @@ inspects.
 - `recall eval run [--json suite.json|-]`: runs the default suite, or a
   custom suite JSON (an object with `name` and `cases`); pass `-` to read
   the suite from stdin. Add `--derive` to admit the result as a derived
-  cell.
+  cell. The derivation key buckets by calendar day (UTC), suite name, and
+  project: the first `--derive` run on a given day admits a new `ver`
+  witness, and later runs the same day report `duplicateOf` even when the
+  outcome changed. Custom suites are a CLI-only feature; the MCP
+  `recall_eval_run` tool always runs the default suite.
 - `recall eval list [--limit 10]`: lists recorded eval runs.
 - `recall eval show <id>`: prints one recorded eval run in full.
 
@@ -305,13 +403,17 @@ recall eval run --json suite.json --project my-project
 **`recall health [--derive]`** analyzes overall memory health: belief
 pressure, stale findings, contradictions, dangling edges, provenance health,
 and critical warnings. Add `--derive` to admit the report as a derived
-witness cell.
+witness cell; the derivation key is bucketed by calendar day (UTC) and
+project, so only the first `--derive` on a given day admits a new witness,
+and later runs the same day report `duplicateOf` regardless of whether the
+report changed.
 
-**`recall operate once [--derive]`** runs one operator cycle: ticks live
+**`recall operate once [--derive]`** (bare `recall operate` is the same)
+runs one operator cycle: ticks live
 scores (currency/salience decay) and runs any due standing programs in one
 pass. Add `--derive` to admit derived witnesses from that cycle.
 
-- `recall operate list [--limit 20]`: lists recorded operator cycle runs.
+- `recall operate list [--limit 10]`: lists recorded operator cycle runs.
 - `recall operate show <id>`: prints one recorded operator run in full.
 
 ```sh
@@ -323,6 +425,11 @@ recall operate once --derive --project my-project
 
 Netlists are a compact, human-readable text serialization of the cell graph:
 one line per cell, edge, or schedule directive.
+
+Netlists are a plain-text serialization of a graph: one header line per cell
+in the same notation the compile packet uses, one line per edge, readable in
+any editor and diffable in git. They are an inspection and snapshot format;
+the store itself remains the source of truth.
 
 **`recall render`** serializes every active cell (and its edges) in the
 resolved store to netlist text on stdout.
@@ -348,7 +455,9 @@ recall load --file snapshot.mal --mode verify --project my-project
 
 Import commands follow a dry-run-first discipline: without `--apply`, they
 report what would happen (created, superseded, skipped, with per-item
-reasons) and write nothing. Pass `--apply` to actually write.
+reasons) and write nothing. Pass `--apply` to actually write. Every `--json`
+flag on the import verbs accepts `-` to read the payload from stdin, capped
+at 128 MiB, the same limit as file input.
 
 Import is idempotent: re-importing the same source data a second time skips
 records that are unchanged (matched by a stable per-record fingerprint), and
@@ -382,8 +491,12 @@ auto-memory files discovered under `--root` (defaults to
 
 **`recall import local [--global-db path] [--topics a,b] [--limit N]
 [--no-hyperedges] [--apply]`** imports cells from another local Recall store
-(defaults to the home store) into the resolved store, optionally filtered by
-topic and capped by count. `--no-hyperedges` skips carrying hyperedges over.
+(defaults to the home store) into the resolved store. The selection must be
+scoped: pass `--project`, `--topics`, or both; there is no unscoped
+import-everything mode. Up to 500 cells are selected by default (`--limit N`
+changes the cap), and the summary's `selectionTruncated` flag reports
+whether more matching cells existed than the cap let through.
+`--no-hyperedges` skips carrying hyperedges over.
 
 ```sh
 recall export --project my-project --out archive.json
@@ -417,6 +530,14 @@ recall migrate --from old.sqlite3 --apply
 in the resolved store. `--missing-only` skips cells that already have a
 vector, useful after a bulk import or after migrating a database that
 predates semantic search.
+
+Embeddings come from a pluggable backend. The default is a deterministic
+local hash embedding (`hash:v1`, no network call). Setting
+`RECALL_EMBEDDING_URL` switches to an HTTP backend;
+`RECALL_EMBEDDING_MODEL` and `RECALL_EMBEDDING_API_KEY` set the model name
+and bearer token sent to it. A failed HTTP call falls back to `hash:v1` for
+that cell. The vectors feed semantic search, which is exposed only over MCP
+(`recall_semantic`); `reindex` is the CLI verb that maintains them.
 
 ```sh
 recall reindex --project my-project
@@ -455,8 +576,12 @@ prints an equivalent crontab line instead, which you can add with `crontab
 `launchctl unload` command to run first if the agent is currently loaded
 (non-macOS: prints a reminder to remove the equivalent crontab line).
 
-**`recall service status`** prints the agent's label, file path, and whether
-the plist file is currently installed.
+**`recall service status`** (bare `recall service` is the same) prints the
+agent's label, file path, and whether the plist file is currently installed.
+
+The plist directory (default `~/Library/LaunchAgents`) and the log
+directory (default `~/.recall/logs`) can be relocated with the
+`RECALL_LAUNCH_AGENTS_DIR` and `RECALL_LOG_DIR` environment variables.
 
 ```sh
 recall service install --interval-min 30
@@ -466,7 +591,8 @@ recall service uninstall
 
 ## Assistant integrations
 
-**`recall claude sync [--apply]`** wires Recall into Claude Code: merges MCP
+**`recall claude sync [--apply]`** (bare `recall claude` is the same) wires
+Recall into Claude Code: merges MCP
 server registration and hook settings into Claude's settings file, installs
 the bundled session hook script and the Recall skills tree (`SKILL.md` plus
 the peek and router helper scripts under `~/.claude/skills/recall/`), and
@@ -477,27 +603,39 @@ Recall. Flags:
   importing it.
 - `--write-gate`: enable the Stop-hook write-back gate.
 - `--root path`: auto-memory root to import from, if importing.
-- `--db path`: database path to point the installed MCP server at.
+- `--db path`: override the Recall database the auto-memory import writes
+  into (defaults to the home store). The MCP registration itself never
+  carries a database path; the installed server resolves its own store (see
+  `docs/mcp.md`).
 
 Without `--apply`, it reports what would change and writes nothing; any file
 it does change is backed up first (a `.bak` copy of prior content).
 
 **`recall claude status`** reports whether the settings file has Recall's
-hooks installed and whether built-in auto-memory is disabled.
+hooks installed, whether built-in auto-memory is disabled, and whether the
+`recall` MCP server is registered (`mcpPath`, `mcpInstalled`).
 
-**`recall codex sync [--apply]`** wires Recall into Codex: merges MCP server
+**`recall codex sync [--apply]`** (bare `recall codex` is the same) wires
+Recall into Codex: merges MCP server
 registration into Codex's config and merges a Recall block into `AGENTS.md`.
 Same dry-run-by-default and backup behavior as `claude sync`.
 
 **`recall codex status`** reports whether the MCP server is registered and
 whether the `AGENTS.md` Recall block is present.
 
+Both sync verbs operate on settings files under your home directory and do
+not route by project; a `--project` flag is accepted by the parser but has
+no effect on them.
+
 ```sh
-recall claude sync --apply --project my-project
+recall claude sync --apply
 recall claude status
-recall codex sync --apply --project my-project
+recall codex sync --apply
 recall codex status
 ```
 
 See `docs/integrations.md` for the full detail on what each integration
 installs and how the write-back hooks behave.
+
+Next: `docs/mcp.md` for the MCP tool surface, and `docs/integrations.md`
+for hooks, assistant sync, and scheduled maintenance.

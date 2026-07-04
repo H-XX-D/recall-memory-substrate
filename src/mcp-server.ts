@@ -1,6 +1,6 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Eighteen tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Nineteen tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
 // recall_hyperedge_list, recall_dag_analyze, recall_program_run,

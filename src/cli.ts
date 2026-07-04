@@ -1063,7 +1063,7 @@ Commands:
   recall eval show <id> [--db path] [--project slug]
   recall health [--derive] [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
-  recall operate list [--limit 20] [--db path] [--project slug]
+  recall operate list [--limit 10] [--db path] [--project slug]
   recall operate show <id> [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]

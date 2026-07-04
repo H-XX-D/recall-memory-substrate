@@ -15,7 +15,7 @@ recall claude sync --apply
 This updates two settings files under your home directory and installs the bundled assets:
 
 - `~/.claude/settings.json`: adds `SessionStart`, `UserPromptSubmit`, and `Stop` hook entries and sets `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` to `"1"`.
-- `~/.claude.json`: registers the `recall` MCP server (`type: stdio`, `command: recall-mcp`) so Claude Code can call the `recall_search`, `recall_compile`, `recall_cell`, `recall_write`, and `recall_status` tools.
+- `~/.claude.json`: registers the `recall` MCP server (`type: stdio`, `command: recall-mcp`) so Claude Code can call all nineteen Recall tools (see `docs/mcp.md`).
 - `~/.claude/hooks/recall-session-start.py`: the bundled hook script that serves all the hook events.
 - `~/.claude/skills/recall/`: the Recall skills tree (see below).
 
@@ -66,10 +66,10 @@ Every command the tree documents exists on the current CLI; the session hook's r
 
 `--write-gate` adds a second command to the `UserPromptSubmit` and `Stop` hook entries: `recall-prompt-hook` and `recall-stop-hook`, two small Node binaries bundled with the package. These implement a stricter, fail-closed gate:
 
-- `recall-prompt-hook` stamps the turn's start time to a marker file.
-- `recall-stop-hook` checks whether any durable cell was created in Recall since that marker. If nothing was written, it holds the turn open with a prompt to admit a finding or explicitly decline; if something was written, it releases the turn and runs a background maintenance tick.
+- `recall-prompt-hook` stamps the turn's start time to a marker file (per session under `~/.recall/state/stop/`; the `RECALL_STOP_STATE` environment variable overrides the marker path for both hooks).
+- `recall-stop-hook` checks whether any durable cell was created in Recall since that marker. If nothing was written, it holds the turn open and re-injects the full write template JSON: every field must be replaced with a real value, because admission rejects a field whose submitted value still equals its template description (the fill-or-reject rule). If something was written, it releases the turn and runs a background maintenance tick.
 
-This is fail-closed: if the turn-start marker is missing or the store cannot be opened, the gate holds by default rather than letting the turn through. Because of this, treat it as an opt-in enforcement mechanism, not a default: it will interrupt turns that produce no durable memory write. The Python hooks above always run first and are unaffected by this flag; `--write-gate` only appends the stricter Node hooks alongside them.
+The hold is fail-closed on the marker: a missing turn-start marker holds the turn. A store that fails to open releases the turn instead, since a gate that cannot read the store cannot judge it. Treat the gate as an opt-in enforcement mechanism, not a default: it will interrupt turns that produce no durable memory write. The Python hooks above always run first and are unaffected by this flag; `--write-gate` only appends the stricter Node hooks alongside them.
 
 ### Uninstalling
 
@@ -143,7 +143,7 @@ recall service install [--interval-min 60]
 
 On macOS, this writes a launchd agent plist to `~/Library/LaunchAgents` that runs `recall maintain --all-graphs` on a fixed interval (default 60 minutes). The command only writes the plist; it does not load it. After installing, run the `launchctl load` command the CLI prints to activate the schedule, and `recall service uninstall` followed by the printed `launchctl unload` command to deactivate and remove it. `recall service status` reports whether the plist file is present.
 
-The agent is interval-based (`StartInterval`), not a persistent daemon, and does not run immediately on install: it waits for the first interval to elapse. Logs are written to `~/.recall/logs/`.
+The agent is interval-based (`StartInterval`), not a persistent daemon, and does not run immediately on install: it waits for the first interval to elapse. Logs are written to `~/.recall/logs/` (the `RECALL_LOG_DIR` environment variable relocates them; `RECALL_LAUNCH_AGENTS_DIR` relocates the plist directory).
 
 On non-macOS platforms, the same plist file is still written (harmless, and portable if you copy it to a Mac later), but there is no launchd to load it. Instead, the CLI prints an equivalent crontab line you can add yourself with `crontab -e`.
 
@@ -159,3 +159,5 @@ Two bundled scripts under `python/` give command-line and scripting access to Re
 - **Server not found (`recall-mcp` or `recall` command missing)**: confirm the package's bin directory is on `PATH`. If you installed with `npm install -g`, check `npm bin -g`; if running from a local checkout, the `dist/` build must exist (`npm run build`) before the bin scripts resolve.
 - **No semantic search hits after a restore or migrate**: newly imported or migrated cells have no vector embedding yet. Run `recall reindex` (or `recall reindex --missing-only` to only index cells that lack one) to backfill them.
 - **Hooks not firing**: run `recall claude status` to confirm the hook entries, the auto-memory environment flag, and the MCP registration are all in place. If they are missing or stale, re-run `recall claude sync --apply`.
+
+Next: `docs/import-export.md` for moving memory in and out of a store.
