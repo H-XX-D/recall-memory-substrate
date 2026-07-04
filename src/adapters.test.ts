@@ -300,6 +300,73 @@ test("the batch-local prior lookup caps the deduped prior list at MAX_PRIOR_VERS
   }
 });
 
+test("an item's priorKeys union a pre-batch active cell (via byEntity) with a same-batch admitted cell (via admittedThisBatch)", () => {
+  const now = "2026-06-26T12:00:00.000Z";
+  const buildBatch = () => {
+    const itemX = importedRecordToItem(
+      { ref: "x-1", source: "mem0", title: "Pre-batch fact", body: "Fact X exists before the batch.", sourceTag: "TX" },
+      now,
+    );
+    const itemA = importedRecordToItem(
+      { ref: "a-1", source: "mem0", title: "Fresh batch fact", body: "Fact A is fresh in this batch.", sourceTag: "TA" },
+      now,
+    );
+    const itemB = importedRecordToItem(
+      {
+        ref: "b-1",
+        source: "mem0",
+        title: "Combining fact",
+        body: "Fact B supersedes both the pre-batch cell and the same-batch cell.",
+        sourceTag: "TB",
+        supersedesTags: ["TX", "TA"],
+      },
+      now,
+    );
+    return { itemX, itemA, itemB };
+  };
+
+  const applyStore = new SqliteStore(":memory:");
+  try {
+    const { itemX } = buildBatch();
+    const seed = importItems(applyStore, "mem0", [itemX], { apply: true, now });
+    assert.equal(seed.created, 1);
+    const xKey = seed.items[0]?.cellKey;
+    assert.ok(xKey);
+
+    const { itemA, itemB } = buildBatch();
+    const batch = importItems(applyStore, "mem0", [itemA, itemB], { apply: true, now });
+    assert.equal(batch.items[0]?.action, "create");
+    const aKey = batch.items[0]?.cellKey;
+    assert.ok(aKey);
+
+    assert.equal(batch.items[1]?.action, "supersede");
+    const supersedes = batch.items[1]?.supersedes ?? [];
+    assert.equal(supersedes.length, 2);
+    assert.ok(supersedes.includes(xKey!));
+    assert.ok(supersedes.includes(aKey!));
+
+    assert.equal(applyStore.get(xKey!)?.status, "superseded");
+    assert.equal(applyStore.get(aKey!)?.status, "superseded");
+  } finally {
+    applyStore.close();
+  }
+
+  const dryStore = new SqliteStore(":memory:");
+  try {
+    const { itemX } = buildBatch();
+    importItems(dryStore, "mem0", [itemX], { apply: true, now });
+
+    const { itemA, itemB } = buildBatch();
+    const dryBatch = importItems(dryStore, "mem0", [itemA, itemB], { apply: false, now });
+    assert.equal(dryBatch.items[0]?.action, "create");
+    assert.equal(dryBatch.items[1]?.action, "supersede");
+    assert.equal(dryBatch.created, 1);
+    assert.equal(dryBatch.superseded, 1);
+  } finally {
+    dryStore.close();
+  }
+});
+
 test("importZep reconstructs invalidated predecessor supersession", () => {
   const store = new SqliteStore(":memory:");
   try {
