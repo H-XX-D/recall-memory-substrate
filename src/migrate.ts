@@ -1,7 +1,10 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { buildCell } from "./build.js";
 import type { Cell, Edge, Kind, Relation } from "./types.js";
 import { RELATIONS } from "./types.js";
+import { listProjects, registerProject, registryDbPath } from "./routing.js";
 import { SqliteStore } from "./store.js";
 import { normalizeHyperedgeMembers } from "./hyperedges.js";
 
@@ -86,6 +89,8 @@ export interface MigrateResult {
   hyperedges: number;
   semanticVectors: number;
   dagOverlays: number;
+  projects: number;
+  projectRenames: { from: string; to: string }[];
   applied: boolean;
 }
 
@@ -97,12 +102,13 @@ function tableExists(db: DatabaseSync, name: string): boolean {
 export function migrate(
   oldDbPath: string,
   target: SqliteStore,
-  opts: { apply?: boolean } = {},
+  opts: { apply?: boolean; registryDb?: string } = {},
 ): MigrateResult {
   const apply = opts.apply ?? false;
   const db = new DatabaseSync(oldDbPath, { readOnly: true });
   const res: MigrateResult = {
-    cells: 0, edges: 0, hyperedges: 0, semanticVectors: 0, dagOverlays: 0, applied: apply,
+    cells: 0, edges: 0, hyperedges: 0, semanticVectors: 0, dagOverlays: 0,
+    projects: 0, projectRenames: [], applied: apply,
   };
 
   // Build edge map from relations so they can be attached to each cell before put().
@@ -181,6 +187,66 @@ export function migrate(
     }
   }
 
+  // Legacy home stores also carried the projects registry. Import each row
+  // into the v5 registry with INSERT OR IGNORE semantics: a root, slug, or
+  // db path that is already registered skips the row. Reserved slugs go
+  // through registerProject's existing collision rule; any rename it makes
+  // is reported in projectRenames so it is never silent. The registry is
+  // only touched when the legacy db actually has project rows.
+  type LegacyProjectRow = {
+    slug: string | null; root_path: string | null; db_path: string | null;
+    description: string | null; created_at: string | null;
+  };
+  const projectRows = tableExists(db, "projects")
+    ? db.prepare(`SELECT slug, root_path, db_path, description, created_at FROM projects`).all() as unknown as LegacyProjectRow[]
+    : [];
+  if (projectRows.length > 0) {
+    const registryDb = opts.registryDb ?? registryDbPath();
+    const existing = listProjects(registryDb);
+    const seenSlugs = new Set(existing.map((p) => p.slug));
+    const seenRoots = new Set(existing.map((p) => p.rootPath));
+    const seenDbPaths = new Set(existing.map((p) => resolve(p.dbPath)));
+    for (const row of projectRows) {
+      if (!row.slug || !row.root_path) continue;
+      const root = canonicalRoot(row.root_path);
+      const dbPathKey = row.db_path ? resolve(row.db_path) : null;
+      if (seenRoots.has(root) || seenSlugs.has(row.slug)) continue;
+      if (dbPathKey !== null && seenDbPaths.has(dbPathKey)) continue;
+      res.projects++;
+      if (apply) {
+        const record = registerProject(
+          {
+            slug: row.slug,
+            root: row.root_path,
+            dbPath: row.db_path ?? undefined,
+            description: row.description ?? undefined,
+          },
+          row.created_at || new Date().toISOString(),
+          registryDb,
+        );
+        if (record.slug !== row.slug) res.projectRenames.push({ from: row.slug, to: record.slug });
+        seenSlugs.add(record.slug);
+        seenRoots.add(record.rootPath);
+        seenDbPaths.add(resolve(record.dbPath));
+      } else {
+        seenSlugs.add(row.slug);
+        seenRoots.add(root);
+        if (dbPathKey !== null) seenDbPaths.add(dbPathKey);
+      }
+    }
+  }
+
   db.close();
   return res;
+}
+
+// Match routing's canonicalPath so skip checks compare like with like:
+// resolve first, then realpath when the directory exists on disk.
+function canonicalRoot(path: string): string {
+  const resolved = resolve(path);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
 }

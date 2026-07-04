@@ -641,7 +641,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const dbPath = args.db ?? homeDbPath(env);
       const store = openWriteStore(dbPath);
       try {
-        const result = migrate(args.from, store, { apply: args.apply });
+        const result = migrate(args.from, store, { apply: args.apply, registryDb: registryDbPath(env) });
         outJson(out, result);
         return 0;
       } finally {

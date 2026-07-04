@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runCli } from "./cli.js";
+import { listProjects, registerProject } from "./routing.js";
 import { SqliteStore } from "./store.js";
 import { migrate } from "./migrate.js";
 import { mapKind, mapNodeToCell, mapRelationToEdge, type OldNodeRow } from "./migrate.js";
@@ -56,6 +58,7 @@ test("migrate tolerates legacy DB with only graph_nodes (no hyperedges/semantic_
   assert.equal(res!.edges, 0);
   assert.equal(res!.hyperedges, 0);
   assert.equal(res!.semanticVectors, 0);
+  assert.equal(res!.projects, 0);
   assert.equal(target.all().length, 2);
   target.close();
   rmSync(dir, { recursive: true, force: true });
@@ -168,3 +171,133 @@ test("migrate copies dag_overlays, mapping legacy from/to edges to source/target
   target.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+// Legacy home stores carry a projects registry table (slug, root_path,
+// db_path, created_at, description). The fixture name avoids "home.sqlite3"
+// so routing's lazy legacy-registry copy cannot mask what migrate imports.
+function writeLegacyDbWithProjects(
+  path: string,
+  rows: Array<[slug: string, root: string, dbPath: string, createdAt: string, description: string | null]>,
+): void {
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE graph_nodes (id TEXT, cell_address TEXT, kind TEXT, title TEXT, body TEXT, summary TEXT, scope_json TEXT, tags_json TEXT, data_json TEXT, provenance_json TEXT, status TEXT, created_at TEXT, updated_at TEXT);
+    CREATE TABLE projects (slug TEXT, root_path TEXT, db_path TEXT, created_at TEXT, description TEXT);`);
+  const insert = old.prepare(`INSERT INTO projects VALUES (?,?,?,?,?)`);
+  for (const row of rows) insert.run(...row);
+  old.close();
+}
+
+test("migrate --apply imports the legacy projects registry with visible slug renames", () => {
+  const dir = mkdtempSync(join(tmpdir(), "recall-mig-projects-"));
+  try {
+    const recallHome = join(dir, "recall-home");
+    const oldPath = join(dir, "legacy-graph.sqlite3");
+    const targetPath = join(dir, "target.sqlite3");
+    writeLegacyDbWithProjects(oldPath, [
+      ["defi", join(dir, "roots", "defi"), join(recallHome, "db", "defi.sqlite3"), "2026-06-01T00:00:00Z", "DeFi memory"],
+      ["aide", join(dir, "roots", "aide"), join(recallHome, "db", "aide.sqlite3"), "2026-06-02T00:00:00Z", null],
+      ["home", join(dir, "roots", "home-named"), join(recallHome, "db", "home-named.sqlite3"), "2026-06-03T00:00:00Z", null],
+    ]);
+
+    const env = { RECALL_HOME: recallHome } as NodeJS.ProcessEnv;
+    const first = captureCli(["migrate", "--from", oldPath, "--db", targetPath, "--apply"], env);
+    assert.equal(first.code, 0, first.stderr);
+    const firstJson = JSON.parse(first.stdout) as {
+      projects: number;
+      projectRenames: { from: string; to: string }[];
+      applied: boolean;
+    };
+    assert.equal(firstJson.applied, true);
+    assert.equal(firstJson.projects, 3);
+    assert.equal(firstJson.projectRenames.length, 1);
+    assert.equal(firstJson.projectRenames[0]!.from, "home");
+    assert.match(firstJson.projectRenames[0]!.to, /^project-home-[a-f0-9]{6}$/);
+
+    const registry = join(recallHome, "db", "registry.sqlite3");
+    const listed = listProjects(registry);
+    assert.equal(listed.length, 3);
+    const slugs = listed.map((p) => p.slug).sort();
+    assert.ok(slugs.includes("defi"));
+    assert.ok(slugs.includes("aide"));
+    assert.ok(!slugs.includes("home"));
+    assert.equal(slugs.filter((s) => /^project-home-[a-f0-9]{6}$/.test(s)).length, 1);
+    const defi = listed.find((p) => p.slug === "defi");
+    assert.equal(defi?.dbPath, join(recallHome, "db", "defi.sqlite3"));
+    assert.equal(defi?.description, "DeFi memory");
+    assert.equal(defi?.createdAt, "2026-06-01T00:00:00Z");
+
+    const second = captureCli(["migrate", "--from", oldPath, "--db", targetPath, "--apply"], env);
+    assert.equal(second.code, 0, second.stderr);
+    const secondJson = JSON.parse(second.stdout) as { projects: number; projectRenames: unknown[] };
+    assert.equal(secondJson.projects, 0);
+    assert.equal(secondJson.projectRenames.length, 0);
+    assert.deepEqual(listProjects(registry).map((p) => p.slug).sort(), slugs);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("migrate dry-run counts legacy projects without writing the registry", () => {
+  const dir = mkdtempSync(join(tmpdir(), "recall-mig-projects-dry-"));
+  try {
+    const oldPath = join(dir, "legacy-graph.sqlite3");
+    const registry = join(dir, "db", "registry.sqlite3");
+    writeLegacyDbWithProjects(oldPath, [
+      ["defi", join(dir, "roots", "defi"), join(dir, "db", "defi.sqlite3"), "2026-06-01T00:00:00Z", null],
+      ["aide", join(dir, "roots", "aide"), join(dir, "db", "aide.sqlite3"), "2026-06-02T00:00:00Z", null],
+    ]);
+
+    const target = new SqliteStore(":memory:");
+    const res = migrate(oldPath, target, { apply: false, registryDb: registry });
+    assert.equal(res.applied, false);
+    assert.equal(res.projects, 2);
+    assert.equal(existsSync(registry), false);
+    assert.deepEqual(listProjects(registry), []);
+    target.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a legacy project slug already registered to a different root is skipped, not renamed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "recall-mig-projects-skip-"));
+  try {
+    const oldPath = join(dir, "legacy-graph.sqlite3");
+    const registry = join(dir, "db", "registry.sqlite3");
+    const keeper = registerProject(
+      { slug: "defi", root: join(dir, "elsewhere") },
+      "2026-05-01T00:00:00.000Z",
+      registry,
+    );
+    writeLegacyDbWithProjects(oldPath, [
+      ["defi", join(dir, "roots", "defi"), join(dir, "db", "legacy-defi.sqlite3"), "2026-06-01T00:00:00Z", null],
+    ]);
+
+    const target = new SqliteStore(":memory:");
+    const res = migrate(oldPath, target, { apply: true, registryDb: registry });
+    assert.equal(res.projects, 0);
+    assert.equal(res.projectRenames.length, 0);
+    const listed = listProjects(registry);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]!.slug, "defi");
+    assert.equal(listed[0]!.rootPath, keeper.rootPath);
+    target.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function captureCli(argv: string[], env: NodeJS.ProcessEnv): { code: number; stdout: string; stderr: string } {
+  let stdout = "";
+  let stderr = "";
+  const code = runCli(argv, {
+    env,
+    stdout: (text) => {
+      stdout += text;
+    },
+    stderr: (text) => {
+      stderr += text;
+    },
+  });
+  return { code, stdout, stderr };
+}
