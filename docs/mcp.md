@@ -167,7 +167,10 @@ section per packet field: `objective`, `compiler_state`, `relevant_memory`,
 section lists `- none` when empty; the `active_beliefs`, `conflicts`,
 `dependencies`, `risks`, and `tasks` sections append a parenthetical hint
 naming what populates them (for example
-`- none (populated by contradicts edges)`). When the packet exceeds the word budget,
+`- none (populated by contradicts edges)`). The `expansion_handles` section is
+a categorized index, one line per cell: category (decisions, beliefs, tasks,
+and so on), then the handle, the quoted title, and the full key in brackets,
+so nothing has to be expanded blind. When the packet exceeds the word budget,
 sections are trimmed from the back in a fixed order (reference parameters
 first, standing programs never trimmed) until it fits.
 
