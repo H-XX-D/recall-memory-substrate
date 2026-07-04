@@ -109,8 +109,9 @@ function suggestRelation(cell: Cell, target: Cell): { relation: SuggestedRelatio
 }
 
 function nearIdenticalTitle(a: string, b: string): boolean {
-  const na = a.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
-  const nb = b.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  const na = a.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+  const nb = b.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+  if (na.length === 0 || nb.length === 0) return false;
   return na === nb || na.includes(nb) || nb.includes(na);
 }
 

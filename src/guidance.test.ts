@@ -159,3 +159,25 @@ test("a contradicts edge onto a belief suggests a quorum program targeted at it"
   assert.ok(g.programSuggestions.length <= 2);
   store.close();
 });
+
+test("non-latin titles do not blanket-match as supersedes and still match their own near-duplicates", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "dec", title: "採用預寫式日誌模式", body: "b", confidence: 0.6, topics: ["storage"] }, { store });
+  const unrelated = admit(
+    { kind: "dec", title: "storage layout decision", body: "b", confidence: 0.6, topics: ["storage"] },
+    { store },
+  );
+  const g1 = buildWriteGuidance(store, unrelated.cell!, unrelated);
+  const wrong = g1.candidateEdges.find((c) => c.title === "採用預寫式日誌模式");
+  assert.notEqual(wrong?.relation, "supersedes");
+
+  const revised = admit(
+    { kind: "dec", title: "採用預寫式日誌模式 v2", body: "b", confidence: 0.6, topics: ["storage"] },
+    { store },
+  );
+  const g2 = buildWriteGuidance(store, revised.cell!, revised);
+  const dup = g2.candidateEdges.find((c) => c.title === "採用預寫式日誌模式");
+  assert.ok(dup, "the CJK near-duplicate should surface as a candidate");
+  assert.equal(dup!.relation, "supersedes");
+  store.close();
+});
