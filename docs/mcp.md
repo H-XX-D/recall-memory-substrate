@@ -164,7 +164,10 @@ section per packet field: `objective`, `compiler_state`, `relevant_memory`,
 `active_beliefs`, `conflicts`, `dependencies`, `risks`, `tasks`, `cell_state`,
 `standing_programs`, `translated_references`, `reference_parameters`,
 `stale_or_low_trust`, `suggested_next_actions`, and `expansion_handles`. Each
-section lists `- none` when empty. When the packet exceeds the word budget,
+section lists `- none` when empty; the `active_beliefs`, `conflicts`,
+`dependencies`, `risks`, and `tasks` sections append a parenthetical hint
+naming what populates them (for example
+`- none (populated by contradicts edges)`). When the packet exceeds the word budget,
 sections are trimmed from the back in a fixed order (reference parameters
 first, standing programs never trimmed) until it fits.
 
@@ -261,32 +264,97 @@ validation, secret screening, confidence attenuation, cell construction, and
 graph mass.
 
 Parameters:
-- `kind` (string, required)
+- `kind` (string, required): one of `dec`, `obs`, `bel`, `tsk`, `obj`,
+  `rsk`, `ref`, `ver`, `hyp`, `prg`. Prefer `bel`, `tsk`, `rsk` over flat
+  observations when they fit; `contradicts` and `depends_on` edges feed the
+  compile packet's conflicts and dependencies sections.
 - `title` (string, required)
 - `body` (string, required)
-- `confidence` (number, required; must be in `(0, 1]`)
-- `topics` (array, optional)
+- `confidence` (number, required; must be in `(0, 1]`). Confidence above 0.7
+  is attenuated unless the proposal carries `verification`, `sourceRefs`, or
+  a weighted supports edge.
+- `topics` (array of strings, optional)
+- `entities` (array of strings, optional)
 - `edges` (array, optional): each entry `{ relation, target, weight? }`
+- `sourceRefs` (array of strings, optional)
+- `verification` (string, optional): one of `unverified`, `checked`,
+  `tested`, `external`
+- `suggestPrograms` (boolean, optional, default false): include
+  standing-program suggestions in the response guidance. Setting
+  `RECALL_SUGGEST_PROGRAMS=1` in the server's environment is equivalent.
 
-Additional proposal fields accepted by the underlying write path (not listed
-in the tool schema but read from `arguments` if present): `entities`,
-`sourceRefs`, `verification`.
+Returns: `{ accepted, id, issues, warnings, attenuations }`, plus `guidance`
+on accepted writes. `id` is the new or existing cell's key (an identical
+active cell with the same kind, title, and body is deduplicated rather than
+duplicated, and `accepted` is still `true` with a warning noting the dedup).
+`issues` is populated only when `accepted` is `false`.
 
-Returns: `{ accepted, id, issues, warnings, attenuations }`. `id` is the new
-or existing cell's key (an identical active cell with the same kind, title,
-and body is deduplicated rather than duplicated, and `accepted` is still
-`true` with a warning noting the dedup). `issues` is populated only when
-`accepted` is `false`.
+`guidance` is computed against the store at admit time and never persisted:
+
+- `candidateEdges`: up to three similar active cells the new cell does not
+  already link, each with the target's key, handle, title, and kind, a
+  suggested `relation` (`supports`, `supersedes`, or `depends_on`), its
+  lexical score, and a reason.
+- `kindHint` (optional): present when an `obs` or `dec` cell's text reads
+  like an open action, an unconfirmed claim, or a hazard, naming the kind
+  (`tsk`, `bel` or `hyp`, `rsk`) that fits better.
+- `evidenceHint` (optional): present exactly when confidence was attenuated.
+- `programSuggestions`: empty unless `suggestPrograms` is true. Each entry
+  is `{ operation, reason, proposal }` where `operation` is `watch`,
+  `quorum`, or `allocate` and `proposal` is a ready-to-admit `prg` write
+  proposal (a topic shared by 5 or more active cells suggests a watch, 4 or
+  more open tasks on one topic suggest an allocate, a `contradicts` edge
+  onto a belief or hypothesis suggests a quorum; at most 2 suggestions,
+  skipping anything an active program already covers). Suggestions never
+  write anything themselves.
 
 Example call:
 
 ```json
 {
   "kind": "obs",
-  "title": "Release check passed",
-  "body": "The local package passed tests and npm pack dry-run.",
-  "confidence": 0.92,
-  "topics": ["release"]
+  "title": "WAL mode kept readers unblocked during bulk import",
+  "body": "Measured on the event store.",
+  "confidence": 0.9,
+  "topics": ["storage"]
+}
+```
+
+Real response against a store already holding a related decision and belief
+(the stated 0.9 confidence was attenuated because the proposal carried no
+verification, so the response also shows the evidence hint):
+
+```json
+{
+  "accepted": true,
+  "id": "72283dc7-81e8-4a4c-a2dd-f97815301d90",
+  "issues": [],
+  "warnings": ["unsupported high confidence was attenuated"],
+  "attenuations": ["confidence 0.90 -> 0.70"],
+  "guidance": {
+    "candidateEdges": [
+      {
+        "target": "63902c26-e531-485b-a3c4-20638ced3534",
+        "handle": "dec_6390",
+        "title": "Use SQLite WAL mode for the event store",
+        "kind": "dec",
+        "relation": "supports",
+        "reason": "related active cell; a supports edge records why they belong together",
+        "score": 0.0000037300670853467745
+      },
+      {
+        "target": "7c4e7afc-074f-486b-b973-8eb3ff45ca93",
+        "handle": "bel_7c4e",
+        "title": "WAL checkpoints stall under heavy write load",
+        "kind": "bel",
+        "relation": "supports",
+        "reason": "evidence for this claim raises its effective confidence (use contradicts instead if it disputes it)",
+        "score": 0.00000140857297883885
+      }
+    ],
+    "evidenceHint": "confidence was capped at 0.7; supply verification (checked, tested, external), sourceRefs, or a weighted supports edge to keep higher confidence",
+    "programSuggestions": []
+  }
 }
 ```
 

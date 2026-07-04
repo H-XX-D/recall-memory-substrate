@@ -7,7 +7,7 @@ No services, no cloud, no external database. One file per graph, on your machine
 ## What it does
 
 - **Typed memory with provenance.** Ten cell kinds (decisions, observations, beliefs, tasks, risks, hypotheses, and more), each carrying confidence, origin, verification level, and policy. Relations are first-class signed edges: support raises a belief's effective confidence, contradiction lowers it, supersession preserves history.
-- **A single write gate.** Schema validation, credential screening, deduplication, dangling-reference rejection, and confidence attenuation on every write. Derived writes use deterministic keys, so nothing is ever recorded twice.
+- **A single write gate.** Schema validation, credential screening, deduplication, dangling-reference rejection, and confidence attenuation on every write, with guidance on every accepted write: candidate edges to similar cells, kind and evidence hints, and opt-in standing-program suggestions. Derived writes use deterministic keys, so nothing is ever recorded twice.
 - **Hybrid retrieval.** FTS5 BM25 fused with graph degree, effective confidence, and recency decay; semantic search over auto-maintained embeddings; a compile step that turns a task description into a sectioned context packet under a word budget.
 - **Deterministic standing programs.** Watch, trend, drift, quorum, allocation, and reflex programs run over the graph without a model in the loop, emitting witness cells only when something actually changed.
 - **Self-maintenance.** A built-in eval suite audits store invariants, a health engine tracks belief pressure and staleness, and one idempotent `maintain` pass keeps every graph current, on demand or on a schedule.

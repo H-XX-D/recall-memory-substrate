@@ -38,6 +38,10 @@ Every write enters through one gate. A write proposal is a small JSON object (ki
 
 Derived writes (program witnesses, health reports, analysis results) use deterministic keys, so re-deriving the same result is a no-op that returns the existing cell instead of stacking duplicates.
 
+## Write guidance
+
+An accepted write comes back with guidance, computed against the store at admit time and never stored: candidate edges to similar active cells the new cell does not already link (each with a suggested relation and a reason), a kind hint when an observation or decision reads like an open task, an unconfirmed claim, or a risk, and an evidence hint exactly when confidence was attenuated. With program suggestions enabled (off by default; a CLI flag, an MCP parameter, or `RECALL_SUGGEST_PROGRAMS=1` turns them on), guidance also flags what deserves ongoing monitoring: a watch program for a recurring topic, an allocate program over a pool of open tasks, a quorum program for a contested belief. Each suggestion is a ready-to-admit `prg` proposal; nothing is ever created automatically, and admitting a suggestion is always a separate, explicit write.
+
 ## Retrieval
 
 Reads run through three engines that can be combined:

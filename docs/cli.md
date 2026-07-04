@@ -153,9 +153,46 @@ valid, 1 if not. Pass `-` to read the proposal from stdin.
 if accepted, writes the cell. Prints the admission result (accepted cell, or
 issues/warnings if rejected) and exits 0 if accepted, 1 if rejected.
 
+On an accepted write, the printed result also carries a `guidance` object,
+computed against the store at admit time and never persisted:
+
+- `candidateEdges`: up to three similar active cells the new cell does not
+  already link, each with the target's key, handle, title, and kind, a
+  suggested relation (`supports`, `supersedes`, or `depends_on`), its
+  lexical score, and a reason. The cell itself, cells it already links, and
+  `prg` cells are excluded.
+- `kindHint` (optional): present when an `obs` or `dec` cell's text reads
+  like an open action, an unconfirmed claim, or a hazard, naming the kind
+  (`tsk`, `bel` or `hyp`, `rsk`) that would put it in the matching compile
+  section.
+- `evidenceHint` (optional): present exactly when confidence was attenuated,
+  stating what keeps higher confidence (verification, sourceRefs, or a
+  weighted supports edge).
+- `programSuggestions`: empty unless suggestions are enabled (below). Each
+  entry is `{ operation, reason, proposal }` where `operation` is `watch`,
+  `quorum`, or `allocate` and `proposal` is a ready-to-admit `prg` write
+  proposal. Suggestions never write anything themselves: admitting the
+  proposal is always a separate, explicit call.
+
+Flags:
+
+- `--suggest-programs`: include standing-program suggestions in guidance. A
+  topic shared by 5 or more active cells suggests a watch program, a pool of
+  4 or more open tasks on one topic suggests an allocate program, and a
+  `contradicts` edge onto a belief or hypothesis suggests a quorum program
+  targeted at it. Topics and targets already covered by an active program
+  are skipped, and at most 2 suggestions are returned. Setting
+  `RECALL_SUGGEST_PROGRAMS=1` in the environment is equivalent to passing
+  the flag.
+- `--no-guidance`: omit the guidance block entirely.
+
+Rejected writes carry no guidance.
+
 ```sh
 recall validate --json proposal.json
 recall admit --json proposal.json --project my-project
+recall admit --json proposal.json --suggest-programs --project my-project
+recall admit --json proposal.json --no-guidance --project my-project
 ```
 
 ## Graph structures

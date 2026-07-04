@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 - 2026-07-04
+
+Write guidance: the write path now teaches at the moment of writing. An accepted admit returns advice computed against the store, and empty compile sections say what fills them.
+
+- Adds a guidance engine in `src/guidance.ts`: `buildWriteGuidance` computes candidate edges (up to three similar active cells the new cell does not already link, each with a suggested relation of supports, supersedes, or depends_on and a reason), a kind hint when an obs or dec cell's text reads like an open action, an unconfirmed claim, or a hazard, and an evidence hint exactly when confidence was attenuated. Guidance is returned to the writer and never persisted; it reads the store only through the Store interface, so it works on any store implementation.
+- Adds opt-in standing-program suggestions, default off everywhere: when enabled, guidance proposes at most two programs, a watch when 5 or more active cells share a topic, an allocate when 4 or more open tasks share a topic, and a quorum when a contradicts edge lands on a belief or hypothesis. Each suggestion carries a ready-to-admit prg proposal whose spec passes program validation unchanged; topics and targets already covered by an active program are skipped, and nothing is ever created automatically.
+- CLI: `recall admit` now prints a `guidance` object on accepted writes. `--suggest-programs` enables program suggestions, `--no-guidance` omits the block, and `RECALL_SUGGEST_PROGRAMS=1` in the environment is equivalent to the flag. Rejected writes carry no guidance.
+- MCP: `recall_write` now declares `entities`, `sourceRefs`, and `verification` in its input schema, fixing a 0.10.0 defect where the write path read those fields but the schema never declared them, so schema-driven clients could not offer them. The schema also gains `suggestPrograms`, the tool description now steers kind choice (prefer bel, tsk, rsk over flat observations when they fit) and states the attenuation rule, and accepted responses include the same `guidance` object as the CLI.
+- Compile: the `active_beliefs`, `conflicts`, `dependencies`, `risks`, and `tasks` sections now render a parenthetical hint when empty, for example `- none (populated by bel cells)`, so a sparse packet names what would fill each section. All other sections keep the bare `- none`.
+
 ## 0.10.0 - 2026-07-04
 
 Phase 5 of the subsystem port: services and surfaces. This release closes the second open decision from the port plan and lands the maintenance, storage, and sync surfaces that decision points at.
