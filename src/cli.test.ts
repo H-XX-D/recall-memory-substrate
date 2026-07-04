@@ -227,6 +227,32 @@ test("import mem0 --json - with an oversized stdin payload fails too-large with 
   }
 });
 
+test("import mem0 --json - stdin cap counts bytes, not string length", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    // A 3-byte UTF-8 character (the euro sign, one UTF-16 code unit) repeated
+    // 45,000,000 times gives a string whose .length (45,000,000) stays under
+    // MAX_IMPORT_BYTES (134,217,728) while its UTF-8 byte length (135,000,000
+    // plus JSON wrapping) exceeds it. A length-only regression would let this
+    // payload through; the byte-counting cap must still reject it.
+    const bigContent = "€".repeat(45_000_000);
+    const stdinInput = JSON.stringify({ memories: [{ id: "m1", memory: bigContent }] });
+    assert.ok(stdinInput.length < MAX_IMPORT_BYTES);
+    assert.ok(Buffer.byteLength(stdinInput, "utf8") > MAX_IMPORT_BYTES);
+
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "cli.ts"), "import", "mem0", "--json", "-", "--db", db],
+      { input: stdinInput, encoding: "utf8", maxBuffer: 1024 * 1024 * 1024 },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /too large/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("import mem0 where every record is rejected exits 1 with the summary on stdout", () => {
   const tmp = tempDir();
   try {
@@ -249,6 +275,36 @@ test("import mem0 where every record is rejected exits 1 with the summary on std
     const summary = JSON.parse(applied.stdout);
     assert.equal(summary.created, 0);
     assert.equal(summary.superseded, 0);
+    assert.ok(summary.items.some((item: { reason?: string }) => item.reason?.startsWith("rejected")));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("import mem0 with a mixed batch (one clean, one rejected) exits 0 and prints the summary", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const mem0Path = join(tmp, "mem0.json");
+    // One record admits cleanly; the other carries a GitHub-token-shaped
+    // string that trips screenSecrets and is always rejected. With at least
+    // one record landed, the run should still exit 0.
+    writeFileSync(
+      mem0Path,
+      JSON.stringify({
+        memories: [
+          { id: "m1", memory: "CLI imported memory." },
+          { id: "m2", memory: "leaked token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        ],
+      }),
+    );
+
+    const applied = capture(["import", "mem0", "--json", mem0Path, "--apply", "--db", db], {
+      now: "2026-06-26T12:00:00.000Z",
+    });
+    assert.equal(applied.code, 0, applied.stderr);
+    const summary = JSON.parse(applied.stdout);
+    assert.equal(summary.created, 1);
     assert.ok(summary.items.some((item: { reason?: string }) => item.reason?.startsWith("rejected")));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
