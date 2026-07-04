@@ -334,22 +334,31 @@ function dependsOnAcyclic(name: string, active: Cell[]): RecallEvalCaseResult {
   };
 }
 
-// For the first active cell, an 8-char key prefix must resolve back to it
-// through the same resolver recall_cell uses (resolveCell from cell-context).
-// An ambiguous prefix is a pass (reported in details.ambiguous), since
-// ambiguity is a property of the key space, not a broken resolver. An empty
-// store trivially passes: there is nothing to resolve.
+// Prefix resolution is only promised for hex prefixes (resolveCell's prefix
+// branch scans keys whose queried prefix is >= 4 hex chars), so the eligible
+// targets here are cells whose key opens with 8 hex chars (uuid keys do).
+// Deterministic derived keys (drv_<kind>_<hex24>) are legal cell keys, the
+// documented derivation scheme, and simply carry no hex-prefix contract:
+// they are skipped as targets, never counted as violations.
+const HEX_PREFIXABLE_KEY = /^[0-9a-f]{8}/i;
+
+// For the first active cell with a hex-prefixable key, an 8-char key prefix
+// must resolve back to it through the same resolver recall_cell uses
+// (resolveCell from cell-context). An ambiguous prefix is a pass (reported
+// in details.ambiguous), since ambiguity is a property of the key space, not
+// a broken resolver. A store with no eligible target (empty, or holding only
+// derived keys) trivially passes: there is nothing to resolve by prefix.
 function prefixResolution(name: string, store: Store, active: Cell[]): RecallEvalCaseResult {
-  if (active.length === 0) {
+  const target = active.find((cell) => HEX_PREFIXABLE_KEY.test(cell.key));
+  if (!target) {
     return {
       name,
       kind: "invariant",
       passed: true,
       score: 1,
-      details: { checked: 0, trivial: true },
+      details: { checked: 0, trivial: true, skipped: active.length },
     };
   }
-  const target = active[0]!;
   const prefix = target.key.slice(0, 8);
   try {
     const resolved = resolveCell(store, prefix);
@@ -405,15 +414,18 @@ export function runAndRecordEval(
   return result;
 }
 
-// id and createdAt are excluded so two runs with identical name/passed/score/
-// cases collide on the same derivation key: an unchanged eval outcome is the
-// same derivation, not a new one each time it happens to be run again.
-export function evalResultDerivationKey(result: RecallEvalResult): string {
+// Bucketed by calendar day (UTC, from the result's createdAt ISO slice),
+// suite name, and project, mirroring memoryHealthDerivationKey. The result
+// content (passed/score/cases) is deliberately excluded: every case reads
+// the store, and the store changes under the suite as maintenance admits
+// its own witness cells, so hashing outcomes made the documented duplicateOf
+// branch unreachable and stacked a new witness on every pass. One eval
+// witness per day per suite per project is the cadence contract.
+export function evalResultDerivationKey(result: RecallEvalResult, project?: string | null): string {
   return derivationHash("eval_run", {
-    name: result.name,
-    passed: result.passed,
-    score: result.score,
-    cases: result.cases,
+    bucket: result.createdAt.slice(0, 10),
+    project: project ?? null,
+    suite: result.name,
   });
 }
 
@@ -442,10 +454,11 @@ export function runEvalAndDerive(
   store: Store,
   suite: RecallEvalSuite = defaultEvalSuite(),
   now: Date = new Date(),
+  opts: { project?: string; tenant?: string } = {},
 ): { result: RecallEvalResult; derived: AdmissionResult } {
   const result = runAndRecordEval(store, suite, now);
-  const key = evalResultDerivationKey(result);
-  const proposal = evalResultToProposal(result);
+  const key = evalResultDerivationKey(result, opts.project ?? null);
+  const proposal = evalResultToProposal(result, opts);
   const derived = deriveAdmit(store, proposal, key, now.toISOString());
   return { result, derived };
 }

@@ -78,6 +78,43 @@ test("maintainStore's health leg reports duplicateOf on a second same-day pass",
   }
 });
 
+test("three maintain passes on a fresh store stay green and do not stack eval witnesses", () => {
+  // Shakedown defect (d): pass 1 admits a drv_eval_run_ witness as the
+  // store's first row; pass 2's prefix-resolution invariant used to fail on
+  // that derived key shape, and because the failed result hashed to a fresh
+  // derivation key, every later pass stacked another failed witness. The
+  // maintenance loop must converge on a store containing only its own
+  // byproducts: every pass green, exactly one eval witness per day bucket.
+  const store = new SqliteStore(":memory:");
+  try {
+    const times = [NOW, new Date(NOW.getTime() + 60_000), new Date(NOW.getTime() + 120_000)];
+    const results = times.map((t) => maintainStore(store, "home", t));
+
+    for (const [i, result] of results.entries()) {
+      assert.ok("passed" in result.eval, `pass ${i + 1} eval leg errored: ${JSON.stringify(result.eval)}`);
+      if ("passed" in result.eval) {
+        assert.equal(
+          result.eval.passed,
+          true,
+          `pass ${i + 1} eval failed with score ${result.eval.score}`,
+        );
+      }
+    }
+
+    // Passes 2 and 3 collide on the day bucket instead of admitting again.
+    for (const result of results.slice(1)) {
+      if ("passed" in result.eval) {
+        assert.equal(typeof result.eval.duplicateOf, "string");
+      }
+    }
+
+    const witnesses = store.active().filter((c) => c.title.startsWith("Eval "));
+    assert.equal(witnesses.length, 1, `eval witnesses stacked: ${witnesses.map((c) => c.title).join(", ")}`);
+  } finally {
+    store.close();
+  }
+});
+
 test("maintainStore reindexes only missing vectors on a subsequent pass", () => {
   const store = new SqliteStore(":memory:");
   try {
