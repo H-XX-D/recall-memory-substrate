@@ -88,6 +88,10 @@ def _open_db(db: str) -> sqlite3.Connection:
 def resolve_cell_key(conn: sqlite3.Connection, target: str) -> str | None:
     """Resolve a full key, a handle, or a key prefix to a full cell key.
 
+    Store keys carry no graph qualifier, but federated surfaces (the diff
+    summary, the mini-index) hand back ids like home:1c7fdd22; a target with
+    colons retries on its last segment so those ids resolve here too.
+
     Returns None when nothing matches; raises ValueError on an ambiguous prefix.
     """
     row = conn.execute("SELECT key FROM cells WHERE key = ?", (target,)).fetchone()
@@ -104,6 +108,10 @@ def resolve_cell_key(conn: sqlite3.Connection, target: str) -> str | None:
         return rows[0]["key"]
     if len(rows) > 1:
         raise ValueError(f"Prefix {target!r} matches {len(rows)} cells; need more chars")
+    if ":" in target:
+        bare = target.rsplit(":", 1)[-1].strip()
+        if bare:
+            return resolve_cell_key(conn, bare)
     return None
 
 

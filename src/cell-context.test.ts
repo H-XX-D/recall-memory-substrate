@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { buildCell } from "./build.js";
+import { FederatedReadStore } from "./federated-store.js";
 import { SqliteStore } from "./store.js";
 
 test("inspectCell expands a cell by key with footprint and incident edges", () => {
@@ -60,6 +61,50 @@ test("resolveCell resolves by full key, id prefix, handle, and graph-qualified a
   assert.equal(resolveCell(store, "home:abcd1234ef99")?.key, "abcd1234ef99"); // graph-qualified
   assert.equal(resolveCell(store, "no-such-ref"), undefined); // unknown
   store.close();
+});
+
+// Union keys are graph-prefixed (home:<uuid>), so a bare or graph-qualified
+// hex prefix must match the core after the graph, not the raw key string.
+// Without this, every short id the diff summary or mini-index hands back is
+// unresolvable at home scope.
+test("resolveCell resolves hex prefixes across a federated union", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.put(buildCell({ kind: "dec", title: "home cell", body: "b", confidence: 0.7 }, { key: "abcd1234ef99" }));
+  proj.put(buildCell({ kind: "dec", title: "proj cell", body: "b", confidence: 0.7 }, { key: "beef5678aa00" }));
+  const union = new FederatedReadStore([
+    { graph: "home", store: home },
+    { graph: "work", store: proj },
+  ]);
+  try {
+    assert.equal(resolveCell(union, "abcd1234")?.key, "home:abcd1234ef99"); // bare prefix
+    assert.equal(resolveCell(union, "home:abcd1234")?.key, "home:abcd1234ef99"); // graph-qualified prefix
+    assert.equal(resolveCell(union, "work:beef5678")?.key, "work:beef5678aa00");
+    assert.equal(resolveCell(union, "work:abcd1234"), undefined); // wrong graph does not match
+  } finally {
+    union.close();
+    home.close();
+    proj.close();
+  }
+});
+
+test("resolveCell throws on an ambiguous prefix across graphs but a graph qualifier disambiguates", () => {
+  const home = new SqliteStore(":memory:");
+  const proj = new SqliteStore(":memory:");
+  home.put(buildCell({ kind: "dec", title: "a", body: "b", confidence: 0.7 }, { key: "dead0001aaaa" }));
+  proj.put(buildCell({ kind: "dec", title: "c", body: "d", confidence: 0.7 }, { key: "dead0001bbbb" }));
+  const union = new FederatedReadStore([
+    { graph: "home", store: home },
+    { graph: "work", store: proj },
+  ]);
+  try {
+    assert.throws(() => resolveCell(union, "dead0001"), /ambiguous/i);
+    assert.equal(resolveCell(union, "home:dead0001")?.key, "home:dead0001aaaa");
+  } finally {
+    union.close();
+    home.close();
+    proj.close();
+  }
 });
 
 test("resolveCell throws on an ambiguous id prefix", () => {

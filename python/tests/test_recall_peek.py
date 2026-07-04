@@ -191,6 +191,16 @@ class RecallPeekV5Tests(unittest.TestCase):
         self.assertIn(self.cell_a["key"], proc.stdout)
         self.assertIn("supports=1", proc.stdout)
 
+    def test_graph_qualified_prefix_resolves(self) -> None:
+        # The home-scope diff summary and mini-index hand back graph-qualified
+        # ids like home:1c7fdd22; store keys carry no graph prefix, so peek
+        # must strip the qualifier before prefix resolution.
+        target = "home:" + self.cell_a["key"][:8]
+        proc = run_peek([target, "--db", self.db, "--format", "json"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["key"], self.cell_a["key"])
+
     def test_unknown_prefix_exits_2(self) -> None:
         proc = run_peek(["ffffffff", "--db", self.db, "--format", "json"])
         self.assertEqual(proc.returncode, 2)

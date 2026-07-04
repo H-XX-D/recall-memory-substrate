@@ -172,8 +172,18 @@ function cellRow(cell: Cell): string {
   return `- \`${id8(cell.key)}\` [${cell.kind}] ${truncate(cell.title, 100)}`;
 }
 
+// Short display id. Bare uuid keys shorten to their 8-hex prefix (the legacy
+// contract). A federated union key is graph-prefixed (home:<uuid>), so a raw
+// slice would print a dead 3-hex id like `home:1c7`; keep the graph and
+// shorten the core instead, so cell show / recall_peek can resolve the id.
+// Keys without a hex core (derived keys like drv_eval_run_<hex24>) render
+// whole: any slice of them resolves to nothing.
 function id8(key: string): string {
-  return key.slice(0, 8);
+  const sep = key.lastIndexOf(":");
+  const graph = sep >= 0 ? key.slice(0, sep + 1) : "";
+  const core = sep >= 0 ? key.slice(sep + 1) : key;
+  if (!/^[0-9a-f]{8}/i.test(core)) return key;
+  return graph + core.slice(0, 8);
 }
 
 function truncate(text: string, max: number): string {

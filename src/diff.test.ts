@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { admit } from "./admission.js";
 import { addHyperedge } from "./hyperedges.js";
 import { diffStore, parseSince, renderDiffSummary } from "./diff.js";
+import { FederatedReadStore } from "./federated-store.js";
 import { SqliteStore } from "./store.js";
 import { runCli } from "./cli.js";
 
@@ -158,6 +159,68 @@ test("renderDiffSummary emits the pinned markdown format", () => {
     assert.match(scoped, /^# Recall diff in project `px` since 2026-07-03T00:00:00\.000Z$/m);
   } finally {
     seeded.store.close();
+  }
+});
+
+// Short ids in the summary must survive federation: a union key is
+// graph-prefixed (home:<uuid>), so slicing the first 8 characters yields a
+// dead 3-hex id like `home:1c7`. The short id must keep the graph and an
+// 8-hex core so `recall cell show <id>` and recall_peek can resolve it.
+test("renderDiffSummary keeps federated ids resolvable: graph plus 8-hex core, derived keys whole", () => {
+  const seeded = seededStore();
+  const drvKey = `drv_eval_run_${"a".repeat(24)}`;
+  const drvSource = admit(
+    { kind: "obs", title: "Derived witness row", body: "b", confidence: 0.8 },
+    { store: seeded.store, now: AFTER },
+  ).cell!;
+  seeded.store.put({ ...seeded.store.get(drvSource.key)!, key: drvKey });
+  const union = new FederatedReadStore([{ graph: "home", store: seeded.store }]);
+  try {
+    const md = renderDiffSummary(diffStore(union, { since: SINCE }), "");
+    assert.match(md, new RegExp(`^- \`home:${seeded.newBelKey.slice(0, 8)}\` \\[bel\\] New belief C$`, "m"));
+    assert.match(
+      md,
+      new RegExp(
+        `^- \`home:${seeded.oldDecKey.slice(0, 8)}\` → \`home:${seeded.replacementKey.slice(0, 8)}\` \\(dec\\) — Replacement decision$`,
+        "m",
+      ),
+    );
+    // A derived key has no hex core to shorten; it renders whole.
+    assert.match(md, new RegExp(`^- \`home:${drvKey}\` \\[obs\\] Derived witness row$`, "m"));
+
+    const bare = renderDiffSummary(diffStore(seeded.store, { since: SINCE }), "");
+    assert.match(bare, new RegExp(`^- \`${drvKey}\` \\[obs\\] Derived witness row$`, "m"));
+  } finally {
+    union.close();
+    seeded.store.close();
+  }
+});
+
+// End-to-end pin for the SessionStart remediation loop: the id the home-scope
+// summary prints must resolve through `recall cell show`.
+test("home-scope diff summary prints ids that cell show resolves", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "recall-diff-home-"));
+  try {
+    const env = { RECALL_HOME: join(tmp, "rhome") } as NodeJS.ProcessEnv;
+    const proposalPath = join(tmp, "cell.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({ kind: "dec", title: "Switch to postgres for storage", body: "b", confidence: 0.8 }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath], { env, cwd: tmp, now: "2026-07-04T11:30:00.000Z" });
+    assert.equal(admitted.code, 0);
+    const key = JSON.parse(admitted.stdout).cell.key as string;
+
+    const summary = capture(["diff", "--since", "2h", "--summary"], { env, cwd: tmp, now: "2026-07-04T12:00:00.000Z" });
+    assert.equal(summary.code, 0);
+    const shortId = new RegExp(`\`(home:[0-9a-f]{8})\` \\[dec\\]`).exec(summary.stdout)?.[1];
+    assert.ok(shortId, `no graph-qualified 8-hex id in summary:\n${summary.stdout}`);
+
+    const shown = capture(["cell", "show", shortId!], { env, cwd: tmp });
+    assert.equal(shown.code, 0, shown.stderr);
+    assert.equal(JSON.parse(shown.stdout).cell.key, `home:${key}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
 });
 
