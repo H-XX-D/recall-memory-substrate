@@ -374,3 +374,29 @@ test("default selection limit and MAX_HYPEREDGES constants are exported with the
   assert.equal(DEFAULT_SELECT_LIMIT, 500);
   assert.equal(MAX_HYPEREDGES, 5000);
 });
+
+test("rehydration fetches past the store's default hyperedgesForCell limit of 50", () => {
+  const source = new SqliteStore(":memory:");
+  const local = new SqliteStore(":memory:");
+  try {
+    const cell = seedCell(source, "obs", "Popular member", "Referenced by many edges.", { project: "demo" });
+    const edgeCount = 51;
+    for (let i = 0; i < edgeCount; i++) {
+      source.putHyperedge({
+        id: `edge-many-${i}`,
+        kind: "cluster",
+        title: `edge ${i}`,
+        members: [{ key: cell.key, role: "member", ordinal: 0 }],
+        metadata: {},
+        createdAt: "2026-06-26T12:00:00.000Z",
+      });
+    }
+
+    const summary = importGlobalToLocal(source, local, { project: "demo", apply: true });
+    assert.equal(summary.hyperedgesReattached, edgeCount);
+    assert.equal(local.listHyperedges(edgeCount + 1).length, edgeCount);
+  } finally {
+    source.close();
+    local.close();
+  }
+});

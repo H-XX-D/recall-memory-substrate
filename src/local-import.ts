@@ -148,7 +148,7 @@ function rehydrateHyperedges(
   const uniqueEdges: Hyperedge[] = [];
   for (const cell of cells) {
     if (uniqueEdges.length >= MAX_HYPEREDGES) break;
-    const edges = source.hyperedgesForCell(cell.key);
+    const edges = source.hyperedgesForCell(cell.key, MAX_HYPEREDGES);
     for (const edge of edges) {
       if (uniqueEdges.length >= MAX_HYPEREDGES) break;
       if (seenEdgeIds.has(edge.id)) continue;
