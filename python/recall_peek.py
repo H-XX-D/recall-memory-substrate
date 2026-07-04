@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Compact preview over `recall-mal cell show`.
+Compact preview over `recall cell show`.
 
 The helper shells out to the v5 CLI and only trims/render its JSON output. It
 does not read SQLite directly, so routing and storage behavior stay in TypeScript.
@@ -31,7 +31,7 @@ def fetch_cell_context(
         cmd += ["--project", route_project]
     result = subprocess.run(cmd, text=True, capture_output=True, check=False)
     if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip() or "recall-mal cell show failed"
+        message = result.stderr.strip() or result.stdout.strip() or "recall cell show failed"
         raise RuntimeError(message)
     return json.loads(result.stdout)
 
@@ -130,7 +130,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=["human", "json"], default="human")
     p.add_argument("--db")
     p.add_argument("--route-project")
-    p.add_argument("--cli", help="recall-mal command/path override; also supported by RECALL_CLI.")
+    p.add_argument("--cli", help="recall command/path override; also supported by RECALL_CLI.")
     return p
 
 

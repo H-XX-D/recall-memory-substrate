@@ -964,7 +964,7 @@ function positiveInt(value: string, flag: string): number {
 }
 
 function helpText(): string {
-  return `Recall MAL CLI
+  return `Recall CLI
 
 Commands:
   recall project init [--slug name] [--description text] [--root path] [--db path]

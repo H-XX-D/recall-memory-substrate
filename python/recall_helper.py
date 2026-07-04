@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build small Recall v5 write proposals and optionally pass them to recall-mal.
+Build small Recall write proposals and optionally pass them to the recall CLI.
 
 This helper is deliberately thin: TypeScript remains the source of truth for
 schema validation, admission, routing, storage, and secret screening.
@@ -57,7 +57,7 @@ def build_proposal(
     """Return a v5 WriteProposal-shaped dict.
 
     The function performs light client-side checks for operator ergonomics. The
-    authoritative checks still happen in `recall-mal validate` or `admit`.
+    authoritative checks still happen in `recall validate` or `admit`.
     """
 
     if kind not in KINDS:
@@ -132,7 +132,7 @@ def resolve_cli(cli: str | None = None) -> list[str]:
     local = Path(__file__).resolve().parents[1] / "dist" / "cli.js"
     if local.exists():
         return _command_for(str(local))
-    return ["recall-mal"]
+    return ["recall"]
 
 
 def _command_for(value: str) -> list[str]:
@@ -235,11 +235,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--tenant", help="Proposal tenant scope.")
     p.add_argument("--stability", choices=sorted(STABILITIES))
     p.add_argument("--out", help="Write proposal JSON to this path.")
-    p.add_argument("--validate", action="store_true", help="Run recall-mal validate and print its JSON.")
-    p.add_argument("--admit", action="store_true", help="Run recall-mal admit and print its JSON.")
+    p.add_argument("--validate", action="store_true", help="Run recall validate and print its JSON.")
+    p.add_argument("--admit", action="store_true", help="Run recall admit and print its JSON.")
     p.add_argument("--db", help="Route validate/admit to a concrete DB.")
     p.add_argument("--route-project", help="Route validate/admit through a registered project slug.")
-    p.add_argument("--cli", help="recall-mal command/path override; also supported by RECALL_CLI.")
+    p.add_argument("--cli", help="recall command/path override; also supported by RECALL_CLI.")
     return p
 
 

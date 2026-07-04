@@ -57,7 +57,7 @@ Phase 3 of the subsystem port: graph operations. Hyperedges, DAG analysis, deter
 
 ## 0.7.0 - 2026-07-03
 
-Phase 2 of the subsystem port: retrieval and compile richness. Semantic search, hybrid fusion re-ranking, and curated views land on the MAL base.
+Phase 2 of the subsystem port: retrieval and compile richness. Semantic search, hybrid fusion re-ranking, and curated views land on the core store.
 
 - Adds `src/semantic.ts`: a hash-fallback embedding core (`hashEmbedding`, `cosine`, `embedTextRecord` with an optional HTTP-via-curl backend), `indexCell`, and `semanticSearch` (cosine scan with a dims-mismatch guard). Every admitted cell is auto-indexed into `semantic_index`, and a new `recall_semantic` MCP tool exposes cosine search.
 - Adds `src/retrieval.ts`: a shared Unicode FTS phrase builder (reused by the store), and `fuseCandidates`, a hybrid re-ranker combining normalized BM25, a graph-degree prior, the stored effective-confidence, and recency decay, with per-kind lexical factors (`TASK_CONTEXT_KIND_FACTOR`).
@@ -69,17 +69,17 @@ Phase 2 of the subsystem port: retrieval and compile richness. Semantic search, 
 
 ## 0.6.1 - 2026-07-03
 
-Keeps SQL query ability while the cell stays an evolvable JSON blob: MAL becomes the operational language over indexed SQLite columns rather than trading queryability away.
+Keeps SQL query ability while the cell stays an evolvable JSON blob: the cell schema stays queryable through indexed SQLite columns rather than trading queryability away.
 
 - Adds VIRTUAL generated columns on `cells` derived from the JSON blob via `json_extract` (`created_at`, `updated_at`, `project`, `effective`), each indexed. No write duplication and no drift: the blob stays the single source of truth; the columns are computed and indexed by SQLite. Idempotent on open (uses `PRAGMA table_xinfo` so reopen does not re-add columns), so migrated and existing DBs gain them automatically.
 - Adds `SqliteStore.cellsCreatedSince(iso, limit)`, a temporal read pushed down to the indexed `created_at` column instead of scanning and parsing every row. Verified against a 1,184-cell store: the query plan uses `idx_cells_created_at`.
 
 ## 0.6.0 - 2026-07-03
 
-Phase 1 of the subsystem port: store foundation + data migration. The MAL store gains the rich overlay tables and can read pre-0.6 memory.
+Phase 1 of the subsystem port: store foundation + data migration. The store gains the rich overlay tables and can read pre-0.6 memory.
 
 - Adds `hyperedges`, `semantic_index`, and `dag_overlays` tables to the store, with `putHyperedge`/`listHyperedges`, `putSemanticVector`/`getSemanticVector`, and `putDagOverlay`/`listDagOverlays` accessors.
-- Adds `recall migrate --from <old.sqlite3> [--apply] [--db <path>]`, a dry-run-first, one-shot migration from the legacy `graph_nodes` schema into the MAL `cells`/`edges` store. Cell-level lossless: any legacy field with no first-class MAL home is preserved under `cell.props._migrated`. The old database is opened read-only and never mutated.
+- Adds `recall migrate --from <old.sqlite3> [--apply] [--db <path>]`, a dry-run-first, one-shot migration from the legacy `graph_nodes` schema into the `cells`/`edges` store. Cell-level lossless: any legacy field with no first-class home in the new schema is preserved under `cell.props._migrated`. The old database is opened read-only and never mutated.
 - Verified against a 1,184-cell store: cells, 1,159 relations, 5 hyperedges, and 1,184 semantic vectors migrate, and `recall compile` then sees the memory.
 
 ## 0.5.2 - 2026-07-03
@@ -107,9 +107,9 @@ Abstraction Layer core and ships two previously deferred surfaces.
 
 ## 0.1.0 - 2026-06-26
 
-Initial public preview of Recall MAL.
+Initial public preview of Recall.
 
-- Adds typed v5 memory cells, handles, MAL row rendering, and strict proposal validation.
+- Adds typed v5 memory cells, handles, netlist row rendering, and strict proposal validation.
 - Adds admission checks for schema, public-data safety, secret screening, calibration, and encrypted secret aliases.
 - Adds SQLite storage, FTS5/BM25 search with fallback, evidence mass walks, and store stats.
 - Adds context packet compile/formatting, lazy cell inspection, and expansion handles.
