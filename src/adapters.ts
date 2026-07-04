@@ -137,6 +137,7 @@ export function importItems(
   const now = opts.now ?? new Date().toISOString();
   const result: ImportResultItem[] = [];
   const admittedThisBatch = new Map<string, string>();
+  const fingerprintsThisBatch = new Set<string>();
   let created = 0;
   let superseded = 0;
   let skipped = 0;
@@ -149,7 +150,7 @@ export function importItems(
 
   for (const item of items) {
     const key = importCellKey(item.fingerprint);
-    if (store.get(key) || byFingerprint.get(item.fingerprint)) {
+    if (fingerprintsThisBatch.has(item.fingerprint) || store.get(key) || byFingerprint.get(item.fingerprint)) {
       skipped += 1;
       result.push({ ref: item.ref, action: "skip", reason: "unchanged" });
       continue;
@@ -180,6 +181,7 @@ export function importItems(
         result.push({ ref: item.ref, action: "create" });
       }
       admittedThisBatch.set(item.sourceTag, `dry-run:${item.ref}`);
+      fingerprintsThisBatch.add(item.fingerprint);
       continue;
     }
 
@@ -194,6 +196,7 @@ export function importItems(
       continue;
     }
     admittedThisBatch.set(item.sourceTag, admission.cell.key);
+    fingerprintsThisBatch.add(item.fingerprint);
     if (priorKeys.length > 0) {
       superseded += 1;
       result.push({ ref: item.ref, action: "supersede", cellKey: admission.cell.key, supersedes: priorKeys });

@@ -120,34 +120,48 @@ test("a pre-0.9 cell with a random key but a matching props.import.fingerprint s
   }
 });
 
-test("a same-batch duplicate (identical record listed twice in one export) is caught by probe 1 in apply mode", () => {
-  const store = new SqliteStore(":memory:");
-  try {
-    const record = {
-      ref: "dup-1",
-      source: "mem0",
-      title: "Duplicate fact",
-      body: "Same record appears twice in one export.",
-    };
-    const now = "2026-06-26T12:00:00.000Z";
-    // Two ImportItems built from the identical record share the same
-    // fingerprint. byFingerprint is a pre-loop snapshot of the store, so it
-    // cannot see the first item's cell; only probe 1 (store.get(importCellKey))
-    // can catch the second item, since apply mode writes the first item's
-    // cell before the second item is processed.
-    const item1 = importedRecordToItem(record, now);
-    const item2 = importedRecordToItem(record, now);
-    assert.equal(item1.fingerprint, item2.fingerprint);
+test("a same-batch duplicate (identical record listed twice in one export) skips identically in apply and dry-run", () => {
+  const record = {
+    ref: "dup-1",
+    source: "mem0",
+    title: "Duplicate fact",
+    body: "Same record appears twice in one export.",
+  };
+  const now = "2026-06-26T12:00:00.000Z";
+  // Two ImportItems built from the identical record share the same
+  // fingerprint. byFingerprint is a pre-loop snapshot of the store, so it
+  // cannot see the first item's cell, and dry-run never writes a cell for
+  // probe 1 (store.get(importCellKey)) to find either. The in-batch
+  // fingerprintsThisBatch set is what catches the second item in both
+  // modes, so apply and dry-run must report the same create+skip counts.
+  const item1 = importedRecordToItem(record, now);
+  const item2 = importedRecordToItem(record, now);
+  assert.equal(item1.fingerprint, item2.fingerprint);
 
-    const applied = importItems(store, "mem0", [item1, item2], { apply: true, now });
+  const dryStore = new SqliteStore(":memory:");
+  try {
+    const dry = importItems(dryStore, "mem0", [item1, item2], { apply: false, now });
+    assert.equal(dry.created, 1);
+    assert.equal(dry.skipped, 1);
+    assert.equal(dry.items[0]?.action, "create");
+    assert.equal(dry.items[1]?.action, "skip");
+    assert.equal(dry.items[1]?.reason, "unchanged");
+    assert.equal(dryStore.stats().cells, 0);
+  } finally {
+    dryStore.close();
+  }
+
+  const applyStore = new SqliteStore(":memory:");
+  try {
+    const applied = importItems(applyStore, "mem0", [item1, item2], { apply: true, now });
     assert.equal(applied.created, 1);
     assert.equal(applied.skipped, 1);
     assert.equal(applied.items[0]?.action, "create");
     assert.equal(applied.items[1]?.action, "skip");
     assert.equal(applied.items[1]?.reason, "unchanged");
-    assert.equal(store.stats().cells, 1);
+    assert.equal(applyStore.stats().cells, 1);
   } finally {
-    store.close();
+    applyStore.close();
   }
 });
 
