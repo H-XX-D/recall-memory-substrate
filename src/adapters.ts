@@ -123,6 +123,10 @@ export function clampBody(text: string): string {
   return text.length > MAX_BODY_CHARS ? text.slice(0, MAX_BODY_CHARS) : text;
 }
 
+export function importCellKey(fingerprint: string): string {
+  return `drv_import_${createHash("sha256").update(fingerprint).digest("hex").slice(0, 24)}`;
+}
+
 export function importItems(
   store: Store,
   source: string,
@@ -137,8 +141,15 @@ export function importItems(
   let superseded = 0;
   let skipped = 0;
 
+  const byFingerprint = new Map<string, Cell>();
+  for (const cell of store.all()) {
+    const fingerprint = stringValue(toRecord(cell.props.import).fingerprint);
+    if (fingerprint) byFingerprint.set(fingerprint, cell);
+  }
+
   for (const item of items) {
-    if (findByFingerprint(store, item.fingerprint)) {
+    const key = importCellKey(item.fingerprint);
+    if (store.get(key) || byFingerprint.get(item.fingerprint)) {
       skipped += 1;
       result.push({ ref: item.ref, action: "skip", reason: "unchanged" });
       continue;
@@ -172,7 +183,7 @@ export function importItems(
       continue;
     }
 
-    const admission = admit(proposal, { store, now });
+    const admission = admit(proposal, { store, now, key });
     if (!admission.accepted || !admission.cell) {
       skipped += 1;
       result.push({
@@ -537,10 +548,6 @@ export function parseCellArchive(input: unknown): RecallCellArchive {
       : { cells: 0, activeCells: 0, edges: 0, indexedCells: 0, lexicalBackend: "like" },
     cells: input.cells.map(assertCell),
   };
-}
-
-function findByFingerprint(store: Store, fingerprint: string): Cell | undefined {
-  return store.all().find((cell) => toRecord(cell.props.import).fingerprint === fingerprint);
 }
 
 function findBySourceTags(store: Store, tags: string[]): Cell[] {

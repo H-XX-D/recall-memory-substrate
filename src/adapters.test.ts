@@ -7,6 +7,9 @@ import {
   exportCellArchive,
   importAutoMemory,
   importCellArchive,
+  importCellKey,
+  importedRecordToItem,
+  importItems,
   importMem0,
   importZep,
   parseAutoMemoryFile,
@@ -44,6 +47,12 @@ test("importMem0 is dry-run by default, apply writes, and changed records supers
     const unchanged = importMem0(store, first, { apply: true, now: "2026-06-26T12:01:00.000Z" });
     assert.equal(unchanged.skipped, 1);
     assert.equal(unchanged.items[0]?.reason, "unchanged");
+    assert.equal(store.stats().cells, 1);
+
+    const unchangedAgain = importMem0(store, first, { apply: true, now: "2026-06-26T12:01:30.000Z" });
+    assert.equal(unchangedAgain.skipped, 1);
+    assert.equal(unchangedAgain.items[0]?.reason, "unchanged");
+    assert.equal(store.stats().cells, 1);
 
     const changed = { memories: [{ id: "m1", memory: "Updated imported fact.", categories: ["release"] }] };
     const superseded = importMem0(store, changed, { apply: true, now: "2026-06-26T12:02:00.000Z" });
@@ -52,6 +61,104 @@ test("importMem0 is dry-run by default, apply writes, and changed records supers
     assert.equal(store.stats().cells, 2);
     assert.equal(store.active().length, 1);
     assert.equal(store.all().filter((cell) => cell.status === "superseded").length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("importing the same mem0 export twice creates once then skips all as unchanged with store counts unchanged", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const first = { memories: [{ id: "m1", memory: "Twice-imported fact.", categories: ["release"] }] };
+    const applied = importMem0(store, first, { apply: true, now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(applied.created, 1);
+    assert.equal(store.stats().cells, 1);
+
+    const repeatOne = importMem0(store, first, { apply: true, now: "2026-06-26T12:05:00.000Z" });
+    assert.equal(repeatOne.skipped, 1);
+    assert.equal(repeatOne.created, 0);
+    assert.equal(repeatOne.items[0]?.reason, "unchanged");
+    assert.equal(store.stats().cells, 1);
+
+    const repeatTwo = importMem0(store, first, { apply: true, now: "2026-06-26T12:06:00.000Z" });
+    assert.equal(repeatTwo.skipped, 1);
+    assert.equal(repeatTwo.created, 0);
+    assert.equal(repeatTwo.items[0]?.reason, "unchanged");
+    assert.equal(store.stats().cells, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("a pre-0.9 cell with a random key but a matching props.import.fingerprint still dedups", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const item = importedRecordToItem(
+      {
+        ref: "legacy-1",
+        source: "mem0",
+        title: "Legacy fact",
+        body: "Legacy fact body.",
+      },
+      "2026-06-26T12:00:00.000Z",
+    );
+    const proposal = item.proposal([]);
+    const legacyCell = buildCell(
+      { ...proposal, confidence: proposal.confidence },
+      { key: "random-legacy-key", now: "2026-06-26T12:00:00.000Z" },
+    );
+    store.put(legacyCell);
+    assert.equal(store.stats().cells, 1);
+
+    const summary = importItems(store, "mem0", [item], { apply: true, now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(summary.skipped, 1);
+    assert.equal(summary.created, 0);
+    assert.equal(summary.items[0]?.reason, "unchanged");
+    assert.equal(store.stats().cells, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("the created cell's key equals importCellKey(fingerprint)", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const item = importedRecordToItem(
+      {
+        ref: "m-key-1",
+        source: "mem0",
+        title: "Keyed fact",
+        body: "Body for keyed fact.",
+      },
+      "2026-06-26T12:00:00.000Z",
+    );
+    const summary = importItems(store, "mem0", [item], { apply: true, now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(summary.created, 1);
+    assert.equal(summary.items[0]?.cellKey, importCellKey(item.fingerprint));
+    assert.ok(store.get(importCellKey(item.fingerprint)));
+  } finally {
+    store.close();
+  }
+});
+
+test("re-importing an old export after its record's cell was superseded skips it as unchanged and does not demote the newer cell", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const v1 = { memories: [{ id: "m1", memory: "Version one of the fact.", categories: ["release"] }] };
+    importMem0(store, v1, { apply: true, now: "2026-06-26T12:00:00.000Z" });
+
+    const v2 = { memories: [{ id: "m1", memory: "Version two of the fact.", categories: ["release"] }] };
+    const v2Result = importMem0(store, v2, { apply: true, now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(v2Result.superseded, 1);
+    const v2Key = v2Result.items[0]?.cellKey;
+    assert.ok(v2Key);
+    assert.equal(store.get(v2Key!)?.status, "active");
+
+    const reimportV1 = importMem0(store, v1, { apply: true, now: "2026-06-26T12:02:00.000Z" });
+    assert.equal(reimportV1.skipped, 1);
+    assert.equal(reimportV1.items[0]?.reason, "unchanged");
+    assert.equal(store.get(v2Key!)?.status, "active");
+    assert.equal(store.active().length, 1);
   } finally {
     store.close();
   }
