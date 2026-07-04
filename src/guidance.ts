@@ -38,7 +38,7 @@ export interface WriteGuidance {
 }
 
 export interface GuidanceOptions {
-  suggestPrograms?: boolean;
+  suggestPrograms?: boolean; // default true; pass false to opt out
   maxCandidates?: number;
 }
 
@@ -79,7 +79,7 @@ export function buildWriteGuidance(
     evidenceHint: admission.warnings.includes(ATTENUATION_WARNING)
       ? "confidence was capped at 0.7; supply verification (checked, tested, external), sourceRefs, or a weighted supports edge to keep higher confidence"
       : undefined,
-    programSuggestions: opts.suggestPrograms ? programSuggestions(store, cell) : [],
+    programSuggestions: opts.suggestPrograms !== false ? programSuggestions(store, cell) : [],
   };
 }
 

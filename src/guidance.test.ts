@@ -88,13 +88,13 @@ function admitMany(store: SqliteStore, kind: "obs" | "tsk", n: number, topic: st
   }
 }
 
-test("recurring topic suggests a watch program only when opted in", () => {
+test("recurring topic suggests a watch program by default; explicit false opts out", () => {
   const store = new SqliteStore(":memory:");
   admitMany(store, "obs", 5, "latency");
   const r = admit({ kind: "obs", title: "latency spike observed again", body: "b", confidence: 0.6, topics: ["latency"] }, { store });
-  const off = buildWriteGuidance(store, r.cell!, r);
+  const off = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: false });
   assert.deepEqual(off.programSuggestions, []);
-  const on = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  const on = buildWriteGuidance(store, r.cell!, r);
   const watch = on.programSuggestions.find((s) => s.operation === "watch");
   assert.ok(watch, "expected a watch suggestion");
   assert.equal(watch!.proposal.kind, "prg");

@@ -242,14 +242,15 @@ computed against the store at admit time and never persisted:
 
 Flags:
 
-- `--suggest-programs`: include standing-program suggestions in guidance. A
-  topic shared by 5 or more active cells suggests a watch program, a pool of
-  4 or more open tasks on one topic suggests an allocate program, and a
-  `contradicts` edge onto a belief or hypothesis suggests a quorum program
-  targeted at it. Topics and targets already covered by an active program
-  are skipped, and at most 2 suggestions are returned. Setting
-  `RECALL_SUGGEST_PROGRAMS=1` in the environment is equivalent to passing
-  the flag.
+- `--no-suggest-programs`: omit standing-program suggestions, which run by
+  default. A topic shared by 5 or more active cells suggests a watch
+  program, a pool of 4 or more open tasks on one topic suggests an allocate
+  program, and a `contradicts` edge onto a belief or hypothesis suggests a
+  quorum program targeted at it. Topics and targets already covered by an
+  active program are skipped, and at most 2 suggestions are returned.
+  Setting `RECALL_SUGGEST_PROGRAMS=0` in the environment disables
+  suggestions the same way; `--suggest-programs` is accepted for
+  compatibility and forces them on.
 - `--no-guidance`: omit the guidance block entirely.
 
 Rejected writes carry no guidance.
@@ -257,7 +258,7 @@ Rejected writes carry no guidance.
 ```sh
 recall validate --json proposal.json
 recall admit --json proposal.json --project my-project
-recall admit --json proposal.json --suggest-programs --project my-project
+recall admit --json proposal.json --no-suggest-programs --project my-project
 recall admit --json proposal.json --no-guidance --project my-project
 ```
 

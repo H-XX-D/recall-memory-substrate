@@ -71,7 +71,7 @@ Guidance is computed against the store at admit time and never persisted. Now th
     "relation": "supports", "reason": "related active cell; a supports edge records why they belong together" } ]
 ```
 
-Guidance can also carry a `kindHint` when an observation or decision reads like an open task, an unconfirmed claim, or a risk. With program suggestions enabled (`--suggest-programs` on the CLI, `suggestPrograms` on the MCP tool, or `RECALL_SUGGEST_PROGRAMS=1`), it flags what deserves ongoing monitoring; each suggestion is a ready-to-admit `prg` proposal, and nothing is ever created automatically. `--no-guidance` omits the block entirely. The suggestion thresholds and the full guidance contract are in [cli.md](cli.md) (Writing) and [mcp.md](mcp.md) (recall_write).
+Guidance can also carry a `kindHint` when an observation or decision reads like an open task, an unconfirmed claim, or a risk. Program suggestions run by default and flag what deserves ongoing monitoring; each suggestion is a ready-to-admit `prg` proposal, and nothing is ever created automatically (`--no-suggest-programs`, `suggestPrograms: false` on the MCP tool, or `RECALL_SUGGEST_PROGRAMS=0` opts out). `--no-guidance` omits the block entirely. The suggestion thresholds and the full guidance contract are in [cli.md](cli.md) (Writing) and [mcp.md](mcp.md) (recall_write).
 
 ## Reading it back
 

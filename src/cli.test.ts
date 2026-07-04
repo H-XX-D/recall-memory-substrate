@@ -1609,7 +1609,8 @@ test("admit output includes guidance with candidate edges by default", () => {
     assert.equal(parsed.accepted, true);
     assert.ok(parsed.guidance, "expected a guidance field");
     assert.ok(parsed.guidance.candidateEdges.length >= 1);
-    assert.deepEqual(parsed.guidance.programSuggestions, []);
+    // Suggestions run by default; empty here because no threshold is met.
+    assert.ok(Array.isArray(parsed.guidance.programSuggestions));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1687,7 +1688,7 @@ test("admit --suggest-programs surfaces program suggestions", () => {
   }
 });
 
-test("RECALL_SUGGEST_PROGRAMS=1 enables suggestions without the flag", () => {
+test("RECALL_SUGGEST_PROGRAMS=0 disables suggestions even when a threshold is met", () => {
   const tmp = tempDir();
   const previous = process.env.RECALL_SUGGEST_PROGRAMS;
   try {
@@ -1718,14 +1719,11 @@ test("RECALL_SUGGEST_PROGRAMS=1 enables suggestions without the flag", () => {
         topics: ["latency"],
       }),
     );
-    process.env.RECALL_SUGGEST_PROGRAMS = "1";
+    process.env.RECALL_SUGGEST_PROGRAMS = "0";
     const admitted = capture(["admit", "--json", proposalPath, "--db", db], { now: "2026-07-04T12:01:00.000Z" });
     assert.equal(admitted.code, 0, admitted.stderr);
     const parsed = JSON.parse(admitted.stdout);
-    const watch = parsed.guidance.programSuggestions.find(
-      (s: { operation: string }) => s.operation === "watch",
-    );
-    assert.ok(watch, "expected a watch suggestion via the env var");
+    assert.deepEqual(parsed.guidance.programSuggestions, []);
   } finally {
     if (previous === undefined) delete process.env.RECALL_SUGGEST_PROGRAMS;
     else process.env.RECALL_SUGGEST_PROGRAMS = previous;

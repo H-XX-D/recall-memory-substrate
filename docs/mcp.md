@@ -307,7 +307,7 @@ Parameters:
   `prg` cell carries its program spec at `props.program`, so a program
   suggestion's `proposal` can be passed back through `recall_write`
   unchanged to admit it.
-- `suggestPrograms` (boolean, optional, default false): include
+- `suggestPrograms` (boolean, optional, default true): include
   standing-program suggestions in the response guidance. Setting
   `RECALL_SUGGEST_PROGRAMS=1` in the server's environment is equivalent.
 
@@ -332,7 +332,7 @@ duplicated, and `accepted` is still `true` with a warning noting the dedup.
   like an open action, an unconfirmed claim, or a hazard, naming the kind
   (`tsk`, `bel` or `hyp`, `rsk`) that fits better.
 - `evidenceHint` (optional): present exactly when confidence was attenuated.
-- `programSuggestions`: empty unless `suggestPrograms` is true. Each entry
+- `programSuggestions`: computed by default; empty when `suggestPrograms` is false or no threshold is met. Each entry
   is `{ operation, reason, proposal }` where `operation` is `watch`,
   `quorum`, or `allocate` and `proposal` is a ready-to-admit `prg` write
   proposal (a topic shared by 5 or more active cells suggests a watch, 4 or

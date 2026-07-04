@@ -100,6 +100,7 @@ interface ParsedArgs {
   writeGate: boolean;
   allGraphs: boolean;
   suggestPrograms: boolean;
+  noSuggestPrograms: boolean;
   noGuidance: boolean;
   intervalMin?: number;
   since?: string;
@@ -199,7 +200,9 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       try {
         const result = admit(proposal, { store, now: options.now });
         if (result.accepted && result.cell && !args.noGuidance) {
-          const suggest = args.suggestPrograms || env.RECALL_SUGGEST_PROGRAMS === "1";
+          const suggest = args.noSuggestPrograms
+            ? false
+            : args.suggestPrograms || env.RECALL_SUGGEST_PROGRAMS !== "0";
           outJson(out, {
             ...result,
             guidance: buildWriteGuidance(store, result.cell, result, { suggestPrograms: suggest }),
@@ -790,6 +793,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     writeGate: false,
     allGraphs: false,
     suggestPrograms: false,
+    noSuggestPrograms: false,
     noGuidance: false,
     summary: false,
     csv: false,
@@ -821,6 +825,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--write-gate") parsed.writeGate = true;
     else if (arg === "--all-graphs") parsed.allGraphs = true;
     else if (arg === "--suggest-programs") parsed.suggestPrograms = true;
+    else if (arg === "--no-suggest-programs") parsed.noSuggestPrograms = true;
     else if (arg === "--no-guidance") parsed.noGuidance = true;
     else if (arg === "--interval-min") parsed.intervalMin = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--since") parsed.since = requireValue(argv, ++i, arg);
@@ -1084,8 +1089,8 @@ Commands:
   recall service status
   recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json
-  recall admit --json proposal.json [--suggest-programs] [--no-guidance] [--db path] [--project slug]
-      --suggest-programs  include standing-program suggestions in guidance
+  recall admit --json proposal.json [--no-suggest-programs] [--no-guidance] [--db path] [--project slug]
+      --no-suggest-programs  omit standing-program suggestions (on by default; RECALL_SUGGEST_PROGRAMS=0 also disables)
       --no-guidance       omit the guidance block
   recall version
 `;
