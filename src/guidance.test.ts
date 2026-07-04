@@ -181,3 +181,19 @@ test("non-latin titles do not blanket-match as supersedes and still match their 
   assert.equal(dup!.relation, "supersedes");
   store.close();
 });
+
+test("guidance reports existing programs whose target selects the new cell", () => {
+  const store = new SqliteStore(":memory:");
+  admit(
+    { kind: "prg", title: "watch latency", body: "standing", confidence: 0.6, props: { program: { schemaVersion: "recall.program.v1", operation: "watch", target: { topics: ["latency"] } } } },
+    { store },
+  );
+  const r = admit({ kind: "obs", title: "p99 spiked", body: "b", confidence: 0.6, topics: ["latency"] }, { store });
+  const g = buildWriteGuidance(store, r.cell!, r);
+  assert.equal(g.matchingPrograms.length, 1);
+  assert.equal(g.matchingPrograms[0]!.operation, "watch");
+  const unrelated = admit({ kind: "obs", title: "docs updated", body: "b", confidence: 0.6, topics: ["docs"] }, { store });
+  const g2 = buildWriteGuidance(store, unrelated.cell!, unrelated);
+  assert.deepEqual(g2.matchingPrograms, []);
+  store.close();
+});

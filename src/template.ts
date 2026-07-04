@@ -16,6 +16,7 @@ export const WRITE_TEMPLATE = {
   title: "non-empty one-line claim, <=20 words",
   body: "non-empty: the claim, the evidence, and the reasoning",
   confidence: "number in (0,1], your calibrated probability it is correct",
+  value: "finite number this cell measures, or omit; supersede the prior reading so the lineage forms the delta series",
   topics: "string[] search terms a future asker would use",
   entities: "string[] named entities this is about",
   lifecycle: "string[] lifecycle facet tags for filtering",

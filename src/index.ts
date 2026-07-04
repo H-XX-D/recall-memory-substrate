@@ -12,6 +12,7 @@ export * from "./codex-integration.js";
 export * from "./codex-sync.js";
 export * from "./compile.js";
 export * from "./dag.js";
+export * from "./deltas.js";
 export * from "./derivation.js";
 export * from "./evals.js";
 export * from "./federated-store.js";

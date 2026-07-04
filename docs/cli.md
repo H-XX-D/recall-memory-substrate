@@ -120,6 +120,13 @@ header. A populated summary looks like:
 - `4ae7579e` [obs] Peek reads the cells schema
 ```
 
+**`recall deltas <cell|topic> [--topic] [--csv]`** prints the numeric value
+series for a cell's supersede lineage, or for every reading tagged with a
+topic when `--topic` is set. JSON by default (rows of timestamp, value,
+delta, key, title); `--csv` emits `timestamp,value,delta,key,title` for
+spreadsheets and plotting. Cells record a reading through the proposal's
+`value` field; superseding the prior reading extends the series.
+
 **`recall cell show <key-or-handle>`** inspects a single cell: full content,
 footprint (word and byte counts, tag counts, edge counts), incoming and
 outgoing edges, derivation lineage, and any expansion handles it exposes. The
@@ -167,7 +174,7 @@ include `owner`, `project`, `tenant`, `topics`, `entities`, `lifecycle`,
 `daemon`, `connector`, `program`, `external`), `verification` (`unverified`,
 `checked`, `tested`, `external`), `sensitivity` (`public`, `private`,
 `secret`), `stability` (`ephemeral`, `volatile`, `stable`), `expiresAt`,
-`reverifyAfter`, `flags`, `props`, `programs` (existing prg cell keys or handles that should watch the cell), and `hyperedges` (memberships to join in existing bundles, each `{id, role, weight}`). Membership targets must exist or the write is rejected, the same contract as edge targets.
+`reverifyAfter`, `flags`, `props`, `value` (a finite number this cell measures; supersede the prior reading and the lineage forms the delta series readable with `recall deltas`), `programs` (existing prg cell keys or handles that should watch the cell), and `hyperedges` (memberships to join in existing bundles, each `{id, role, weight}`). Membership targets must exist or the write is rejected, the same contract as edge targets.
 
 Edges are directed and signed: `relation` must be one of `supports`,
 `contradicts`, `concerns`, `depends_on`, `supersedes`, `derived_from`, with

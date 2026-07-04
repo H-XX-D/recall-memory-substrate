@@ -65,6 +65,9 @@ export function validateProposal(input: unknown): ValidationResult {
   }
   optionalStringArray(p.sourceRefs, "sourceRefs", issues);
   optionalProbability(p.uncertainty, "uncertainty", issues);
+  if (p.value !== undefined && (typeof p.value !== "number" || !Number.isFinite(p.value))) {
+    issues.push({ path: "value", message: "value must be a finite number" });
+  }
   optionalProbability(p.concern, "concern", issues);
   optionalEnum(p.operation, "operation", OPERATIONS, issues);
   optionalEnum(p.origin, "origin", ORIGINS, issues);

@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the eighteen-tool surface", () => {
+test("tools/list returns exactly the nineteen-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -43,6 +43,7 @@ test("tools/list returns exactly the eighteen-tool surface", () => {
     "recall_program_runs",
     "recall_eval_run",
     "recall_subgraph",
+      "recall_deltas",
     "recall_health",
     "recall_storage",
   ]);
@@ -96,8 +97,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the eighteen-tool surface", () => {
-  assert.equal(TOOLS.length, 18);
+test("TOOLS is the nineteen-tool surface", () => {
+  assert.equal(TOOLS.length, 19);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {

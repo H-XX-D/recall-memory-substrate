@@ -125,7 +125,7 @@ That makes it the natural companion to RAG, not a replacement for it. The graph 
 ## Surfaces
 
 - **CLI**: about fifty verbs covering writes, compile, search, graph structures, standing programs, evals, health, import and export, maintenance, and assistant sync. [Reference](docs/cli.md).
-- **MCP**: eighteen tools over stdio for any MCP client: search, semantic retrieval, compile, gated writes with guidance, hyperedges, DAG analysis, programs, health. [Reference](docs/mcp.md).
+- **MCP**: nineteen tools over stdio for any MCP client: search, semantic retrieval, compile, gated writes with guidance, hyperedges, DAG analysis, programs, health. [Reference](docs/mcp.md).
 - **Hooks**: session start directive, per-prompt primer, stop-gate obligations, optional fail-closed write-back gate. [Integrations](docs/integrations.md).
 - **Library**: the same engine as TypeScript imports. [How Recall works](docs/overview.md).
 - **Moving memory**: archives and importers, dry-run first, exactly idempotent. [Import and export](docs/import-export.md).

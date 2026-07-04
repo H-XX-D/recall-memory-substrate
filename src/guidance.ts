@@ -2,6 +2,7 @@
 // never persisted. Candidate edges and hints are default on; program
 // suggestions are opt-in and only ever return ready-to-admit proposals.
 import type { Cell, Kind, Store, WriteProposal } from "./types.js";
+import { programSpecFromCell, selectProgramMembers } from "./programs.js";
 
 export type SuggestedRelation = "supports" | "supersedes" | "depends_on";
 
@@ -21,8 +22,16 @@ export interface ProgramSuggestion {
   proposal: WriteProposal;
 }
 
+export interface MatchingProgram {
+  key: string;
+  handle: string;
+  title: string;
+  operation: string;
+}
+
 export interface WriteGuidance {
   candidateEdges: CandidateEdge[];
+  matchingPrograms: MatchingProgram[]; // existing programs whose target selects this cell
   kindHint?: string;
   evidenceHint?: string;
   programSuggestions: ProgramSuggestion[];
@@ -65,12 +74,36 @@ export function buildWriteGuidance(
 ): WriteGuidance {
   return {
     candidateEdges: candidateEdges(store, cell, opts.maxCandidates ?? MAX_CANDIDATES),
+    matchingPrograms: matchingPrograms(store, cell),
     kindHint: kindHint(cell),
     evidenceHint: admission.warnings.includes(ATTENUATION_WARNING)
       ? "confidence was capped at 0.7; supply verification (checked, tested, external), sourceRefs, or a weighted supports edge to keep higher confidence"
       : undefined,
     programSuggestions: opts.suggestPrograms ? programSuggestions(store, cell) : [],
   };
+}
+
+// Existing standing programs whose target already selects the new cell: the
+// writer learns what will watch this cell without naming anything, and can
+// attach explicitly (proposal.programs) when the match should be durable.
+const MAX_MATCHING_PROGRAMS = 5;
+
+function matchingPrograms(store: Store, cell: Cell): MatchingProgram[] {
+  const out: MatchingProgram[] = [];
+  for (const prg of store.active()) {
+    if (prg.kind !== "prg" || cell.programs.includes(prg.key)) continue;
+    try {
+      const spec = programSpecFromCell(prg);
+      if (!spec) continue;
+      if (selectProgramMembers(store, prg, spec).some((m) => m.key === cell.key)) {
+        out.push({ key: prg.key, handle: prg.handle, title: prg.title, operation: spec.operation });
+        if (out.length >= MAX_MATCHING_PROGRAMS) break;
+      }
+    } catch {
+      // A malformed spec must never break the write path; operate reports it.
+    }
+  }
+  return out;
 }
 
 function candidateEdges(store: Store, cell: Cell, max: number): CandidateEdge[] {

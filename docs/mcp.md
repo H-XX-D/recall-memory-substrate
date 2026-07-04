@@ -489,6 +489,17 @@ field is included. An unchanged eval outcome (same name, passed, score, and
 per-case results) collides with a prior derivation instead of creating a new
 witness cell.
 
+### recall_deltas
+
+Numeric value series with deltas: the changes-to-truth history. Walks a
+cell's supersede lineage (or, with `topic: true`, every reading tagged with
+the topic) oldest-first and returns rows of timestamp, value, delta, key, and
+title. With `csv: true` the result is CSV text (`timestamp,value,delta,key,title`)
+instead of JSON.
+
+Parameters: `target` (cell key, handle, or topic; required), `topic`
+(boolean), `csv` (boolean), `limit` (number, default 1000 newest rows).
+
 ### recall_health
 
 Produces a memory health report: belief pressure (support/contradiction

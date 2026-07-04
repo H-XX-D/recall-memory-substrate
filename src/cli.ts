@@ -22,6 +22,7 @@ import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit, memoryHealthDerivationKey } from "./derivation.js";
 import { diffStore, parseKinds, parseSince, renderDiffSummary } from "./diff.js";
+import { renderDeltasCsv, valueSeries } from "./deltas.js";
 import { runAndRecordEval, runEvalAndDerive, type RecallEvalSuite } from "./evals.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { importGlobalToLocal } from "./local-import.js";
@@ -104,6 +105,8 @@ interface ParsedArgs {
   since?: string;
   kinds?: string;
   summary: boolean;
+  csv: boolean;
+  topic: boolean;
   maxItems?: number;
 }
 
@@ -320,6 +323,20 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const query = queryFrom(args, 1, "search requires a query");
       return withReadStore(args, route, env, (store) => {
         outJson(out, { query, hits: store.search(query, { limit: args.limit }) });
+        return 0;
+      });
+    }
+
+    if (command === "deltas") {
+      const target = args.command[1];
+      if (!target) throw new Error("deltas requires a cell key, handle, or --topic <topic>");
+      return withReadStore(args, route, env, (store) => {
+        const rows = valueSeries(store, target, { topic: args.topic });
+        if (args.csv) {
+          out(renderDeltasCsv(rows));
+        } else {
+          outJson(out, { target, mode: args.topic ? "topic" : "lineage", rows });
+        }
         return 0;
       });
     }
@@ -775,6 +792,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     suggestPrograms: false,
     noGuidance: false,
     summary: false,
+    csv: false,
+    topic: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -807,6 +826,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--since") parsed.since = requireValue(argv, ++i, arg);
     else if (arg === "--kinds") parsed.kinds = requireValue(argv, ++i, arg);
     else if (arg === "--summary") parsed.summary = true;
+    else if (arg === "--csv") parsed.csv = true;
+    else if (arg === "--topic") parsed.topic = true;
     else if (arg === "--max-items") parsed.maxItems = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--limit") {
@@ -1025,6 +1046,7 @@ Commands:
   recall search "query" [--limit 10] [--db path] [--project slug]
   recall cell show <key-or-handle> [--db path] [--project slug]
   recall diff --since <ISO|30m|2h|7d|4w> [--kinds a,b] [--summary] [--max-items 12] [--db path] [--project slug]
+  recall deltas <cell|topic> [--topic] [--csv]     numeric value series with deltas (lineage or topic)
   recall hyperedge add --json edge.json [--db path] [--project slug]
   recall hyperedge show <id> [--db path] [--project slug]
   recall hyperedge list [--limit 10] [--db path] [--project slug]

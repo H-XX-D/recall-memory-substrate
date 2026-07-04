@@ -191,7 +191,7 @@ test("auto-index: dedup path does not double-write a semantic vector", () => {
 
 test("fill-or-reject covers the facet, flags, and props template entries", () => {
   const store = new SqliteStore(":memory:");
-  for (const field of ["lifecycle", "quality", "subject", "flags", "props", "programs", "hyperedges"] as const) {
+  for (const field of ["lifecycle", "quality", "subject", "flags", "props", "programs", "hyperedges", "value"] as const) {
     const proposal = {
       kind: "obs",
       title: "Template coverage probe",
