@@ -211,12 +211,13 @@ directory), and the summary reports the count as `projects`.
 
 The registry import is idempotent: a slug, root path, or database path that
 is already registered skips the row, so a second `--apply` changes nothing.
-A legacy slug that collides with the reserved `home` slug (or with a slug
-already registered to a different root) is renamed through the same
-collision rule `recall project init` uses, and every rename is reported in
-the summary's `projectRenames` list as a `{ from, to }` pair, never applied
-silently. A dry run reports the same `projects` count without touching the
-registry.
+That skip rule also covers a legacy slug already registered to a different
+root: the existing registration wins and the legacy row is neither imported
+nor renamed. A legacy slug that collides with the reserved `home` slug is
+renamed through the same collision rule `recall project init` uses, and
+every rename is reported in the summary's `projectRenames` list as a
+`{ from, to }` pair, never applied silently. A dry run reports the same
+`projects` count without touching the registry.
 
 ## Idempotence and re-imports
 
