@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1401,6 +1401,109 @@ test("claude sync/status round-trip through the CLI against a temp HOME", () => 
   } finally {
     rmSync(tmp, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("maintain runs the routed store by default and prints a single-element JSON list", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "maintain cli seed cell",
+        body: "Seed cell for the maintain pass.",
+        confidence: 0.8,
+        topics: ["maintain"],
+      }),
+    );
+    const seeded = capture(["admit", "--json", proposalPath, "--db", db]);
+    assert.equal(seeded.code, 0, seeded.stderr);
+
+    const result = capture(["maintain", "--db", db], { now: "2026-07-03T12:00:00.000Z" });
+    assert.equal(result.code, 0, result.stderr);
+    const results = JSON.parse(result.stdout);
+    assert.ok(Array.isArray(results));
+    assert.equal(results.length, 1);
+    assert.equal(results[0].dbPath, db);
+    assert.ok("ticked" in results[0].operator);
+    assert.ok("passed" in results[0].eval);
+    assert.ok("accepted" in results[0].health);
+    assert.equal(typeof results[0].reindexed, "number");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("maintain --all-graphs sweeps every local graph under RECALL_HOME", () => {
+  const tmp = tempDir();
+  try {
+    const home = join(tmp, "recall-home");
+    const env = { RECALL_HOME: home } as NodeJS.ProcessEnv;
+
+    const initA = capture(["project", "init", "--slug", "repo-a", "--root", join(tmp, "repoA")], { env });
+    assert.equal(initA.code, 0, initA.stderr);
+    const initB = capture(["project", "init", "--slug", "repo-b", "--root", join(tmp, "repoB")], { env });
+    assert.equal(initB.code, 0, initB.stderr);
+
+    const result = capture(["maintain", "--all-graphs"], { env, now: "2026-07-03T12:00:00.000Z" });
+    assert.equal(result.code, 0, result.stderr);
+    const results = JSON.parse(result.stdout);
+    assert.equal(results.length, 3); // home + repo-a + repo-b
+    const graphs = results.map((r: { graph: string }) => r.graph).sort();
+    assert.deepEqual(graphs, ["home", "repo-a", "repo-b"]);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("service install/status/uninstall round-trip against a temp LaunchAgents dir and never invoke launchctl", () => {
+  const tmp = tempDir();
+  try {
+    const env = {
+      RECALL_LAUNCH_AGENTS_DIR: join(tmp, "LaunchAgents"),
+      RECALL_LOG_DIR: join(tmp, "logs"),
+    } as NodeJS.ProcessEnv;
+
+    const before = capture(["service", "status"], { env });
+    assert.equal(before.code, 0, before.stderr);
+    assert.equal(JSON.parse(before.stdout).installed, false);
+
+    const install = capture(["service", "install"], { env });
+    assert.equal(install.code, 0, install.stderr);
+    const installJson = JSON.parse(install.stdout);
+    assert.equal(installJson.label, "io.recall.maintain");
+    assert.ok(existsSync(installJson.path));
+    assert.match(install.stdout + install.stderr, /launchctl load/);
+
+    const after = capture(["service", "status"], { env });
+    assert.equal(JSON.parse(after.stdout).installed, true);
+
+    const uninstall = capture(["service", "uninstall"], { env });
+    assert.equal(uninstall.code, 0, uninstall.stderr);
+    const finalStatus = capture(["service", "status"], { env });
+    assert.equal(JSON.parse(finalStatus.stdout).installed, false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("service install --interval-min honors a custom interval", () => {
+  const tmp = tempDir();
+  try {
+    const env = {
+      RECALL_LAUNCH_AGENTS_DIR: join(tmp, "LaunchAgents"),
+      RECALL_LOG_DIR: join(tmp, "logs"),
+    } as NodeJS.ProcessEnv;
+
+    const install = capture(["service", "install", "--interval-min", "15"], { env });
+    assert.equal(install.code, 0, install.stderr);
+    const plist = readFileSync(JSON.parse(install.stdout).path, "utf8");
+    assert.match(plist, /<key>StartInterval<\/key>\s*<integer>900<\/integer>/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
 });
 

@@ -2,6 +2,7 @@
 // R8 CLI surface over the implemented v5 core. Server, TUI, import adapters,
 // and installer sync commands stay deferred; this is the npm/bin entry point.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { admit } from "./admission.js";
@@ -28,6 +29,7 @@ import { FederatedReadStore } from "./federated-store.js";
 import { runOperatorCycle } from "./operator.js";
 import { runProgramCell } from "./programs.js";
 import { reindexSemantic } from "./semantic.js";
+import { maintainAll, maintainStore } from "./maintain.js";
 import { serializeGraph, parseNetlist, loadNetlist, type LoadMode } from "./netlist.js";
 import {
   homeDbPath,
@@ -39,6 +41,15 @@ import {
   whereProject,
 } from "./routing.js";
 import { validateProposal } from "./schema.js";
+import {
+  crontabEquivalent,
+  installService,
+  launchctlLoadCommand,
+  launchctlUnloadCommand,
+  serviceStatus,
+  uninstallService,
+  type ServiceOptions,
+} from "./service.js";
 import { SqliteStore } from "./store.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 
@@ -82,6 +93,8 @@ interface ParsedArgs {
   inlineRefs: boolean;
   refParams: boolean;
   keepAutoMemory: boolean;
+  allGraphs: boolean;
+  intervalMin?: number;
 }
 
 interface Route {
@@ -631,6 +644,47 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    // maintain always derives: there is no --no-derive flag, since deriving
+    // (operator + eval + health witnesses) is the whole purpose of a
+    // maintenance pass, not an optional extra.
+    if (command === "maintain") {
+      const now = options.now ? new Date(options.now) : new Date();
+      if (args.allGraphs) {
+        outJson(out, maintainAll(env, now));
+        return 0;
+      }
+      const store = openWriteStore(route.dbPath);
+      try {
+        const graph = route.slug ?? "home";
+        outJson(out, [maintainStore(store, graph, now)]);
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (command === "service" && subcommand === "install") {
+      const opts = serviceOptionsFromEnv(env, args);
+      const result = installService(opts);
+      outJson(out, result);
+      err(`${serviceLoadNote(opts)}\n`);
+      return 0;
+    }
+
+    if (command === "service" && subcommand === "uninstall") {
+      const opts = serviceOptionsFromEnv(env, args);
+      const result = uninstallService(opts);
+      outJson(out, result);
+      err(`${serviceUnloadNote(opts)}\n`);
+      return 0;
+    }
+
+    if (command === "service" && (!subcommand || subcommand === "status")) {
+      const opts = serviceOptionsFromEnv(env, args);
+      outJson(out, serviceStatus(opts));
+      return 0;
+    }
+
     throw new Error(`Unknown command: ${args.command.join(" ")}`);
   } catch (error) {
     err(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -653,6 +707,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     inlineRefs: false,
     refParams: false,
     keepAutoMemory: false,
+    allGraphs: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -677,6 +732,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--inline-refs") parsed.inlineRefs = true;
     else if (arg === "--ref-params") parsed.refParams = true;
     else if (arg === "--keep-automemory") parsed.keepAutoMemory = true;
+    else if (arg === "--all-graphs") parsed.allGraphs = true;
+    else if (arg === "--interval-min") parsed.intervalMin = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--limit") {
       parsed.limit = positiveInt(requireValue(argv, i + 1, arg), arg);
@@ -770,6 +827,38 @@ function routeOutput(route: Route, env: NodeJS.ProcessEnv): Record<string, unkno
     out.locals = locals.map((member) => member.graph);
   }
   return out;
+}
+
+// RECALL_LAUNCH_AGENTS_DIR/RECALL_LOG_DIR are env overrides for tests and for
+// anyone who wants the service files somewhere other than the defaults;
+// same convention as RECALL_HOME/RECALL_DB in routing.ts. --interval-min is
+// the only CLI flag service install accepts.
+function serviceOptionsFromEnv(env: NodeJS.ProcessEnv, args: ParsedArgs): ServiceOptions {
+  const opts: ServiceOptions = {};
+  if (args.intervalMin !== undefined) opts.intervalMinutes = args.intervalMin;
+  const launchAgentsDir = env.RECALL_LAUNCH_AGENTS_DIR?.trim();
+  if (launchAgentsDir) opts.launchAgentsDir = launchAgentsDir;
+  const logDir = env.RECALL_LOG_DIR?.trim();
+  if (logDir) opts.logDir = logDir;
+  return opts;
+}
+
+// On macOS, print the launchctl command the user must run themselves (this
+// module never invokes launchctl). On other platforms, launchd does not
+// exist, so print a crontab-equivalent line instead: the plist file is still
+// written (harmless, and portable if copied to a mac later).
+function serviceLoadNote(opts: ServiceOptions): string {
+  if (platform() === "darwin") {
+    return `Run to activate: ${launchctlLoadCommand(opts)}`;
+  }
+  return `Non-macOS platform: no launchd. Crontab equivalent:\n${crontabEquivalent(opts)}`;
+}
+
+function serviceUnloadNote(opts: ServiceOptions): string {
+  if (platform() === "darwin") {
+    return `Run to deactivate: ${launchctlUnloadCommand(opts)}`;
+  }
+  return `Non-macOS platform: no launchd. Remove the equivalent crontab line if one was added.`;
 }
 
 function readProposal(args: ParsedArgs): WriteProposal {
@@ -890,6 +979,10 @@ Commands:
   recall claude sync [--apply] [--keep-automemory] [--root path] [--db path]
   recall claude status
   recall reindex [--missing-only] [--db path] [--project slug]
+  recall maintain [--all-graphs] [--db path] [--project slug]
+  recall service install [--interval-min 60]
+  recall service uninstall
+  recall service status
   recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json
   recall admit --json proposal.json [--db path] [--project slug]

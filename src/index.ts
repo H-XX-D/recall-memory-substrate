@@ -17,6 +17,7 @@ export * from "./federated-store.js";
 export * from "./firewall.js";
 export * from "./hyperedges.js";
 export * from "./local-import.js";
+export * from "./maintain.js";
 export * from "./mass.js";
 export * from "./netlist.js";
 export * from "./operator.js";
@@ -29,6 +30,7 @@ export * from "./schema.js";
 export * from "./scores.js";
 export * from "./secrets.js";
 export * from "./semantic.js";
+export * from "./service.js";
 export {
   buildFtsMatchQuery,
   searchTerms,
