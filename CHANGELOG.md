@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.10.0 - 2026-07-04
+
+Phase 5 of the subsystem port: services and surfaces. This release closes the second open decision from the port plan and lands the maintenance, storage, and sync surfaces that decision points at.
+
+Open decision 2, resolved: every legacy daemon and scheduler role is covered by a surface that already exists in this tree, so nothing from that list is ported as a new module.
+
+- acp is dropped. All ten ACP actions map onto an existing MCP or CLI surface: status, search, semantic, subgraph, compile, and write proposals are the same recall_status, recall_search, recall_semantic, recall_subgraph, recall_compile, and admission path already in place, and the tick/daemon actions are the operator cycle fired by the Stop hook and the `recall operate` verb. No acp_requests table ships in this release.
+- The workflow module is dropped. Its allocation formula lives on as the allocate program operation added in this release: a standing prg cell with operation allocate scores open tsk cells with the same constants the legacy workflow formula used, and the result is a deterministic ranked selection recorded in the program run ledger, not a separate allocation_plan kind or module.
+- The daemon KeepAlive service is dropped in favor of the StartInterval maintain runner added in this release. The daemon's execution engine, eval closure, and memory-health duties are already covered by the operator cycle, the eval ledger, and the health derivation added in Phase 4 and this release, so the only real gap was a wall-clock trigger, which a StartInterval launchd plist calling `recall maintain` fills without reintroducing a long-running process.
+- tui, cognitive, inception, and trend-scaffold are dropped. None has a current dependent once acp is gone, and no surface in this tree calls into any of them.
+
+Additions:
+
+- Adds a day-bucketed memory health witness: `recall health --derive` now keys its proposal through `memoryHealthDerivationKey(now, project)` and admits through the derive path, so repeated same-day runs collapse onto one witness instead of stacking near-identical health cells, while a changed report still admits a new one.
+- Adds an endcap derive to the operator cycle: the Stop-triggered tick now derives standing-program witnesses at the end of its pass, using the same idempotent admission path so repeated ticks in one day do not pile up duplicate program witnesses.
+- Adds the allocate program operation: a ranked, change-gated view over open task cells, scored with the allocation-pressure formula, with its own witness that only re-admits when the selected set actually changes.
+- Adds true storage stats: `recall storage` and `recall_storage` report the database path and byte size (counting WAL sidecars), per-table row counts, and average and maximum cell size, computed over the real blob length rather than an estimate.
+- Adds the maintain verb and the service install, uninstall, and status verbs. `recall maintain [--all-graphs] [--db path]` runs the operator cycle, the eval suite, and the health derive in one pass over one store or every registered graph. `recall service install --interval-min N` renders a StartInterval launchd plist that calls `recall maintain --all-graphs` on a timer, without loading or invoking launchctl itself.
+- Adds hook asset installation to claude sync, with an optional write gate: `recall claude sync --apply` now installs the session-start hook script into the target home's Claude hooks directory, and `--write-gate` additionally wires the optional node-side gate. The hook asset ships in the published package under `integrations/claude/hooks/`.
+- Adds `recall codex sync` and `recall codex status`, following the same dry-run-by-default, home-isolated, backup-before-overwrite shape as claude sync.
+- Adds a registry split: the project registry now lives in its own store separate from the home store, with a legacy migration path that carries forward any project mapping recorded in the old combined layout.
+- Adds a fail-open guard to the Stop hook: if the store cannot be opened, the hook now lets the turn proceed instead of blocking on a maintenance failure.
+- Cleans up the Claude skill docs to drop references to the retired acp, tick, and tui surfaces and point at maintain and service instead.
+
 ## 0.9.0 - 2026-07-03
 
 Phase 4 of the subsystem port: adapters and ingest. Import hardening, the mem0/zep/auto-memory/local/claude-sync adapters, and a v2 export archive land on top of the Phase 1 to 3 store, retrieval, and graph work.
