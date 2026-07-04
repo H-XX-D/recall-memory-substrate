@@ -185,6 +185,18 @@ def _trim(line: str, n: int) -> str:
     return (line[: n - 1] + "…") if len(line) > n else line
 
 
+def _row_title(body: str) -> str:
+    """The engageable claim of an index row, for the dig state. A v5 compile
+    row is the whole score notation (handle "Title" conf(..) .. score(..)),
+    and every row carries the same notation words (review, score, ...), so
+    storing the raw row as the flagged cell's title would let the stop gate's
+    content-overlap match fire on almost any substantive reply. Only the
+    quoted title is the cell's claim. A row without a quoted title (legacy
+    rows were the bare title) passes through whole."""
+    m = re.search(r'"([^"]+)"', body)
+    return m.group(1).strip() if m else body
+
+
 def build_mini_index(rel, conflict_lines, stale_lines, flagged_out=None, header=None) -> str:
     """Assemble the mini-index from compile section lines (ids + titles only),
     flagging a row only when the cell ITSELF is the superseded side of a
@@ -221,11 +233,11 @@ def build_mini_index(rel, conflict_lines, stale_lines, flagged_out=None, header=
         if short and short in stale_ids:
             tag, flagged = "  [STALE]", True
             if flagged_out is not None:
-                flagged_out.append({"id": short, "title": body})
+                flagged_out.append({"id": short, "title": _row_title(body)})
         elif short and short in challenged_ids:
             tag, flagged = "  [SUPERSEDED?]", True
             if flagged_out is not None:
-                flagged_out.append({"id": short, "title": body})
+                flagged_out.append({"id": short, "title": _row_title(body)})
         index.append(f"- {_trim(body, 110)}" + (f"  [{cid}]" if cid else "") + tag)
     if not index:
         return ""

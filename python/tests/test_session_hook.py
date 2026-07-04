@@ -239,6 +239,36 @@ class SessionHookTests(unittest.TestCase):
         self.assertIn("DIG REQUIRED", out.get("reason") or "")
         self.assertIn(id8, out.get("reason") or "")
 
+    # --- (c2) the dig state title is the cell's quoted title, not the whole v5
+    #     score-notation row, so a reply sharing only notation words (review,
+    #     score) must not count as engaging the flagged cell ---
+    def test_stop_allows_unrelated_reply_sharing_only_notation_tokens(self) -> None:
+        tpath = self.transcript("transcript-c2.jsonl", [noise_line(), noise_line()])
+        prompt_proc = self.run_hook(
+            ["--prompt"],
+            {
+                "prompt": "retry budget capped at five attempts",
+                "session_id": "sess-c2",
+                "transcript_path": str(tpath),
+                "cwd": str(self.work),
+            },
+        )
+        self.assertEqual(prompt_proc.returncode, 0, prompt_proc.stderr)
+        state_file = self.state_path("sess-c2")
+        self.assertTrue(state_file.exists())
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        self.assertEqual(state.get("titles"), ["Retry budget capped at five attempts"])
+        with open(tpath, "a", encoding="utf-8") as f:
+            f.write(
+                assistant_line("I will review the score of the basketball game tonight.") + "\n"
+            )
+        proc = self.run_hook(
+            ["--stop"],
+            {"session_id": "sess-c2", "transcript_path": str(tpath)},
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout), {}, proc.stdout)
+
     # --- (d) --stop loop guard: stop_hook_active short-circuits to {} ---
     def test_stop_loop_guard_emits_empty(self) -> None:
         tpath = self.transcript("transcript-d.jsonl", [noise_line()])

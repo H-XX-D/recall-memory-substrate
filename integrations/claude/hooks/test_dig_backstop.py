@@ -161,6 +161,25 @@ class DigBackstopTest(unittest.TestCase):
         self.assertIn("DIG REQUIRED", out)
         self.assertEqual([f["id"] for f in flagged], ["1750a919"])
 
+    # --- the dig state title must be the quoted cell title, not the whole v5
+    #     score-notation row: every v5 row carries the notation words (review,
+    #     score, ...), so storing the raw row would let the stop gate engage on
+    #     almost any substantive reply ---
+    def test_mini_index_extracts_quoted_title_for_dig_state(self):
+        rel = [
+            '- ^obs_c0e2 "Unicode café observation" conf(0.5!) eff(0.5) curr(1) sal(0.5) '
+            "annexed(0) locked(0) pinned(0) review(0) bg(1) [out:0 programs:0] score(1.11) "
+            "[obs:c0e296f7-0000-1111-2222-333344445555]"
+        ]
+        stale = ["Unicode café observation: stale [stale:c0e296f7-0000-1111-2222-333344445555]"]
+        flagged = []
+        self.h.build_mini_index(rel, [], stale, flagged)
+        self.assertEqual(flagged, [{"id": "c0e296f7", "title": "Unicode café observation"}])
+        # a reply sharing only notation words with the row must not engage it
+        self.assertFalse(self.h.response_engages(
+            "I will review the score of the basketball game tonight.",
+            ["c0e296f7"], [f["title"] for f in flagged]))
+
     def test_mini_index_flags_bare_ids(self):
         rel = ["- Cache TTL is sixty seconds [decision:1750a919-7592-4791-b144-d0f2280fd7c7]"]
         stale = ["Cache TTL note: stale; severity=0.5 [stale:1750a919-7592-4791-b144-d0f2280fd7c7]"]
