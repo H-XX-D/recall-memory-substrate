@@ -42,6 +42,27 @@ export function validateProposal(input: unknown): ValidationResult {
   optionalStringArray(p.lifecycle, "lifecycle", issues);
   optionalStringArray(p.quality, "quality", issues);
   optionalStringArray(p.subject, "subject", issues);
+  optionalStringArray(p.programs, "programs", issues);
+  if (p.hyperedges !== undefined) {
+    if (!Array.isArray(p.hyperedges)) {
+      issues.push({ path: "hyperedges", message: "hyperedges must be an array of {id, role?, weight?}" });
+    } else {
+      p.hyperedges.forEach((h, i) => {
+        if (typeof h !== "object" || h === null || typeof (h as { id?: unknown }).id !== "string" || (h as { id: string }).id.trim() === "") {
+          issues.push({ path: `hyperedges[${i}]`, message: "hyperedge membership needs a non-empty string id" });
+          return;
+        }
+        const role = (h as { role?: unknown }).role;
+        if (role !== undefined && typeof role !== "string") {
+          issues.push({ path: `hyperedges[${i}].role`, message: "role must be a string" });
+        }
+        const weight = (h as { weight?: unknown }).weight;
+        if (weight !== undefined && (typeof weight !== "number" || weight < 0 || weight > 1)) {
+          issues.push({ path: `hyperedges[${i}].weight`, message: "weight must be a number in [0, 1]" });
+        }
+      });
+    }
+  }
   optionalStringArray(p.sourceRefs, "sourceRefs", issues);
   optionalProbability(p.uncertainty, "uncertainty", issues);
   optionalProbability(p.concern, "concern", issues);

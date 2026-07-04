@@ -34,6 +34,8 @@ export const WRITE_TEMPLATE = {
   reverifyAfter: "ISO-8601 timestamp or null (reverify clock)",
   flags: "{annexed|locked|pinned|requiresReview|allowBackgroundUse: boolean}, or omit for defaults (pinned resists decay)",
   props: "object payload; props.program carries a standing-program spec (recall.program.v1) on prg cells",
+  programs: "string[] existing prg cell keys/handles that should watch this cell",
+  hyperedges: "[{id: existing-hyperedge-id, role, weight}] bundle memberships to join; create bundles with hyperedge add",
   summary: "optional short summary",
   owner: "actor id",
   project: "project slug for routing",

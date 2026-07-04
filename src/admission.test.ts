@@ -191,7 +191,7 @@ test("auto-index: dedup path does not double-write a semantic vector", () => {
 
 test("fill-or-reject covers the facet, flags, and props template entries", () => {
   const store = new SqliteStore(":memory:");
-  for (const field of ["lifecycle", "quality", "subject", "flags", "props"] as const) {
+  for (const field of ["lifecycle", "quality", "subject", "flags", "props", "programs", "hyperedges"] as const) {
     const proposal = {
       kind: "obs",
       title: "Template coverage probe",
@@ -203,5 +203,58 @@ test("fill-or-reject covers the facet, flags, and props template entries", () =>
     assert.equal(r.accepted, false, `${field} left as its instruction must reject`);
     assert.ok(r.issues.some((i) => i.path === field), `${field} issue expected`);
   }
+  store.close();
+});
+
+test("proposal programs resolve to prg cells and land on cell.programs", () => {
+  const store = new SqliteStore(":memory:");
+  const prg = admit(
+    { kind: "prg", title: "watch storage", body: "standing", confidence: 0.6, props: { program: { schemaVersion: "recall.program.v1", operation: "watch", target: { topics: ["storage"] } } } },
+    { store },
+  ).cell!;
+  const r = admit(
+    { kind: "obs", title: "Storage observation", body: "b", confidence: 0.6, topics: ["storage"], programs: [prg.handle] },
+    { store },
+  );
+  assert.equal(r.accepted, true);
+  assert.deepEqual(r.cell!.programs, [prg.key]);
+  assert.deepEqual(store.get(r.cell!.key)!.programs, [prg.key]);
+  store.close();
+});
+
+test("proposal programs reject dangling targets and non-prg cells", () => {
+  const store = new SqliteStore(":memory:");
+  const obs = admit({ kind: "obs", title: "Not a program", body: "b", confidence: 0.6 }, { store }).cell!;
+  const dangling = admit({ kind: "obs", title: "A", body: "b", confidence: 0.6, programs: ["nope"] }, { store });
+  assert.equal(dangling.accepted, false);
+  assert.ok(dangling.issues.some((i) => i.path === "programs[0]"));
+  const wrongKind = admit({ kind: "obs", title: "B", body: "b", confidence: 0.6, programs: [obs.key] }, { store });
+  assert.equal(wrongKind.accepted, false);
+  assert.ok(wrongKind.issues.some((i) => i.path === "programs[0]"));
+  store.close();
+});
+
+test("proposal hyperedges join existing bundles with role and weight", () => {
+  const store = new SqliteStore(":memory:");
+  const seed = admit({ kind: "obs", title: "Seed member", body: "b", confidence: 0.6 }, { store }).cell!;
+  store.putHyperedge({
+    id: "he-1", kind: "evidence-set", title: "Storage evidence",
+    members: [{ key: seed.key, role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-04T00:00:00.000Z",
+  });
+  const r = admit(
+    { kind: "obs", title: "Joins the bundle", body: "b", confidence: 0.6, hyperedges: [{ id: "he-1", role: "driver", weight: 0.8 }] },
+    { store },
+  );
+  assert.equal(r.accepted, true);
+  const he = store.getHyperedge("he-1")!;
+  const member = he.members.find((m) => m.key === r.cell!.key);
+  assert.ok(member, "new cell should be a member");
+  assert.equal(member!.role, "driver");
+  assert.equal(member!.weight, 0.8);
+  assert.equal(member!.ordinal, 1);
+  const unknown = admit({ kind: "obs", title: "C", body: "b", confidence: 0.6, hyperedges: [{ id: "missing" }] }, { store });
+  assert.equal(unknown.accepted, false);
+  assert.ok(unknown.issues.some((i) => i.path === "hyperedges[0].id"));
   store.close();
 });

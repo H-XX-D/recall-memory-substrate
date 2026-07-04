@@ -167,7 +167,7 @@ include `owner`, `project`, `tenant`, `topics`, `entities`, `lifecycle`,
 `daemon`, `connector`, `program`, `external`), `verification` (`unverified`,
 `checked`, `tested`, `external`), `sensitivity` (`public`, `private`,
 `secret`), `stability` (`ephemeral`, `volatile`, `stable`), `expiresAt`,
-`reverifyAfter`, `flags`, and `props`.
+`reverifyAfter`, `flags`, `props`, `programs` (existing prg cell keys or handles that should watch the cell), and `hyperedges` (memberships to join in existing bundles, each `{id, role, weight}`). Membership targets must exist or the write is rejected, the same contract as edge targets.
 
 Edges are directed and signed: `relation` must be one of `supports`,
 `contradicts`, `concerns`, `depends_on`, `supersedes`, `derived_from`, with

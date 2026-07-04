@@ -97,9 +97,33 @@ export function admit(
         message: `edge target does not resolve to a cell: ${e.target}`,
       });
     });
+    // Bundle memberships resolve like edge targets: a program must be an
+    // existing prg cell, a hyperedge must already exist. Dangling memberships
+    // reject rather than silently dropping, same contract as edges.
+    const watchingPrograms: string[] = [];
+    (proposal.programs ?? []).forEach((target, i) => {
+      const t = store.get(target) ?? store.getByHandle(target);
+      if (!t || t.kind !== "prg") {
+        unresolved.push({
+          path: `programs[${i}]`,
+          message: `program target does not resolve to a prg cell: ${target}`,
+        });
+        return;
+      }
+      if (!watchingPrograms.includes(t.key)) watchingPrograms.push(t.key);
+    });
+    (proposal.hyperedges ?? []).forEach((h, i) => {
+      if (!store.getHyperedge(h.id)) {
+        unresolved.push({
+          path: `hyperedges[${i}].id`,
+          message: `hyperedge does not exist: ${h.id}`,
+        });
+      }
+    });
     if (unresolved.length > 0) {
       return { accepted: false, issues: unresolved, warnings: att.warnings, attenuations };
     }
+    cell.programs = watchingPrograms;
 
     // Dedup: an identical active cell (same kind+title+body) is a no-op.
     const dup = store.findByContentKey(cell.kind, contentKey(cell.kind, cell.title));
@@ -114,6 +138,21 @@ export function admit(
     }
 
     store.put(cell); // store first so the new cell's edges exist for the walks
+
+    // Join declared hyperedges: append this cell as a member (next ordinal)
+    // unless it already belongs. Resolution above guarantees existence.
+    for (const h of proposal.hyperedges ?? []) {
+      const bundle = store.getHyperedge(h.id)!;
+      if (bundle.members.some((m) => m.key === cell.key)) continue;
+      const ordinal = bundle.members.reduce((max, m) => Math.max(max, m.ordinal), -1) + 1;
+      bundle.members.push({
+        key: cell.key,
+        role: h.role ?? "member",
+        ordinal,
+        ...(h.weight !== undefined ? { weight: h.weight } : {}),
+      });
+      store.putHyperedge(bundle);
+    }
 
     // Supersede: an explicit supersedes edge demotes its target and extends lineage.
     // Targets resolve by key or handle (the validator above accepts both); the

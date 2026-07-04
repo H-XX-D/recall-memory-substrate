@@ -100,6 +100,11 @@ function textFields(proposal: WriteProposal): { path: string; text: string }[] {
   pushStrings(fields, "quality", proposal.quality);
   pushStrings(fields, "subject", proposal.subject);
   pushStrings(fields, "sourceRefs", proposal.sourceRefs);
+  pushStrings(fields, "programs", proposal.programs);
+  proposal.hyperedges?.forEach((h, i) => {
+    pushString(fields, `hyperedges[${i}].id`, h.id);
+    pushString(fields, `hyperedges[${i}].role`, h.role);
+  });
   pushString(fields, "project", proposal.project);
   pushString(fields, "tenant", proposal.tenant);
   collectPropStrings(fields, "props", proposal.props);

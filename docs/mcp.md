@@ -282,6 +282,11 @@ Parameters:
 - `sourceRefs` (array of strings, optional)
 - `verification` (string, optional): one of `unverified`, `checked`,
   `tested`, `external`
+- `programs` (string array, optional): existing `prg` cell keys or handles
+  that should watch this cell; unresolvable or non-program targets reject the
+  write.
+- `hyperedges` (array, optional): memberships to join in existing bundles,
+  each `{id, role, weight}`; an unknown hyperedge id rejects the write.
 - `props` (object, optional): structured properties stored on the cell. A
   `prg` cell carries its program spec at `props.program`, so a program
   suggestion's `proposal` can be passed back through `recall_write`
