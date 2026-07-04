@@ -589,3 +589,15 @@ test("compileContext: budget trimming never drops standingPrograms", () => {
   );
   store.close();
 });
+
+test("empty packet sections say what would populate them", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "dec", title: "Lone decision", body: "b", confidence: 0.6 }, { key: "k1" }));
+  const text = formatContextPacket(compileContext(store, "anything"));
+  assert.match(text, /active_beliefs:\n- none \(populated by bel cells\)/);
+  assert.match(text, /conflicts:\n- none \(populated by contradicts edges\)/);
+  assert.match(text, /dependencies:\n- none \(populated by depends_on edges\)/);
+  assert.match(text, /risks:\n- none \(populated by rsk cells\)/);
+  assert.match(text, /tasks:\n- none \(populated by tsk cells\)/);
+  store.close();
+});

@@ -426,8 +426,22 @@ function needsExpansion(cell: Cell): boolean {
   return cell.flags.requiresReview || Boolean(cell.policy.reverifyAfter || cell.policy.expiresAt);
 }
 
+// Hints teach the writer what kind of cell or edge fills a section that came
+// back empty; sections without a hint keep the bare "- none".
+const SECTION_HINTS: Record<string, string> = {
+  active_beliefs: "populated by bel cells",
+  conflicts: "populated by contradicts edges",
+  dependencies: "populated by depends_on edges",
+  risks: "populated by rsk cells",
+  tasks: "populated by tsk cells",
+};
+
 function section(name: string, lines: string[]): string {
-  return `${name}:\n${lines.length === 0 ? "- none" : lines.map((line) => `- ${line}`).join("\n")}`;
+  if (lines.length === 0) {
+    const hint = SECTION_HINTS[name];
+    return `${name}:\n- none${hint ? ` (${hint})` : ""}`;
+  }
+  return `${name}:\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }
 
 function tagsSummary(label: string, values: string[] | undefined): string {
