@@ -188,3 +188,20 @@ test("auto-index: dedup path does not double-write a semantic vector", () => {
   assert.equal(v2, undefined, "dedup no-op must not create a second vector");
   store.close();
 });
+
+test("fill-or-reject covers the facet, flags, and props template entries", () => {
+  const store = new SqliteStore(":memory:");
+  for (const field of ["lifecycle", "quality", "subject", "flags", "props"] as const) {
+    const proposal = {
+      kind: "obs",
+      title: "Template coverage probe",
+      body: "b",
+      confidence: 0.6,
+      [field]: WRITE_TEMPLATE[field],
+    } as unknown as Parameters<typeof admit>[0];
+    const r = admit(proposal, { store });
+    assert.equal(r.accepted, false, `${field} left as its instruction must reject`);
+    assert.ok(r.issues.some((i) => i.path === field), `${field} issue expected`);
+  }
+  store.close();
+});
