@@ -502,7 +502,8 @@ function executeWatch(
   previousRun: ProgramRun | undefined,
 ): ProgramOutput {
   const delta = positiveNumber(spec.params?.delta, 0.15);
-  const current = round(meanEffective(members));
+  const measure = typeof spec.params?.measure === "string" ? spec.params.measure : "effective_confidence";
+  const current = round(measuredValue(measure, members));
   const previous = typeof previousRun?.output.current === "number" ? previousRun.output.current : null;
   const change = previous === null ? 0 : round(current - previous);
   const tripped = previous !== null && Math.abs(change) >= delta;
@@ -535,8 +536,11 @@ function executeDrift(
   previousRun: ProgramRun | undefined,
 ): ProgramOutput {
   const delta = positiveNumber(spec.params?.delta, 0.15);
-  const memberValues = Object.fromEntries(members.map((cell) => [cell.key, round(cell.scores.effective)]));
-  const current = round(meanEffective(members));
+  const measure = typeof spec.params?.measure === "string" ? spec.params.measure : "effective_confidence";
+  const memberValues = Object.fromEntries(
+    members.map((cell) => [cell.key, round(measuredValue(measure, [cell]))]),
+  );
+  const current = round(measuredValue(measure, members));
   const previous = typeof previousRun?.output.current === "number" ? previousRun.output.current : null;
   const previousValues = isRecord(previousRun?.output.memberValues)
     ? (previousRun.output.memberValues as Record<string, unknown>)

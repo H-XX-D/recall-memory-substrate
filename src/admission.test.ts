@@ -23,11 +23,25 @@ test("admit rejects a schema-invalid proposal and builds no cell", () => {
   assert.ok(r.issues.some((i) => i.path === "kind"));
 });
 
-test("admit rejects a proposal carrying a secret and builds no cell", () => {
+test("admit accepts a proposal carrying a secret, marks it sensitivity secret, and warns", () => {
   const r = admit({ ...base, body: "token sk-abcdEFGH1234567890ijklMNOP stored" });
-  assert.equal(r.accepted, false);
-  assert.equal(r.cell, undefined);
-  assert.ok(r.issues.some((i) => /OpenAI/i.test(i.message)));
+  assert.equal(r.accepted, true);
+  assert.equal(r.cell!.policy.sensitivity, "secret");
+  assert.ok(r.warnings.some((w) => /OpenAI/i.test(w) && /sensitivity: secret/.test(w)));
+});
+
+test("a public write carrying personal data is downgraded to private with a warning", () => {
+  const r = admit({ ...base, sensitivity: "public", body: "contact ada@example.com for details" });
+  assert.equal(r.accepted, true);
+  assert.equal(r.cell!.policy.sensitivity, "private");
+  assert.ok(r.warnings.some((w) => /email/i.test(w) && /downgraded to private/.test(w)));
+});
+
+test("an explicit sensitivity secret write passes without secret warnings", () => {
+  const r = admit({ ...base, sensitivity: "secret", body: "token sk-abcdEFGH1234567890ijklMNOP stored" });
+  assert.equal(r.accepted, true);
+  assert.equal(r.cell!.policy.sensitivity, "secret");
+  assert.ok(!r.warnings.some((w) => /marked sensitivity/.test(w)), "already-secret writes need no marking warning");
 });
 
 test("admit attenuates unsupported high confidence and warns", () => {
@@ -87,6 +101,20 @@ test("admit with a store: a supersedes edge demotes the target and extends linea
   );
   assert.equal(store.get("oldk")?.status, "superseded");
   assert.ok(r.cell?.lineage.includes("oldk"));
+  store.close();
+});
+
+test("supersede by handle demotes the target and preserves lineage", () => {
+  const store = new SqliteStore(":memory:");
+  const a = admit({ kind: "dec", title: "Original decision", body: "b", confidence: 0.6 }, { store }).cell!;
+  const b = admit(
+    { kind: "dec", title: "Replacement decision", body: "b", confidence: 0.6, edges: [{ relation: "supersedes", target: a.handle, weight: 0 }] },
+    { store },
+  ).cell!;
+  assert.equal(store.get(a.key)?.status, "superseded");
+  assert.ok(b.lineage.includes(a.key)); // same lineage record as the full-key path
+  const storedEdge = store.get(b.key)?.edgesOut.find((e) => e.relation === "supersedes");
+  assert.equal(storedEdge?.target, a.key); // edge target normalized to the full key
   store.close();
 });
 
@@ -172,5 +200,75 @@ test("auto-index: dedup path does not double-write a semantic vector", () => {
   assert.ok(v1 !== undefined, "original cell vector must be defined");
   const v2 = store.getSemanticVector("d2");
   assert.equal(v2, undefined, "dedup no-op must not create a second vector");
+  store.close();
+});
+
+test("fill-or-reject covers the facet, flags, and props template entries", () => {
+  const store = new SqliteStore(":memory:");
+  for (const field of ["lifecycle", "quality", "subject", "flags", "props", "programs", "hyperedges", "value"] as const) {
+    const proposal = {
+      kind: "obs",
+      title: "Template coverage probe",
+      body: "b",
+      confidence: 0.6,
+      [field]: WRITE_TEMPLATE[field],
+    } as unknown as Parameters<typeof admit>[0];
+    const r = admit(proposal, { store });
+    assert.equal(r.accepted, false, `${field} left as its instruction must reject`);
+    assert.ok(r.issues.some((i) => i.path === field), `${field} issue expected`);
+  }
+  store.close();
+});
+
+test("proposal programs resolve to prg cells and land on cell.programs", () => {
+  const store = new SqliteStore(":memory:");
+  const prg = admit(
+    { kind: "prg", title: "watch storage", body: "standing", confidence: 0.6, props: { program: { schemaVersion: "recall.program.v1", operation: "watch", target: { topics: ["storage"] } } } },
+    { store },
+  ).cell!;
+  const r = admit(
+    { kind: "obs", title: "Storage observation", body: "b", confidence: 0.6, topics: ["storage"], programs: [prg.handle] },
+    { store },
+  );
+  assert.equal(r.accepted, true);
+  assert.deepEqual(r.cell!.programs, [prg.key]);
+  assert.deepEqual(store.get(r.cell!.key)!.programs, [prg.key]);
+  store.close();
+});
+
+test("proposal programs reject dangling targets and non-prg cells", () => {
+  const store = new SqliteStore(":memory:");
+  const obs = admit({ kind: "obs", title: "Not a program", body: "b", confidence: 0.6 }, { store }).cell!;
+  const dangling = admit({ kind: "obs", title: "A", body: "b", confidence: 0.6, programs: ["nope"] }, { store });
+  assert.equal(dangling.accepted, false);
+  assert.ok(dangling.issues.some((i) => i.path === "programs[0]"));
+  const wrongKind = admit({ kind: "obs", title: "B", body: "b", confidence: 0.6, programs: [obs.key] }, { store });
+  assert.equal(wrongKind.accepted, false);
+  assert.ok(wrongKind.issues.some((i) => i.path === "programs[0]"));
+  store.close();
+});
+
+test("proposal hyperedges join existing bundles with role and weight", () => {
+  const store = new SqliteStore(":memory:");
+  const seed = admit({ kind: "obs", title: "Seed member", body: "b", confidence: 0.6 }, { store }).cell!;
+  store.putHyperedge({
+    id: "he-1", kind: "evidence-set", title: "Storage evidence",
+    members: [{ key: seed.key, role: "member", ordinal: 0 }],
+    metadata: {}, createdAt: "2026-07-04T00:00:00.000Z",
+  });
+  const r = admit(
+    { kind: "obs", title: "Joins the bundle", body: "b", confidence: 0.6, hyperedges: [{ id: "he-1", role: "driver", weight: 0.8 }] },
+    { store },
+  );
+  assert.equal(r.accepted, true);
+  const he = store.getHyperedge("he-1")!;
+  const member = he.members.find((m) => m.key === r.cell!.key);
+  assert.ok(member, "new cell should be a member");
+  assert.equal(member!.role, "driver");
+  assert.equal(member!.weight, 0.8);
+  assert.equal(member!.ordinal, 1);
+  const unknown = admit({ kind: "obs", title: "C", body: "b", confidence: 0.6, hyperedges: [{ id: "missing" }] }, { store });
+  assert.equal(unknown.accepted, false);
+  assert.ok(unknown.issues.some((i) => i.path === "hyperedges[0].id"));
   store.close();
 });

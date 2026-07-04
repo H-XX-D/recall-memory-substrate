@@ -139,6 +139,7 @@ export interface Cell {
   title: string;
   body: string;
   summary?: string;
+  value?: number; // measured numeric reading; supersede chains form its delta series
   scope: { project: string; tenant: string };
   scores: Scores;
   stability: Stability;
@@ -182,6 +183,9 @@ export interface WriteProposal {
   reverifyAfter?: string | null;
   flags?: Partial<Flags>;
   props?: Record<string, unknown>;
+  value?: number; // measured numeric reading this cell records
+  programs?: string[]; // prg cell keys or handles that should watch this cell
+  hyperedges?: { id: string; role?: string; weight?: number }[]; // join existing hyperedges at admit
   project?: string;
   tenant?: string;
   stability?: Stability;

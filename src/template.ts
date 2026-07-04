@@ -16,8 +16,12 @@ export const WRITE_TEMPLATE = {
   title: "non-empty one-line claim, <=20 words",
   body: "non-empty: the claim, the evidence, and the reasoning",
   confidence: "number in (0,1], your calibrated probability it is correct",
+  value: "finite number this cell measures, or omit; supersede the prior reading so the lineage forms the delta series",
   topics: "string[] search terms a future asker would use",
   entities: "string[] named entities this is about",
+  lifecycle: "string[] lifecycle facet tags for filtering",
+  quality: "string[] quality facet tags for filtering",
+  subject: "string[] subject facet tags for filtering",
   edges: "[{relation: supports|contradicts|concerns|depends_on|supersedes|derived_from, target: cell-id, weight}] or state none and why in body",
   sourceRefs: "string[] grounding refs (files/commits)",
   uncertainty: "number in [0,1], or omit to derive from confidence",
@@ -29,6 +33,10 @@ export const WRITE_TEMPLATE = {
   stability: "one of: ephemeral|volatile|stable",
   expiresAt: "ISO-8601 timestamp or null (staleness clock)",
   reverifyAfter: "ISO-8601 timestamp or null (reverify clock)",
+  flags: "{annexed|locked|pinned|requiresReview|allowBackgroundUse: boolean}, or omit for defaults (pinned resists decay)",
+  props: "object payload; props.program carries a standing-program spec (recall.program.v1) on prg cells",
+  programs: "string[] existing prg cell keys/handles that should watch this cell",
+  hyperedges: "[{id: existing-hyperedge-id, role, weight}] bundle memberships to join; create bundles with hyperedge add",
   summary: "optional short summary",
   owner: "actor id",
   project: "project slug for routing",
@@ -36,6 +44,12 @@ export const WRITE_TEMPLATE = {
 } as const;
 
 export type WriteTemplateField = keyof typeof WRITE_TEMPLATE;
+
+// Completeness guard: every WriteProposal key must have a template entry, so a
+// schema field can never again exist without the authoring contract teaching
+// it. Fails typecheck if the template and the proposal type drift.
+const _templateCoversProposal: Record<keyof WriteProposal, string> = WRITE_TEMPLATE;
+void _templateCoversProposal;
 
 // A field whose submitted value still equals its template description was never
 // filled. Returns one issue per such field; admission rejects on any, and the

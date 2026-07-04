@@ -258,13 +258,14 @@ test("import mem0 where every record is rejected exits 1 with the summary on std
   try {
     const db = join(tmp, "recall.sqlite3");
     const mem0Path = join(tmp, "mem0.json");
-    // A GitHub-token-shaped string trips screenSecrets, which admit() always
-    // rejects regardless of store state: a deterministic, store-independent
-    // rejection.
+    // A memory that lands exactly on its template instruction trips the
+    // fill-or-reject rule: a deterministic, store-independent rejection.
+    // (Credential-shaped strings no longer reject; they import flagged as
+    // sensitivity: secret.)
     writeFileSync(
       mem0Path,
       JSON.stringify({
-        memories: [{ id: "m1", memory: "leaked token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+        memories: [{ id: "m1", memory: "non-empty: the claim, the evidence, and the reasoning" }],
       }),
     );
 
@@ -286,15 +287,15 @@ test("import mem0 with a mixed batch (one clean, one rejected) exits 0 and print
   try {
     const db = join(tmp, "recall.sqlite3");
     const mem0Path = join(tmp, "mem0.json");
-    // One record admits cleanly; the other carries a GitHub-token-shaped
-    // string that trips screenSecrets and is always rejected. With at least
+    // One record admits cleanly; the other lands exactly on its template
+    // instruction and is always rejected by fill-or-reject. With at least
     // one record landed, the run should still exit 0.
     writeFileSync(
       mem0Path,
       JSON.stringify({
         memories: [
           { id: "m1", memory: "CLI imported memory." },
-          { id: "m2", memory: "leaked token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+          { id: "m2", memory: "non-empty: the claim, the evidence, and the reasoning" },
         ],
       }),
     );
@@ -1609,7 +1610,8 @@ test("admit output includes guidance with candidate edges by default", () => {
     assert.equal(parsed.accepted, true);
     assert.ok(parsed.guidance, "expected a guidance field");
     assert.ok(parsed.guidance.candidateEdges.length >= 1);
-    assert.deepEqual(parsed.guidance.programSuggestions, []);
+    // Suggestions run by default; empty here because no threshold is met.
+    assert.ok(Array.isArray(parsed.guidance.programSuggestions));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1687,7 +1689,7 @@ test("admit --suggest-programs surfaces program suggestions", () => {
   }
 });
 
-test("RECALL_SUGGEST_PROGRAMS=1 enables suggestions without the flag", () => {
+test("RECALL_SUGGEST_PROGRAMS=0 disables suggestions even when a threshold is met", () => {
   const tmp = tempDir();
   const previous = process.env.RECALL_SUGGEST_PROGRAMS;
   try {
@@ -1718,14 +1720,11 @@ test("RECALL_SUGGEST_PROGRAMS=1 enables suggestions without the flag", () => {
         topics: ["latency"],
       }),
     );
-    process.env.RECALL_SUGGEST_PROGRAMS = "1";
+    process.env.RECALL_SUGGEST_PROGRAMS = "0";
     const admitted = capture(["admit", "--json", proposalPath, "--db", db], { now: "2026-07-04T12:01:00.000Z" });
     assert.equal(admitted.code, 0, admitted.stderr);
     const parsed = JSON.parse(admitted.stdout);
-    const watch = parsed.guidance.programSuggestions.find(
-      (s: { operation: string }) => s.operation === "watch",
-    );
-    assert.ok(watch, "expected a watch suggestion via the env var");
+    assert.deepEqual(parsed.guidance.programSuggestions, []);
   } finally {
     if (previous === undefined) delete process.env.RECALL_SUGGEST_PROGRAMS;
     else process.env.RECALL_SUGGEST_PROGRAMS = previous;

@@ -77,21 +77,22 @@ class RecallHelperTests(unittest.TestCase):
         self.assertEqual(proposal["body"], "body from disk")
         self.assertEqual(proposal["props"], {"phase": "r9"})
 
-    def test_refuses_secret_sensitivity_for_normal_graph(self) -> None:
+    def test_accepts_explicit_secret_sensitivity(self) -> None:
         result = run_helper(
             "--kind",
             "obs",
             "--title",
-            "Secret write",
+            "Secret-flagged write",
             "--body",
-            "This should not enter the normal graph.",
+            "Sensitivity secret is a legitimate policy value.",
             "--confidence",
             "0.6",
             "--sensitivity",
             "secret",
         )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("encrypted side store", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        proposal = json.loads(result.stdout)
+        self.assertEqual(proposal["sensitivity"], "secret")
 
     @unittest.skipUnless(CLI.exists(), "dist/cli.js is not built")
     def test_validate_delegates_to_recall_mal(self) -> None:

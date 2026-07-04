@@ -26,15 +26,21 @@ const SECRET_PATTERNS: { name: string; re: RegExp }[] = [
   },
 ];
 
-export function screenSecrets(
+// Detection only: callers decide policy. Admission flags rather than blocks:
+// a detected credential marks the cell sensitivity: secret with a warning, a
+// public write carrying personal data is downgraded to private. The store is
+// a local file; the durable protection is keeping it out of version control
+// (see the safety practices section in the docs).
+export function screenFindings(
   proposal: WriteProposal
-): { allowed: boolean; issues: ValidationIssue[] } {
-  const issues: ValidationIssue[] = [];
+): { secrets: ValidationIssue[]; publicData: ValidationIssue[] } {
+  const secrets: ValidationIssue[] = [];
+  const publicData: ValidationIssue[] = [];
   const fields = textFields(proposal);
   for (const field of fields) {
     for (const { name, re } of SECRET_PATTERNS) {
       if (re.test(field.text)) {
-        issues.push({ path: field.path, message: `possible ${name} detected` });
+        secrets.push({ path: field.path, message: `possible ${name} detected` });
       }
     }
   }
@@ -42,11 +48,20 @@ export function screenSecrets(
     for (const field of fields) {
       for (const { name, re } of PUBLIC_DATA_PATTERNS) {
         if (re.test(field.text)) {
-          issues.push({ path: field.path, message: `public write may expose ${name}` });
+          publicData.push({ path: field.path, message: `public write may expose ${name}` });
         }
       }
     }
   }
+  return { secrets, publicData };
+}
+
+// Back-compat detection summary over screenFindings.
+export function screenSecrets(
+  proposal: WriteProposal
+): { allowed: boolean; issues: ValidationIssue[] } {
+  const { secrets, publicData } = screenFindings(proposal);
+  const issues = [...secrets, ...publicData];
   return { allowed: issues.length === 0, issues };
 }
 
@@ -100,6 +115,11 @@ function textFields(proposal: WriteProposal): { path: string; text: string }[] {
   pushStrings(fields, "quality", proposal.quality);
   pushStrings(fields, "subject", proposal.subject);
   pushStrings(fields, "sourceRefs", proposal.sourceRefs);
+  pushStrings(fields, "programs", proposal.programs);
+  proposal.hyperedges?.forEach((h, i) => {
+    pushString(fields, `hyperedges[${i}].id`, h.id);
+    pushString(fields, `hyperedges[${i}].role`, h.role);
+  });
   pushString(fields, "project", proposal.project);
   pushString(fields, "tenant", proposal.tenant);
   collectPropStrings(fields, "props", proposal.props);

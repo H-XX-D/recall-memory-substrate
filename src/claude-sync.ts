@@ -13,7 +13,33 @@ import { SqliteStore } from "./store.js";
 
 export const DEFAULT_AUTO_MEMORY_ROOT = join(homedir(), ".claude", "projects");
 
-const HOOK_ASSET_RELATIVE = ["claude", "hooks", "recall-session-start.py"];
+// Assets installed under the user's home on apply: the session hook, plus the
+// recall skills tree (SKILL.md and the peek/router helper scripts) that the
+// hook's directive and remediation text point at. `source` is relative to the
+// packaged integrations/ directory; `dest` is relative to the user's home.
+interface AssetSpec {
+  source: string[];
+  dest: string[];
+}
+
+const INSTALL_ASSETS: AssetSpec[] = [
+  {
+    source: ["claude", "hooks", "recall-session-start.py"],
+    dest: [".claude", "hooks", "recall-session-start.py"],
+  },
+  {
+    source: ["claude", "skill", "SKILL.md"],
+    dest: [".claude", "skills", "recall", "SKILL.md"],
+  },
+  {
+    source: ["claude", "skill", "scripts", "recall_peek.py"],
+    dest: [".claude", "skills", "recall", "scripts", "recall_peek.py"],
+  },
+  {
+    source: ["claude", "skill", "scripts", "recall_router.py"],
+    dest: [".claude", "skills", "recall", "scripts", "recall_router.py"],
+  },
+];
 
 export interface ClaudeSyncOptions {
   home?: string;
@@ -115,11 +141,15 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
   const assetsInstalled: string[] = [];
   let assetsSkipped: string | undefined;
   if (apply && installAssets) {
-    const sourceAsset = findHookAssetSource();
-    if (!sourceAsset) {
-      assetsSkipped = "asset not found";
-    } else {
-      const destAsset = join(home, ".claude", "hooks", "recall-session-start.py");
+    for (const asset of INSTALL_ASSETS) {
+      const sourceAsset = findAssetSource(asset.source);
+      if (!sourceAsset) {
+        // Degrade per asset: a packaging miss of one file must not block the
+        // rest of the install (or the sync as a whole).
+        assetsSkipped = "asset not found";
+        continue;
+      }
+      const destAsset = join(home, ...asset.dest);
       const contents = readFileSync(sourceAsset);
       const changed = !existsSync(destAsset) || !readFileSync(destAsset).equals(contents);
       if (changed) {
@@ -179,18 +209,18 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
   };
 }
 
-// Resolves the packaged recall-session-start.py hook asset. Tries the path
-// relative to this module first (works for both the src/ tsx dev path and the
-// compiled dist/ path, since integrations/ and dist/ are both direct children
-// of the package root), then a packaged-path fallback one level up from that
-// (covers a module nested one directory deeper than expected). Returns null,
-// never throws, if neither location has the file: runClaudeSync degrades to
+// Resolves a packaged asset under integrations/. Tries the path relative to
+// this module first (works for both the src/ tsx dev path and the compiled
+// dist/ path, since integrations/ and dist/ are both direct children of the
+// package root), then a packaged-path fallback one level up from that (covers
+// a module nested one directory deeper than expected). Returns null, never
+// throws, if neither location has the file: runClaudeSync degrades to
 // assetsSkipped rather than failing the whole sync.
-function findHookAssetSource(): string | null {
+function findAssetSource(relative: string[]): string | null {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    join(here, "..", "integrations", ...HOOK_ASSET_RELATIVE),
-    join(here, "..", "..", "integrations", ...HOOK_ASSET_RELATIVE),
+    join(here, "..", "integrations", ...relative),
+    join(here, "..", "..", "integrations", ...relative),
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;

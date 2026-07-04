@@ -82,9 +82,19 @@ export function resolveCell(store: Store, ref: string): Cell | undefined {
   if (exact) return exact;
   const byHandle = store.getByHandle(r) ?? store.getByHandle(bare);
   if (byHandle) return byHandle;
-  // id prefix: a unique hex prefix (>=4 chars) resolves; an ambiguous one errors.
+  // id prefix: a unique hex prefix (>=4 chars) resolves; an ambiguous one
+  // errors. Federated union keys are graph-prefixed (home:<uuid>), so the
+  // prefix matches the core after any graph qualifier, and a graph-qualified
+  // ref (home:1c7fdd22) narrows the match to that graph.
   if (/^[a-f0-9]{4,}$/i.test(bare)) {
-    const matches = store.all().filter((c) => c.key.startsWith(bare));
+    const refGraph = r.includes(":") ? r.slice(0, r.indexOf(":")).trim() : undefined;
+    const matches = store.all().filter((c) => {
+      const sep = c.key.indexOf(":");
+      const cellGraph = sep >= 0 ? c.key.slice(0, sep) : undefined;
+      const core = sep >= 0 ? c.key.slice(sep + 1) : c.key;
+      if (refGraph !== undefined && cellGraph !== undefined && refGraph !== cellGraph) return false;
+      return core.startsWith(bare);
+    });
     if (matches.length === 1) return matches[0];
     if (matches.length > 1) {
       throw new Error(`ambiguous cell id prefix: ${bare} (${matches.length} matches)`);

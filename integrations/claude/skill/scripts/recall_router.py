@@ -1,32 +1,30 @@
 #!/usr/bin/env python3
-"""
-recall_router.py — Meta-router for operator-style Recall queries.
+"""Meta-router for Recall queries: picks the cheapest tool per question shape.
 
-The benchmark (2026-05-24) showed operator-mode wins decisively on bytes
-(~32×) but missed 3/7 relevance checks where `recall_compile`'s lexical
-ranking surfaced wrong cells. The fix: route the query to the operator
-tool whose retrieval shape best matches the question shape.
+Rule-based pattern matching (stdlib only, explainable, debuggable) maps the
+shape of a question to the tool whose retrieval shape matches it:
 
-This router uses rule-based pattern matching (zero-dep, explainable,
-debuggable) to pick the right tool:
+| Question shape                 | Tool                        | Trigger patterns |
+|--------------------------------|-----------------------------|------------------|
+| Cell ID lookup                 | recall_peek.py <id>         | 8+ hex chars |
+| Temporal ("what changed")      | recall diff --since X       | "since", "ago", "last", "recent", "changed", Nh/Nd/Nw |
+| Graph health                   | recall health               | "contradiction", "stale", "warning", "health", "conflict" |
+| Known symbol or specific term  | recall_peek.py --match      | snake_case, CamelCase, backticked code, "function/class X" |
+| Synthesis, open-ended          | recall compile (fallback)   | anything else |
 
-| Question shape | Tool | Trigger patterns |
-|---|---|---|
-| Cell ID lookup | `recall_peek <id>` | 8+ hex chars |
-| Temporal ("what changed") | `recall_diff --since X` | "since", "ago", "last", "recent", "changed", "Nh"/"Nd"/"Nw" |
-| Graph health | `recall_health_peek` | "contradiction", "stale", "warning", "health", "conflict", "beliefs" |
-| Known symbol / specific term | `recall_peek --match` | snake_case, CamelCase, backticked code, "function/class X" |
-| Synthesis / open-ended | `recall compile` (default fallback) | anything else |
+The peek script lives beside this one; diff, health, and compile are verbs on
+the installed recall CLI, which owns DB routing by cwd. Pass --db only to
+override that routing.
 
 CLI:
 
     # Auto-route and execute:
     recall_router.py "what changed in the last 2 hours"
 
-    # Show routing decision + reasoning, then execute:
+    # Show the routing decision and reasoning, then execute:
     recall_router.py "find the build_proposal function" --explain
 
-    # Try multiple tools if primary returns empty:
+    # Try fallback tools if the primary returns empty:
     recall_router.py "L7 gravity closure" --fallback
 
     # Force a specific tool (override routing):
@@ -40,14 +38,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from recall_helper import DEFAULT_DB  # noqa: E402
+
+def _recall_bin() -> str:
+    """Resolve the recall CLI: RECALL_CLI override, else PATH, else the bare
+    name (subprocess will surface a clean not-found error)."""
+    override = os.environ.get("RECALL_CLI", "").strip()
+    if override:
+        return override
+    return shutil.which("recall") or "recall"
 
 
 # ---- Routing patterns ----
@@ -67,14 +73,14 @@ TEMPORAL_KEYWORDS = (
 
 HEALTH_KEYWORDS = (
     "contradiction", "contradictions", "stale", "warning", "warnings",
-    "health", "conflict", "conflicts", "critical", "beliefs",
+    "health", "conflict", "conflicts", "critical",
     "stale cells", "graph state",
 )
 
-# Identifier-y patterns that hint at a specific symbol/term.
-# Order matters: most-specific patterns first so a query like
+# Identifier-shaped patterns hinting at a specific symbol or term.
+# Order matters: most-specific patterns first, so a query like
 # "tell me about build_proposal function" matches snake_case (build_proposal)
-# rather than the function-keyword pattern (function ... → "function" stops).
+# rather than the function-keyword pattern.
 SYMBOL_PATTERNS = (
     re.compile(r'`([^`]+)`'),                                       # backticked
     re.compile(r'\bcell\s+([a-f0-9]{8,}(?:-[a-f0-9-]+)?)', re.I),   # "cell abc12345"
@@ -85,8 +91,8 @@ SYMBOL_PATTERNS = (
     re.compile(r'\bmethod\s+([A-Za-z_][\w]*)', re.I),               # "method bar"
 )
 
-# Short canonical version-string-y / specific-identifier-y patterns.
-# These are tried in order; first match wins.
+# Short version-string or specific-identifier patterns, tried in order;
+# first match wins.
 SPECIFIC_TERM_PATTERNS = (
     re.compile(r'\b(v\d+(?:\.\d+){1,2})\b'),                 # v1.4, v1.2.3
     re.compile(r'\b([A-Z]+-\d+[a-z]?)\b'),                   # GR-01e, R-02a
@@ -101,31 +107,31 @@ class RouteDecision:
     tool: str                # peek-id | diff | health | peek-match | compile
     arg: str | None          # tool-specific arg
     reason: str              # explanation
-    confidence: float        # 0..1 — how sure the router is
+    confidence: float        # 0 to 1: how sure the router is
 
 
 def route(query: str) -> RouteDecision:
-    """Pick the most-appropriate operator tool for a query.
+    """Pick the most-appropriate tool for a query.
 
     Returns RouteDecision with tool name, optional arg, reason, confidence.
     """
     q_lower = query.lower()
     q_stripped = query.strip()
 
-    # 1. Cell ID lookup — highest priority, unambiguous when present
+    # 1. Cell ID lookup: highest priority, unambiguous when present
     id_match = ID_PATTERN.search(q_stripped)
     if id_match:
         candidate = id_match.group(1)
-        # Only treat as ID if it's at least 8 chars (UUID prefix size)
+        # Only treat as an ID at 8+ chars (key prefix size)
         if len(candidate.replace("-", "")) >= 8:
             return RouteDecision(
                 tool="peek-id",
                 arg=candidate,
-                reason=f"detected cell-ID-like prefix {candidate!r} (≥8 hex chars)",
+                reason=f"detected cell-ID-like prefix {candidate!r} (8+ hex chars)",
                 confidence=0.95,
             )
 
-    # 2. Temporal queries → recall_diff
+    # 2. Temporal queries route to `recall diff`
     time_match = TIME_PATTERN.search(q_stripped)
     has_temporal_keyword = any(kw in q_lower for kw in TEMPORAL_KEYWORDS)
     if time_match or has_temporal_keyword:
@@ -139,15 +145,15 @@ def route(query: str) -> RouteDecision:
                 "week": "w", "w": "w",
             }
             if unit == "month":
-                # diff has no month unit; approximate 1 month as ~4 weeks so
-                # "3 months" widens to ~12w instead of collapsing to 3w.
+                # diff has no month unit; approximate 1 month as 4 weeks so
+                # "3 months" widens to 12w instead of collapsing to 3w.
                 since = f"{int(n) * 4}w"
             else:
                 since = f"{n}{unit_map.get(unit, 'd')}"
             return RouteDecision(
                 tool="diff",
                 arg=since,
-                reason=f"detected time expression {time_match.group(0)!r} → --since {since}",
+                reason=f"detected time expression {time_match.group(0)!r}, --since {since}",
                 confidence=0.9,
             )
         return RouteDecision(
@@ -157,7 +163,7 @@ def route(query: str) -> RouteDecision:
             confidence=0.7,
         )
 
-    # 3. Graph-health queries → recall_health_peek
+    # 3. Graph-health queries route to `recall health`
     if any(kw in q_lower for kw in HEALTH_KEYWORDS):
         return RouteDecision(
             tool="health",
@@ -166,7 +172,7 @@ def route(query: str) -> RouteDecision:
             confidence=0.85,
         )
 
-    # 4. Specific symbol or term → recall_peek --match
+    # 4. Specific symbol or term routes to peek --match
     for pat in SYMBOL_PATTERNS:
         m = pat.search(q_stripped)
         if m:
@@ -175,12 +181,11 @@ def route(query: str) -> RouteDecision:
             return RouteDecision(
                 tool="peek-match",
                 arg=symbol,
-                reason=f"identifier-shaped pattern matched: {pat.pattern!r} → {symbol!r}",
+                reason=f"identifier-shaped pattern matched: {pat.pattern!r} gives {symbol!r}",
                 confidence=0.75,
             )
 
-    # 5. Specific terms (version strings, kebab-case, lemma-IDs)
-    # Patterns are already selective enough that any match → peek-match.
+    # 5. Specific terms (version strings, kebab-case, lemma IDs)
     for pat in SPECIFIC_TERM_PATTERNS:
         m = pat.search(q_stripped)
         if m:
@@ -189,15 +194,15 @@ def route(query: str) -> RouteDecision:
                 return RouteDecision(
                     tool="peek-match",
                     arg=term,
-                    reason=f"specific-term pattern matched: {pat.pattern!r} → {term!r}",
+                    reason=f"specific-term pattern matched: {pat.pattern!r} gives {term!r}",
                     confidence=0.7,
                 )
 
-    # 6. Default: compile for synthesis / open-ended queries
+    # 6. Default: compile for synthesis and open-ended queries
     return RouteDecision(
         tool="compile",
         arg=None,
-        reason="no specific pattern matched — defaulting to compile for synthesis",
+        reason="no specific pattern matched; defaulting to compile for synthesis",
         confidence=0.5,
     )
 
@@ -213,28 +218,38 @@ class ExecutionResult:
     error: str | None = None
 
 
-def execute(decision: RouteDecision, query: str, db: str) -> ExecutionResult:
-    """Execute the routed tool."""
+def build_command(decision: RouteDecision, query: str, db: str | None,
+                  recall: str = "recall") -> list[str] | None:
+    """Command line for a routed tool. Pure, so the mapping is unit-tested.
+
+    Peek runs the sibling script; diff, health, and compile are CLI verbs.
+    --db is appended only when the caller gave one: the CLI (and the peek
+    script's env resolution) own routing otherwise.
+    """
     scripts = Path(__file__).parent
-    cmd: list[str]
+    db_args = ["--db", db] if db else []
 
     if decision.tool == "peek-id":
-        cmd = ["python3", str(scripts / "recall_peek.py"),
-               decision.arg, "--format", "human", "--db", db]
-    elif decision.tool == "diff":
-        cmd = ["python3", str(scripts / "recall_diff.py"),
-               "--since", decision.arg or "1d",
-               "--summary", "--max-items", "8", "--db", db]
-    elif decision.tool == "health":
-        cmd = ["python3", str(scripts / "recall_health_peek.py"),
-               "--max-items-per-section", "5", "--db", db]
-    elif decision.tool == "peek-match":
-        cmd = ["python3", str(scripts / "recall_peek.py"),
-               "--match", decision.arg or query,
-               "--limit", "5", "--format", "human", "--db", db]
-    elif decision.tool == "compile":
-        cmd = ["recall", "compile", query, "--words", "300", "--db", db]
-    else:
+        return [sys.executable or "python3", str(scripts / "recall_peek.py"),
+                decision.arg or query, "--format", "human", *db_args]
+    if decision.tool == "diff":
+        return [recall, "diff", "--since", decision.arg or "1d",
+                "--summary", "--max-items", "8", *db_args]
+    if decision.tool == "health":
+        return [recall, "health", *db_args]
+    if decision.tool == "peek-match":
+        return [sys.executable or "python3", str(scripts / "recall_peek.py"),
+                "--match", decision.arg or query,
+                "--limit", "5", "--format", "human", *db_args]
+    if decision.tool == "compile":
+        return [recall, "compile", query, "--words", "300", *db_args]
+    return None
+
+
+def execute(decision: RouteDecision, query: str, db: str | None) -> ExecutionResult:
+    """Execute the routed tool."""
+    cmd = build_command(decision, query, db, recall=_recall_bin())
+    if cmd is None:
         return ExecutionResult(
             tool=decision.tool, output="", bytes_returned=0,
             returncode=1, error=f"unknown tool: {decision.tool}",
@@ -247,6 +262,11 @@ def execute(decision: RouteDecision, query: str, db: str) -> ExecutionResult:
         return ExecutionResult(
             tool=decision.tool, output="", bytes_returned=0,
             returncode=124, error="timeout",
+        )
+    except OSError as e:
+        return ExecutionResult(
+            tool=decision.tool, output="", bytes_returned=0,
+            returncode=127, error=str(e),
         )
 
     return ExecutionResult(
@@ -275,7 +295,7 @@ def _result_looks_empty(execution: ExecutionResult) -> bool:
 
 
 def _fallback_tools(primary: str) -> list[str]:
-    """Pick fallback tools to try if primary returned empty."""
+    """Fallback tools to try if the primary returned empty."""
     if primary == "compile":
         return ["peek-match"]
     if primary == "peek-match":
@@ -293,23 +313,23 @@ def _fallback_tools(primary: str) -> list[str]:
 
 def _cli() -> int:
     ap = argparse.ArgumentParser(
-        description="Meta-router for Recall: picks the right operator tool per query.",
+        description="Meta-router for Recall: picks the right tool per query.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
             "  # Auto-route and execute:\n"
             "  recall_router.py \"what changed in the last 2 hours\"\n\n"
-            "  # Show routing decision + reasoning:\n"
+            "  # Show routing decision and reasoning:\n"
             "  recall_router.py \"find build_proposal\" --explain\n\n"
             "  # Force a tool override:\n"
             "  recall_router.py \"...\" --tool peek-match --arg build_proposal\n\n"
-            "  # Fallback if primary returns empty:\n"
+            "  # Fallback if the primary returns empty:\n"
             "  recall_router.py \"v1.4 CI\" --fallback\n"
         ),
     )
     ap.add_argument("query", help="The query string to route.")
     ap.add_argument("--explain", action="store_true",
-                    help="Show routing decision + reasoning before executing.")
+                    help="Show routing decision and reasoning before executing.")
     ap.add_argument("--explain-only", action="store_true",
                     help="Show routing decision; don't execute.")
     ap.add_argument("--tool", default=None,
@@ -318,10 +338,12 @@ def _cli() -> int:
     ap.add_argument("--arg", default=None,
                     help="Override the routed tool's arg (used with --tool).")
     ap.add_argument("--fallback", action="store_true",
-                    help="Try secondary tools if primary returns empty/insufficient.")
+                    help="Try secondary tools if the primary returns empty.")
     ap.add_argument("--format", choices=("text", "json"), default="text",
-                    help="Output format. Default: text (tool output + optional explanation).")
-    ap.add_argument("--db", default=DEFAULT_DB)
+                    help="Output format. Default: text (tool output plus optional explanation).")
+    ap.add_argument("--db", default=None,
+                    help="Explicit DB path. Default: none; the recall CLI routes by cwd "
+                         "and the peek script resolves RECALL_DB / RECALL_HOME.")
     args = ap.parse_args()
 
     # Routing
@@ -366,7 +388,6 @@ def _cli() -> int:
             if args.explain:
                 print(f"[router] primary empty, trying fallback: {fb_tool}",
                       file=sys.stderr)
-            # Re-route to the fallback tool, possibly with different arg
             fb_decision = RouteDecision(
                 tool=fb_tool,
                 arg=args.query if fb_tool == "peek-match" else None,
@@ -397,13 +418,12 @@ def _cli() -> int:
             } for e in executions],
         }, indent=2))
     else:
-        # Text: concatenate executions
         for e in executions:
             if e.error:
                 print(f"[error from {e.tool}] {e.error}", file=sys.stderr)
             print(e.output, end="" if e.output.endswith("\n") else "\n")
 
-    # Return code: 0 if primary succeeded OR any fallback succeeded
+    # Exit 0 if the primary succeeded OR any fallback succeeded
     return 0 if any(e.returncode == 0 for e in executions) else 1
 
 

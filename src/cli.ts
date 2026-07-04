@@ -21,6 +21,8 @@ import { migrate } from "./migrate.js";
 import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit, memoryHealthDerivationKey } from "./derivation.js";
+import { diffStore, parseKinds, parseSince, renderDiffSummary } from "./diff.js";
+import { renderDeltasCsv, valueSeries } from "./deltas.js";
 import { runAndRecordEval, runEvalAndDerive, type RecallEvalSuite } from "./evals.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { importGlobalToLocal } from "./local-import.js";
@@ -56,7 +58,7 @@ import { SqliteStore } from "./store.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 
 export const CLI_NAME = "recall-memory-substrate";
-export const CLI_VERSION = "0.11.3";
+export const CLI_VERSION = "0.12.0";
 
 export interface CliIo {
   stdout?: (text: string) => void;
@@ -98,8 +100,15 @@ interface ParsedArgs {
   writeGate: boolean;
   allGraphs: boolean;
   suggestPrograms: boolean;
+  noSuggestPrograms: boolean;
   noGuidance: boolean;
   intervalMin?: number;
+  since?: string;
+  kinds?: string;
+  summary: boolean;
+  csv: boolean;
+  topic: boolean;
+  maxItems?: number;
 }
 
 interface Route {
@@ -191,7 +200,9 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       try {
         const result = admit(proposal, { store, now: options.now });
         if (result.accepted && result.cell && !args.noGuidance) {
-          const suggest = args.suggestPrograms || env.RECALL_SUGGEST_PROGRAMS === "1";
+          const suggest = args.noSuggestPrograms
+            ? false
+            : args.suggestPrograms || env.RECALL_SUGGEST_PROGRAMS !== "0";
           outJson(out, {
             ...result,
             guidance: buildWriteGuidance(store, result.cell, result, { suggestPrograms: suggest }),
@@ -315,6 +326,43 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const query = queryFrom(args, 1, "search requires a query");
       return withReadStore(args, route, env, (store) => {
         outJson(out, { query, hits: store.search(query, { limit: args.limit }) });
+        return 0;
+      });
+    }
+
+    if (command === "deltas") {
+      const target = args.command[1];
+      if (!target) throw new Error("deltas requires a cell key, handle, or --topic <topic>");
+      return withReadStore(args, route, env, (store) => {
+        const rows = valueSeries(store, target, { topic: args.topic });
+        if (args.csv) {
+          out(renderDeltasCsv(rows));
+        } else {
+          outJson(out, { target, mode: args.topic ? "topic" : "lineage", rows });
+        }
+        return 0;
+      });
+    }
+
+    if (command === "diff") {
+      if (!args.since) throw new Error("diff requires --since <ISO|30m|2h|7d|4w>");
+      const since = parseSince(args.since, options.now ?? new Date().toISOString());
+      const kinds = args.kinds === undefined ? undefined : parseKinds(args.kinds);
+      return withReadStore(args, route, env, (store) => {
+        // No scope.project filter here: routing already picked the store.
+        // A project route opens that project's own DB file, whose cells keep
+        // scope.project === "default" unless an import stamped it, so
+        // re-filtering by the routing slug would report zero activity.
+        const result = diffStore(store, {
+          since,
+          kinds,
+          maxItems: args.maxItems,
+        });
+        if (args.summary) {
+          out(`${renderDiffSummary(result, route.slug ?? "")}\n`);
+        } else {
+          outJson(out, result);
+        }
         return 0;
       });
     }
@@ -492,7 +540,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       try {
         const now = options.now ? new Date(options.now) : new Date();
         if (args.derive) {
-          const { result, derived } = runEvalAndDerive(store, suite, now);
+          const { result, derived } = runEvalAndDerive(store, suite, now, { project: route.slug ?? args.project });
           outJson(out, { ...result, derived: { accepted: derived.accepted, duplicateOf: derived.duplicateOf } });
         } else {
           const result = runAndRecordEval(store, suite, now);
@@ -616,7 +664,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const dbPath = args.db ?? homeDbPath(env);
       const store = openWriteStore(dbPath);
       try {
-        const result = migrate(args.from, store, { apply: args.apply });
+        const result = migrate(args.from, store, { apply: args.apply, registryDb: registryDbPath(env) });
         outJson(out, result);
         return 0;
       } finally {
@@ -745,7 +793,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     writeGate: false,
     allGraphs: false,
     suggestPrograms: false,
+    noSuggestPrograms: false,
     noGuidance: false,
+    summary: false,
+    csv: false,
+    topic: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -773,8 +825,15 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--write-gate") parsed.writeGate = true;
     else if (arg === "--all-graphs") parsed.allGraphs = true;
     else if (arg === "--suggest-programs") parsed.suggestPrograms = true;
+    else if (arg === "--no-suggest-programs") parsed.noSuggestPrograms = true;
     else if (arg === "--no-guidance") parsed.noGuidance = true;
     else if (arg === "--interval-min") parsed.intervalMin = positiveInt(requireValue(argv, ++i, arg), arg);
+    else if (arg === "--since") parsed.since = requireValue(argv, ++i, arg);
+    else if (arg === "--kinds") parsed.kinds = requireValue(argv, ++i, arg);
+    else if (arg === "--summary") parsed.summary = true;
+    else if (arg === "--csv") parsed.csv = true;
+    else if (arg === "--topic") parsed.topic = true;
+    else if (arg === "--max-items") parsed.maxItems = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--limit") {
       parsed.limit = positiveInt(requireValue(argv, i + 1, arg), arg);
@@ -991,6 +1050,8 @@ Commands:
   recall compile "task" [--words 900] [--limit 10] [--no-health] [--inline-refs] [--ref-params] [--db path] [--project slug]
   recall search "query" [--limit 10] [--db path] [--project slug]
   recall cell show <key-or-handle> [--db path] [--project slug]
+  recall diff --since <ISO|30m|2h|7d|4w> [--kinds a,b] [--summary] [--max-items 12] [--db path] [--project slug]
+  recall deltas <cell|topic> [--topic] [--csv]     numeric value series with deltas (lineage or topic)
   recall hyperedge add --json edge.json [--db path] [--project slug]
   recall hyperedge show <id> [--db path] [--project slug]
   recall hyperedge list [--limit 10] [--db path] [--project slug]
@@ -1007,7 +1068,7 @@ Commands:
   recall eval show <id> [--db path] [--project slug]
   recall health [--derive] [--db path] [--project slug]
   recall operate once [--derive] [--db path] [--project slug]
-  recall operate list [--limit 20] [--db path] [--project slug]
+  recall operate list [--limit 10] [--db path] [--project slug]
   recall operate show <id> [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]
@@ -1028,8 +1089,8 @@ Commands:
   recall service status
   recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json
-  recall admit --json proposal.json [--suggest-programs] [--no-guidance] [--db path] [--project slug]
-      --suggest-programs  include standing-program suggestions in guidance
+  recall admit --json proposal.json [--no-suggest-programs] [--no-guidance] [--db path] [--project slug]
+      --no-suggest-programs  omit standing-program suggestions (on by default; RECALL_SUGGEST_PROGRAMS=0 also disables)
       --no-guidance       omit the guidance block
   recall version
 `;

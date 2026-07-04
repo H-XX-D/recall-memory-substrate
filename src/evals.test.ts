@@ -8,7 +8,7 @@ import {
   runEvalAndDerive,
   runRecallEval,
 } from "./evals.js";
-import type { RecallEvalCase } from "./evals.js";
+import type { RecallEvalCase, RecallEvalResult } from "./evals.js";
 import { buildCell } from "./build.js";
 import { SqliteStore } from "./store.js";
 import { indexCell } from "./semantic.js";
@@ -334,6 +334,87 @@ test("evalResultDerivationKey is stable for identical results and uses the eval_
     const k2 = evalResultDerivationKey(result);
     assert.equal(k1, k2);
     assert.match(k1, /^drv_eval_run_[0-9a-f]{24}$/);
+  } finally {
+    store.close();
+  }
+});
+
+test("evalResultDerivationKey buckets by day, suite, and project, not by volatile result content", () => {
+  const base: RecallEvalResult = {
+    name: "recall-default",
+    passed: true,
+    score: 1,
+    cases: [],
+    createdAt: "2026-07-03T08:00:00.000Z",
+  };
+  // Same day, same suite, different outcome: the pass/fail counts and case
+  // payloads are volatile between runs (the store changes under the suite as
+  // maintain admits its own witnesses), so they must not perturb the key.
+  const laterSameDay: RecallEvalResult = {
+    ...base,
+    passed: false,
+    score: 0.875,
+    cases: [{ name: "prefix", kind: "invariant", passed: false, score: 0, details: {} }],
+    createdAt: "2026-07-03T20:00:00.000Z",
+  };
+  assert.equal(evalResultDerivationKey(base), evalResultDerivationKey(laterSameDay));
+
+  const nextDay: RecallEvalResult = { ...base, createdAt: "2026-07-04T00:00:00.000Z" };
+  assert.notEqual(evalResultDerivationKey(base), evalResultDerivationKey(nextDay));
+
+  const otherSuite: RecallEvalResult = { ...base, name: "custom" };
+  assert.notEqual(evalResultDerivationKey(base), evalResultDerivationKey(otherSuite));
+
+  assert.notEqual(evalResultDerivationKey(base), evalResultDerivationKey(base, "someproject"));
+  assert.match(evalResultDerivationKey(base), /^drv_eval_run_[0-9a-f]{24}$/);
+});
+
+test("prefix-resolution targets the first hex-prefixable key and treats derived drv_ keys as legal", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    // Insertion order puts the derived-key witness first: exactly the state
+    // a maintain pass leaves behind on a fresh store. Derived keys
+    // (drv_<kind>_<hex24>) are the documented derivation scheme, not a
+    // resolver violation; the case must move on to a hex-prefixable target.
+    store.put(
+      buildCell(
+        { kind: "ver", title: "Eval recall-default: passed (score 1)", body: "w", confidence: 0.9 },
+        { key: `drv_eval_run_${"a".repeat(24)}` },
+      ),
+    );
+    store.put(
+      buildCell(
+        { kind: "obs", title: "Normal", body: "n", confidence: 0.8 },
+        { key: "cccccccc-0000-0000-0000-000000000000" },
+      ),
+    );
+    const suite = {
+      name: "custom",
+      cases: [{ name: "prefix", kind: "invariant" as const, invariant: "prefix-resolution" as const }],
+    };
+    const result = runRecallEval(store, suite);
+    assert.equal(result.cases[0]!.passed, true, JSON.stringify(result.cases[0]!.details));
+    assert.equal(result.cases[0]!.details.prefix, "cccccccc");
+  } finally {
+    store.close();
+  }
+});
+
+test("prefix-resolution passes trivially on a store holding only derived drv_ keys", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    store.put(
+      buildCell(
+        { kind: "ver", title: "Eval recall-default: passed (score 1)", body: "w", confidence: 0.9 },
+        { key: `drv_eval_run_${"b".repeat(24)}` },
+      ),
+    );
+    const suite = {
+      name: "custom",
+      cases: [{ name: "prefix", kind: "invariant" as const, invariant: "prefix-resolution" as const }],
+    };
+    const result = runRecallEval(store, suite);
+    assert.equal(result.cases[0]!.passed, true, JSON.stringify(result.cases[0]!.details));
   } finally {
     store.close();
   }

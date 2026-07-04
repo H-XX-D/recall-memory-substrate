@@ -1,6 +1,6 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Eighteen tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Nineteen tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
 // recall_hyperedge_list, recall_dag_analyze, recall_program_run,
@@ -18,6 +18,7 @@ import type { PageName, PageFilter } from "./pages.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { analyzeDagOverlay } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit, memoryHealthDerivationKey } from "./derivation.js";
+import { renderDeltasCsv, valueSeries } from "./deltas.js";
 import { runProgramCell } from "./programs.js";
 import { runAndRecordEval, runEvalAndDerive } from "./evals.js";
 import { subgraphCells, type SubgraphFilter } from "./subgraph.js";
@@ -39,7 +40,7 @@ export interface JsonRpcResponse {
 }
 
 const SERVER_NAME = "recall";
-const SERVER_VERSION = "0.11.3";
+const SERVER_VERSION = "0.12.0";
 const PROTOCOL_VERSION = "2024-11-05";
 
 export const TOOLS = [
@@ -47,7 +48,7 @@ export const TOOLS = [
   { name: "recall_search", description: "Lexical search; returns id, kind, title, score.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
   { name: "recall_compile", description: "Compile a budgeted context packet for a task.", inputSchema: { type: "object", properties: { task: { type: "string" }, words: { type: "number" }, health: { type: "boolean" }, inlineRefs: { type: "boolean" }, refParams: { type: "boolean" } }, required: ["task"] } },
   { name: "recall_cell", description: "Expand one cell by id, prefix, handle, or address.", inputSchema: { type: "object", properties: { idOrAddress: { type: "string" } }, required: ["idOrAddress"] } },
-  { name: "recall_write", description: "Admit a durable write through the admission gate. kind: dec (decision made), obs (observation), bel (claim to later confirm or refute), tsk (open action), obj (objective), rsk (risk), ref (source reference), ver (verification result), hyp (hypothesis). Prefer bel, tsk, rsk over flat observations when they fit; contradicts and depends_on edges feed the compile packet's conflicts and dependencies sections. Confidence above 0.7 needs verification, sourceRefs, or a weighted supports edge, else it is attenuated. The response includes guidance (candidate edges to similar cells; standing-program suggestions when suggestPrograms is true).", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, edges: { type: "array" }, sourceRefs: { type: "array", items: { type: "string" } }, verification: { type: "string", enum: ["unverified", "checked", "tested", "external"] }, props: { type: "object" }, suggestPrograms: { type: "boolean" } }, required: ["kind", "title", "body", "confidence"] } },
+  { name: "recall_write", description: "Admit a durable write through the admission gate. kind: dec (decision made), obs (observation), bel (claim to later confirm or refute), tsk (open action), obj (objective), rsk (risk), ref (source reference), ver (verification result), hyp (hypothesis). Prefer bel, tsk, rsk over flat observations when they fit; contradicts and depends_on edges feed the compile packet's conflicts and dependencies sections. Confidence above 0.7 needs verification, sourceRefs, or a weighted supports edge, else it is attenuated. The response includes guidance (candidate edges to similar cells; standing-program suggestions on by default, suggestPrograms false to opt out).", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, value: { type: "number" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, edges: { type: "array" }, sourceRefs: { type: "array", items: { type: "string" } }, verification: { type: "string", enum: ["unverified", "checked", "tested", "external"] }, props: { type: "object" }, programs: { type: "array", items: { type: "string" } }, hyperedges: { type: "array" }, suggestPrograms: { type: "boolean" } }, required: ["kind", "title", "body", "confidence"] } },
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
   { name: "recall_ref", description: "Resolve a cell reference (handle#field.path) to the addressed value.", inputSchema: { type: "object", properties: { reference: { type: "string" } }, required: ["reference"] } },
   { name: "recall_page", description: "Return a curated kind-filtered page view (reflections, objectives, workbench, witnesses, handoffs, team-metrics, agent-profile, user-profile, index).", inputSchema: { type: "object", properties: { name: { type: "string" }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } }, required: ["name"] } },
@@ -57,8 +58,9 @@ export const TOOLS = [
   { name: "recall_dag_analyze", description: "Analyze a DAG overlay for cycles and holonomy witnesses; with derive:true, admit keyed derived writes and report accepted/duplicate/rejected counts.", inputSchema: { type: "object", properties: { id: { type: "string" }, derive: { type: "boolean" } }, required: ["id"] } },
   { name: "recall_program_run", description: "Run a standing program cell by key or handle; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { key: { type: "string" }, derive: { type: "boolean" } }, required: ["key"] } },
   { name: "recall_program_runs", description: "List program run history, optionally filtered to one program key or handle.", inputSchema: { type: "object", properties: { key: { type: "string" }, limit: { type: "number" } } } },
-  { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
+  { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write (day-bucketed per project).", inputSchema: { type: "object", properties: { derive: { type: "boolean" }, project: { type: "string" } } } },
   { name: "recall_subgraph", description: "Tag-composed retrieval over active cells (AND across kinds/project/topics/entities/since; every listed value within an array family required), newest-updated first.", inputSchema: { type: "object", properties: { kinds: { type: "array", items: { type: "string" } }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } } } },
+  { name: "recall_deltas", description: "Numeric value series with deltas: walks a cell's supersede lineage (or a topic's readings) oldest-first; csv:true returns CSV text.", inputSchema: { type: "object", properties: { target: { type: "string" }, topic: { type: "boolean" }, csv: { type: "boolean" }, limit: { type: "number" } }, required: ["target"] } },
   { name: "recall_health", description: "Memory health report: belief pressure, staleness, contradictions, dangling edges, and provenance concentration; with derive:true, admit a day-bucketed witness cell and report accepted/duplicateOf.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
   { name: "recall_storage", description: "Storage stats: database path/bytes (including WAL sidecars), per-table row counts, average and maximum cell size.", inputSchema: { type: "object", properties: {} } },
 ] as const;
@@ -131,7 +133,7 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
     }
     case "recall_write": {
       const r = admit(toProposal(args), { store });
-      const suggest = args.suggestPrograms === true || process.env.RECALL_SUGGEST_PROGRAMS === "1";
+      const suggest = args.suggestPrograms === false ? false : args.suggestPrograms === true ? true : process.env.RECALL_SUGGEST_PROGRAMS !== "0";
       const guidance = r.accepted && r.cell ? buildWriteGuidance(store, r.cell, r, { suggestPrograms: suggest }) : undefined;
       return JSON.stringify({
         accepted: r.accepted,
@@ -251,7 +253,9 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       const derive = args.derive === true;
       const now = new Date();
       if (derive) {
-        const { result, derived } = runEvalAndDerive(store, undefined, now);
+        const { result, derived } = runEvalAndDerive(store, undefined, now, {
+          project: typeof args.project === "string" ? args.project : undefined,
+        });
         return JSON.stringify({
           name: result.name,
           passed: result.passed,
@@ -284,6 +288,16 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
         updatedAt: c.updatedAt,
       }));
       return JSON.stringify(cells);
+    }
+    case "recall_deltas": {
+      const target = String(args.target ?? "");
+      if (target === "") throw new Error("missing string param: target");
+      const rows = valueSeries(store, target, {
+        topic: args.topic === true,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      });
+      if (args.csv === true) return renderDeltasCsv(rows);
+      return JSON.stringify({ rows });
     }
     case "recall_health": {
       const now = new Date();
@@ -318,6 +332,9 @@ function toProposal(args: Record<string, unknown>): WriteProposal {
     // Passed through unvalidated: schema rejects a present non-object props,
     // so a malformed value surfaces as a fill-or-reject issue, not a drop.
     props: args.props === undefined ? undefined : (args.props as WriteProposal["props"]),
+    value: typeof args.value === "number" ? args.value : undefined,
+    programs: Array.isArray(args.programs) ? (args.programs as string[]) : undefined,
+    hyperedges: Array.isArray(args.hyperedges) ? (args.hyperedges as WriteProposal["hyperedges"]) : undefined,
   };
 }
 

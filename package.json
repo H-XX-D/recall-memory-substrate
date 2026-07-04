@@ -1,6 +1,6 @@
 {
   "name": "recall-memory-substrate",
-  "version": "0.11.3",
+  "version": "0.12.0",
   "description": "Recall v5 / MAL durable-memory substrate for agent context",
   "type": "module",
   "license": "Apache-2.0",
@@ -53,6 +53,8 @@
     "integrations/claude/hooks/",
     "!integrations/claude/hooks/__pycache__",
     "!integrations/claude/hooks/test_*.py",
+    "integrations/claude/skill/",
+    "!integrations/claude/skill/scripts/__pycache__",
     "README.md",
     "CHANGELOG.md",
     "CITATION.cff",

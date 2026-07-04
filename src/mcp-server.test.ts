@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the eighteen-tool surface", () => {
+test("tools/list returns exactly the nineteen-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -43,6 +43,7 @@ test("tools/list returns exactly the eighteen-tool surface", () => {
     "recall_program_runs",
     "recall_eval_run",
     "recall_subgraph",
+      "recall_deltas",
     "recall_health",
     "recall_storage",
   ]);
@@ -96,8 +97,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the eighteen-tool surface", () => {
-  assert.equal(TOOLS.length, 18);
+test("TOOLS is the nineteen-tool surface", () => {
+  assert.equal(TOOLS.length, 19);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -713,7 +714,7 @@ test("recall_write with verification tested keeps confidence 0.9", () => {
   store.close();
 });
 
-test("recall_write response includes guidance; programSuggestions empty by default", () => {
+test("recall_write response includes guidance; suggestions on by default, off with suggestPrograms false", () => {
   delete process.env["RECALL_SUGGEST_PROGRAMS"];
   const store = new SqliteStore(":memory:");
   callText(handleMcpRequest(req("tools/call", {
@@ -727,7 +728,12 @@ test("recall_write response includes guidance; programSuggestions empty by defau
   assert.equal(wr.accepted, true);
   assert.ok(wr.guidance, "accepted write must carry guidance");
   assert.ok(wr.guidance.candidateEdges.length >= 1);
-  assert.deepEqual(wr.guidance.programSuggestions, []);
+  assert.ok(Array.isArray(wr.guidance.programSuggestions), "suggestions run by default");
+  const off = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "obs", title: "WAL stall reproduced once more", body: "b", confidence: 0.6, topics: ["storage"], suggestPrograms: false },
+  }), store));
+  assert.deepEqual(off.guidance.programSuggestions, []);
   store.close();
 });
 

@@ -83,6 +83,7 @@ export function buildCell(proposal: WriteProposal, opts: BuildOpts = {}): Cell {
     title: proposal.title,
     body: proposal.body,
     summary: proposal.summary,
+    ...(proposal.value !== undefined ? { value: proposal.value } : {}),
     scope: { project, tenant: proposal.tenant ?? `local-${project}` },
     scores,
     stability: proposal.stability ?? "stable",

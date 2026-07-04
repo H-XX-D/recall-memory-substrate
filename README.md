@@ -23,9 +23,9 @@ A prompt arrives. Before the model sees it, the hook has already injected this:
 ```
 [Recall mini-index for THIS prompt (ids + titles only). You now know what
 exists, so do not ask or assert blind:]
-- dec_98ee "Canonical polarity locked for the memory axis"  [dec:98eec1f4]
-- bel_2b0a "Cache layer is safe to remove"  [bel:2b0ae4c3]  [SUPERSEDED?]
-- tsk_8686 "Wire the write surface into review"  [tsk:86868f00]
+- dec_4f21 "Use SQLite WAL mode for the event store"  [dec:4f21c09a]
+- bel_9d3e "Cache layer is safe to remove"  [bel:9d3e57b1]  [SUPERSEDED?]
+- tsk_71ac "Wire the retry path into review"  [tsk:71ac2e8d]
 DIG REQUIRED: a row above is marked [SUPERSEDED?]; its title may be out of
 date. Run recall compile "<task>" and recall cell show <id> on it BEFORE you
 act on it.
@@ -37,9 +37,9 @@ No query was issued. The hook fired, ranked the graph against the prompt, flagge
 
 - **Primer on every prompt.** A per-turn mini-index of the cells relevant to what the user just asked, with contradiction and staleness flags, injected through session hooks.
 - **Compile packets.** `recall compile "<task>"` turns a task description into a budgeted, sectioned context packet: relevant memory, active beliefs, conflicts, dependencies, risks, open tasks, and a categorized expansion index, ranked by BM25 fused with graph degree, effective confidence, and recency.
-- **A single write gate.** Every write is schema-validated, screened for credentials, deduplicated, checked for dangling references, and attenuated when a claim is stated more strongly than its evidence supports. The gate answers with guidance: similar cells to link, a better kind if one fits, what would restore capped confidence.
+- **A single write gate.** Every write is schema-validated, deduplicated, checked for dangling references, and attenuated when a claim is stated more strongly than its evidence supports. Credential-shaped strings are detected and the cell is automatically marked `sensitivity: secret` with a warning, never blocked; the store is a local file you keep out of version control. The gate answers with guidance: similar cells to link, a better kind if one fits, what would restore capped confidence.
 - **Turn gates.** A stop hook can hold the turn open until flagged cells were actually read, or until the agent wrote back what it learned. Forgetting stops being an option.
-- **A runtime, not a store.** Decay ticks, effective-confidence recomputation, standing programs (watch, trend, drift, quorum, reflex, allocation), evals, and health checks run deterministically between turns, no model in the loop. The memory is alive between LLM calls.
+- **A runtime, not a store.** Decay ticks, effective-confidence recomputation, standing programs (score, witness emission, tag projection, watch, drift, quorum, trend, reflex, allocation), evals, and health checks run deterministically between turns, no model in the loop. The memory is alive between LLM calls.
 - **Agents handle their own memory.** The agent that does the work is the agent that writes the memory, through the gate, and the hooks make sure it happens. No extractor model, no embedding service required, no separate memory bill: one model start to finish, plus deterministic code for everything between turns.
 - **Local first.** One SQLite file per graph on your machine. No server, no cloud, no API key. Portable JSON archives, plus importers for mem0, Zep, and Claude Code auto-memory.
 
@@ -49,7 +49,7 @@ No query was issued. The hook fired, ranked the graph against the prompt, flagge
 npm install -g recall-memory-substrate
 ```
 
-Requires Node.js 22.13 or newer (Recall uses the built-in `node:sqlite`; Node flags it experimental and prints a startup warning). Early Node 22 builds bundle SQLite without FTS5; Recall detects that and degrades lexical search to a LIKE scan, reporting backend `like` instead of `fts5-bm25`. Node 22.21 or 24 gets full BM25 ranking. Installs `recall` (CLI) and `recall-mcp` (MCP server).
+Requires Node.js 22.13 or newer (Recall uses the built-in `node:sqlite`; Node flags it experimental and prints a startup warning). Early Node 22 builds bundle SQLite without FTS5; Recall detects that and degrades lexical search to a LIKE scan, reporting backend `like` instead of `fts5-bm25`. Node 22.21 or 24 gets full BM25 ranking. Installs `recall` (CLI), `recall-mcp` (MCP server), and the `recall-stop-hook` and `recall-prompt-hook` binaries used by the opt-in write gate.
 
 ## Sixty seconds
 
@@ -94,6 +94,8 @@ Then read it back the way an agent would:
 recall compile "how should the event store handle concurrent reads?"
 ```
 
+[docs/overview.md](docs/overview.md) walks this loop end to end.
+
 ## How it works
 
 ```mermaid
@@ -124,10 +126,12 @@ That makes it the natural companion to RAG, not a replacement for it. The graph 
 
 ## Surfaces
 
+Start with [How Recall works](docs/overview.md), a guided walkthrough of the whole system; the references below specify each surface.
+
 - **CLI**: about fifty verbs covering writes, compile, search, graph structures, standing programs, evals, health, import and export, maintenance, and assistant sync. [Reference](docs/cli.md).
-- **MCP**: eighteen tools over stdio for any MCP client: search, semantic retrieval, compile, gated writes with guidance, hyperedges, DAG analysis, programs, health. [Reference](docs/mcp.md).
+- **MCP**: nineteen tools over stdio for any MCP client: search, semantic retrieval, compile, gated writes with guidance, hyperedges, DAG analysis, programs, health. [Reference](docs/mcp.md).
 - **Hooks**: session start directive, per-prompt primer, stop-gate obligations, optional fail-closed write-back gate. [Integrations](docs/integrations.md).
-- **Library**: the same engine as TypeScript imports. [How Recall works](docs/overview.md).
+- **Library**: the same engine as TypeScript imports from `src/`.
 - **Moving memory**: archives and importers, dry-run first, exactly idempotent. [Import and export](docs/import-export.md).
 
 ## Development

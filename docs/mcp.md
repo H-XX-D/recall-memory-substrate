@@ -3,19 +3,24 @@
 `recall-mcp` is a Model Context Protocol server for the Recall memory
 substrate. It speaks JSON-RPC 2.0 over newline-delimited stdio (no MCP SDK
 dependency): each line of stdin is one JSON-RPC request, each response is
-written to stdout as one JSON line. It exposes 18 tools that read and write a
-Recall SQLite store: status and search, context compilation, single-cell and
-reference lookups, curated pages, tag-composed subgraph queries, durable
+written to stdout as one JSON line. It exposes 19 tools that read and write a
+Recall SQLite store: status and storage statistics, lexical and semantic
+search, context compilation, single-cell and
+reference lookups, curated pages, tag-composed subgraph queries, numeric
+delta series, durable
 writes, hyperedges, DAG overlay analysis, standing programs, the model-free
 eval suite, and a memory health report.
 
 ## Starting the server
 
-`recall-mcp` resolves its database from the `RECALL_DB` environment variable.
-If `RECALL_DB` is unset, it falls back to the home local store at
-`~/.recall/db/home.sqlite3`. The server opens that database once at startup
+`recall-mcp` resolves its database in this order: the `--db <path>` flag,
+then `--project <slug>` (resolved through the project registry; an unknown
+slug is a startup error), then the `RECALL_DB` environment variable, then
+the home local store at `~/.recall/db/home.sqlite3` (relocated by
+`RECALL_HOME`). The server opens that database once at startup
 and keeps it open for the life of the process; it closes the database and
-exits when stdin closes.
+exits when stdin closes. The server stays single-store: federated reads
+across every local graph exist only on the CLI.
 
 Point an MCP client at the `recall-mcp` binary. Example client configuration:
 
@@ -33,7 +38,8 @@ Point an MCP client at the `recall-mcp` binary. Example client configuration:
 ```
 
 Omit the `env` block to use the home local store instead of a project-specific
-one.
+one, or pass the flags through the client's `args` array (for example
+`"args": ["--project", "my-project"]`) to pin a project by slug.
 
 The server answers three JSON-RPC methods: `initialize` (protocol version and
 server info), `tools/list` (the tool array below), and `tools/call` (invoke a
@@ -46,12 +52,15 @@ Every tool call returns its result as a JSON string inside the standard MCP
 `content` array (`{ "content": [{ "type": "text", "text": "<json>" }] }`). The
 inner JSON is what each tool section below documents as "returns."
 
-Unknown or unresolved identifiers do not raise a protocol-level error; they
-come back as an ordinary JSON payload with an `error` field, for example
-`{"error": "unknown page: bogus"}` or `{"error": "unknown dag overlay: xyz"}`.
-An actual JSON-RPC error (the `error` field on the envelope, not inside the
-result text) is reserved for malformed requests: a missing `name` param, a
-missing method, or an unknown tool name.
+Most unknown or unresolved identifiers do not raise a protocol-level error;
+they come back as an ordinary JSON payload with an `error` field, for example
+`{"error": "unknown page: bogus"}`, `{"error": "unknown dag overlay: xyz"}`,
+or `{"error": "unknown program: <key>"}`. Two lookups are stricter and answer
+on the JSON-RPC envelope instead: `recall_cell` on an unknown or ambiguous
+id, and `recall_hyperedge_add` on a member that does not resolve. Beyond
+those, a JSON-RPC error (the `error` field on the envelope, not inside the
+result text) means a malformed request: a missing `name` param, a missing
+method, or an unknown tool name.
 
 Several tools accept a `derive: true` flag. Deriving computes a deterministic
 key from the operation's inputs (a `drv_<kind>_<hash>` cell key) and admits a
@@ -159,6 +168,10 @@ Parameters:
   `reference_parameters` section with per-reference type and target state
   detail
 
+`objective` is accepted as an alias for `task`. There is no cell-count
+parameter: the packet always carries up to the compile default of 10 cells,
+so the CLI's `--limit` has no MCP counterpart.
+
 Returns: a plain text rendering of the context packet (not JSON), with one
 section per packet field: `objective`, `compiler_state`, `relevant_memory`,
 `active_beliefs`, `conflicts`, `dependencies`, `risks`, `tasks`, `cell_state`,
@@ -182,7 +195,7 @@ Expands one cell by id, id prefix (four or more hex characters, must be
 unique), handle, or graph-qualified address.
 
 Parameters:
-- `idOrAddress` (string, required)
+- `idOrAddress` (string, required; `id` is accepted as an alias)
 
 Returns: `{ id, handle, kind, title, body, scores, status, edgesOut }`. An
 ambiguous id prefix (matching more than one cell) raises an error rather than
@@ -262,9 +275,10 @@ Example call: `{ "kinds": ["bel", "rsk"], "topics": ["storage"], "limit": 10 }`
 ### recall_write
 
 Admits a durable write proposal through the admission gate: schema
-validation, secret screening, confidence attenuation, cell construction, and
-(with a store) dedup, supersede, and effective-confidence recalculation from
-graph mass.
+validation, confidence attenuation, cell construction, and (with a store)
+dedup, supersede, and effective-confidence recalculation from graph mass.
+Credential-shaped strings never block a write; the cell is marked
+`sensitivity: secret` and the response warns, naming the token type.
 
 Parameters:
 - `kind` (string, required): one of `dec`, `obs`, `bel`, `tsk`, `obj`,
@@ -276,24 +290,33 @@ Parameters:
 - `confidence` (number, required; must be in `(0, 1]`). Confidence above 0.7
   is attenuated unless the proposal carries `verification`, `sourceRefs`, or
   a weighted supports edge.
+- `value` (number, optional): a finite reading this cell measures.
+  Superseding the prior reading extends the numeric series `recall_deltas`
+  walks.
 - `topics` (array of strings, optional)
 - `entities` (array of strings, optional)
 - `edges` (array, optional): each entry `{ relation, target, weight? }`
 - `sourceRefs` (array of strings, optional)
 - `verification` (string, optional): one of `unverified`, `checked`,
   `tested`, `external`
+- `programs` (string array, optional): existing `prg` cell keys or handles
+  that should watch this cell; unresolvable or non-program targets reject the
+  write.
+- `hyperedges` (array, optional): memberships to join in existing bundles,
+  each `{id, role, weight}`; an unknown hyperedge id rejects the write.
 - `props` (object, optional): structured properties stored on the cell. A
   `prg` cell carries its program spec at `props.program`, so a program
   suggestion's `proposal` can be passed back through `recall_write`
   unchanged to admit it.
-- `suggestPrograms` (boolean, optional, default false): include
+- `suggestPrograms` (boolean, optional, default true): include
   standing-program suggestions in the response guidance. Setting
   `RECALL_SUGGEST_PROGRAMS=1` in the server's environment is equivalent.
 
 Returns: `{ accepted, id, issues, warnings, attenuations }`, plus `guidance`
-on accepted writes. `id` is the new or existing cell's key (an identical
-active cell with the same kind, title, and body is deduplicated rather than
-duplicated, and `accepted` is still `true` with a warning noting the dedup).
+on accepted writes. `id` is the new or existing cell's key: an active cell
+with the same kind and title (titles compare case- and
+whitespace-insensitively) and an identical body is deduplicated rather than
+duplicated, and `accepted` is still `true` with a warning noting the dedup.
 `issues` is populated only when `accepted` is `false`.
 
 `guidance` is computed against the store at admit time and never persisted:
@@ -302,11 +325,15 @@ duplicated, and `accepted` is still `true` with a warning noting the dedup).
   already link, each with the target's key, handle, title, and kind, a
   suggested `relation` (`supports`, `supersedes`, or `depends_on`), its
   lexical score, and a reason.
+- `matchingPrograms`: up to five existing standing programs whose target
+  already selects the new cell, each `{ key, handle, title, operation }`.
+  Naming a program in the proposal's `programs` field makes the attachment
+  durable.
 - `kindHint` (optional): present when an `obs` or `dec` cell's text reads
   like an open action, an unconfirmed claim, or a hazard, naming the kind
   (`tsk`, `bel` or `hyp`, `rsk`) that fits better.
 - `evidenceHint` (optional): present exactly when confidence was attenuated.
-- `programSuggestions`: empty unless `suggestPrograms` is true. Each entry
+- `programSuggestions`: computed by default; empty when `suggestPrograms` is false or no threshold is met. Each entry
   is `{ operation, reason, proposal }` where `operation` is `watch`,
   `quorum`, or `allocate` and `proposal` is a ready-to-admit `prg` write
   proposal (a topic shared by 5 or more active cells suggests a watch, 4 or
@@ -359,6 +386,7 @@ verification, so the response also shows the evidence hint):
         "score": 0.00000140857297883885
       }
     ],
+    "matchingPrograms": [],
     "evidenceHint": "confidence was capped at 0.7; supply verification (checked, tested, external), sourceRefs, or a weighted supports edge to keep higher confidence",
     "programSuggestions": []
   }
@@ -444,12 +472,19 @@ Parameters:
 
 Returns: `{ id, operation, tripped, witness, derived }`. `operation` is one of
 `score`, `emit_witness`, `tag_projection`, `watch`, `drift`, `quorum`,
-`trend`, `reflex`, `allocate`. `tripped` and `witness` are present only for
-operations that produce them (`watch`, `drift`, `trend`, and conditionally
-`reflex`/`allocate`/`quorum`); `witness` here is just the witness title.
-`derived` is `{ accepted, duplicateOf }` when `derive` was requested, else
-omitted. Returns `{ error: "unknown program: <key>" }` if the key does not
-resolve to a cell.
+`trend`, `reflex`, `allocate`. `tripped` is present on `watch`, `drift`, and
+`trend` runs. `witness` is present when the run produced one: always for
+`quorum` and `emit_witness`, on `watch`/`drift`/`trend` only when tripped,
+on `reflex` when any member fired, and on `allocate` when the selected set
+changed; `witness` here is just the witness title.
+`derived` is `{ accepted, duplicateOf }` when `derive` was requested and the
+run produced a witness; a run with no witness (an untripped watch, for
+example) omits it. Returns `{ error: "unknown program: <key>" }` if the key
+does not resolve to a cell.
+
+Program cells are authored through ordinary writes: the spec format
+(operations, target selectors, per-operation params) is documented in
+`docs/cli.md` under Programs and evals.
 
 Example call: `{ "key": "prg_watch_conf", "derive": true }`
 
@@ -477,12 +512,29 @@ depends-on acyclicity, and prefix resolution).
 Parameters:
 - `derive` (boolean, optional, default false): admit the eval result as a
   keyed derived `ver` cell
+- `project` (string, optional): buckets the derived `ver` witness per
+  project; only meaningful with `derive: true`
 
 Returns: `{ name, passed, score, cases }`, where `cases` is an array of
 `{ name, passed }`. With `derive: true`, an additional `derived: { accepted, duplicateOf }`
-field is included. An unchanged eval outcome (same name, passed, score, and
-per-case results) collides with a prior derivation instead of creating a new
-witness cell.
+field is included. The derivation key buckets by calendar day (UTC), suite
+name, and project: only the first `derive: true` run on a given day (per
+suite and project) admits a new witness cell, and later runs the same day
+report `duplicateOf` even when the outcome changed.
+
+The tool always runs the default suite; there is no suite parameter. Custom
+suite JSON is CLI-only (`recall eval run --json suite.json`).
+
+### recall_deltas
+
+Numeric value series with deltas: the changes-to-truth history. Walks a
+cell's supersede lineage (or, with `topic: true`, every reading tagged with
+the topic) oldest-first and returns rows of `at` (the timestamp), `value`,
+`delta`, `key`, and `title`. With `csv: true` the result is CSV text
+(`timestamp,value,delta,key,title`) instead of JSON.
+
+Parameters: `target` (cell key, handle, or topic; required), `topic`
+(boolean), `csv` (boolean), `limit` (number, default 1000 newest rows).
 
 ### recall_health
 
@@ -503,3 +555,6 @@ Because the derivation key is bucketed by calendar day (UTC), only the first
 `derive: true` call on a given day admits a new witness cell; later calls the
 same day report `duplicateOf` regardless of whether the report content
 changed.
+
+Next: `docs/integrations.md` wires this server into Claude Code and Codex;
+`docs/cli.md` covers the CLI surface over the same store.

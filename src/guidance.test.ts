@@ -88,13 +88,13 @@ function admitMany(store: SqliteStore, kind: "obs" | "tsk", n: number, topic: st
   }
 }
 
-test("recurring topic suggests a watch program only when opted in", () => {
+test("recurring topic suggests a watch program by default; explicit false opts out", () => {
   const store = new SqliteStore(":memory:");
   admitMany(store, "obs", 5, "latency");
   const r = admit({ kind: "obs", title: "latency spike observed again", body: "b", confidence: 0.6, topics: ["latency"] }, { store });
-  const off = buildWriteGuidance(store, r.cell!, r);
+  const off = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: false });
   assert.deepEqual(off.programSuggestions, []);
-  const on = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  const on = buildWriteGuidance(store, r.cell!, r);
   const watch = on.programSuggestions.find((s) => s.operation === "watch");
   assert.ok(watch, "expected a watch suggestion");
   assert.equal(watch!.proposal.kind, "prg");
@@ -179,5 +179,21 @@ test("non-latin titles do not blanket-match as supersedes and still match their 
   const dup = g2.candidateEdges.find((c) => c.title === "採用預寫式日誌模式");
   assert.ok(dup, "the CJK near-duplicate should surface as a candidate");
   assert.equal(dup!.relation, "supersedes");
+  store.close();
+});
+
+test("guidance reports existing programs whose target selects the new cell", () => {
+  const store = new SqliteStore(":memory:");
+  admit(
+    { kind: "prg", title: "watch latency", body: "standing", confidence: 0.6, props: { program: { schemaVersion: "recall.program.v1", operation: "watch", target: { topics: ["latency"] } } } },
+    { store },
+  );
+  const r = admit({ kind: "obs", title: "p99 spiked", body: "b", confidence: 0.6, topics: ["latency"] }, { store });
+  const g = buildWriteGuidance(store, r.cell!, r);
+  assert.equal(g.matchingPrograms.length, 1);
+  assert.equal(g.matchingPrograms[0]!.operation, "watch");
+  const unrelated = admit({ kind: "obs", title: "docs updated", body: "b", confidence: 0.6, topics: ["docs"] }, { store });
+  const g2 = buildWriteGuidance(store, unrelated.cell!, unrelated);
+  assert.deepEqual(g2.matchingPrograms, []);
   store.close();
 });

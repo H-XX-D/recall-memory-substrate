@@ -83,7 +83,11 @@ export function maintainStore(store: SqliteStore, graph: string, now: Date): Mai
 
   let evalLeg: MaintainResult["eval"];
   try {
-    const { result, derived } = runEvalAndDerive(store, defaultEvalSuite(), now);
+    // Same graph-to-project convention as the health leg below: the eval
+    // witness dedups per day per suite per project, so a project graph's
+    // witness must not collide with home's.
+    const project = graph === "home" ? undefined : graph;
+    const { result, derived } = runEvalAndDerive(store, defaultEvalSuite(), now, { project });
     evalLeg = {
       passed: result.passed,
       score: result.score,

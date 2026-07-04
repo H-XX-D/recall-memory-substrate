@@ -2,7 +2,7 @@
 // cell. Sequences the store-free checks and assembles the verdict.
 //
 //   validate (R0 schema)  -> reject on any structural issue
-//   screenSecrets         -> reject if a credential pattern is present
+//   screenFindings        -> flag credentials (sensitivity: secret) and downgrade exposed public writes
 //   attenuateConfidence   -> cap unsupported high confidence
 //   buildCell (R0)        -> scaffold the full cell from the attenuated proposal
 //   calibrate             -> fold the actor's track record into effective
@@ -12,7 +12,7 @@
 
 import { validateProposal } from "./schema.js";
 import { templateIssues } from "./template.js";
-import { screenSecrets, attenuateConfidence } from "./firewall.js";
+import { screenFindings, attenuateConfidence } from "./firewall.js";
 import { buildCell } from "./build.js";
 import { effectiveConfidence } from "./scores.js";
 import { neighborMass } from "./mass.js";
@@ -36,9 +36,24 @@ export function admit(
     return { accepted: false, issues: validation.issues, warnings: [], attenuations: [] };
   }
 
-  const screen = screenSecrets(proposal);
-  if (!screen.allowed) {
-    return { accepted: false, issues: screen.issues, warnings: [], attenuations: [] };
+  // Credential and personal-data findings flag, never block: this is a local
+  // single-user store, and a note ABOUT a key is legitimate memory. Detected
+  // secrets force sensitivity: secret; personal data in a public write
+  // downgrades it to private. Both are reported as warnings.
+  const screen = screenFindings(proposal);
+  const screenWarnings: string[] = [];
+  if (screen.secrets.length > 0) {
+    if (proposal.sensitivity !== "secret") {
+      proposal = { ...proposal, sensitivity: "secret" };
+      for (const f of screen.secrets) {
+        screenWarnings.push(`${f.message} in ${f.path}; cell marked sensitivity: secret`);
+      }
+    }
+  } else if (screen.publicData.length > 0) {
+    proposal = { ...proposal, sensitivity: "private" };
+    for (const f of screen.publicData) {
+      screenWarnings.push(`${f.message} (${f.path}); sensitivity downgraded to private`);
+    }
   }
 
   // Fill-or-reject: any field still equal to its template description was never
@@ -97,9 +112,33 @@ export function admit(
         message: `edge target does not resolve to a cell: ${e.target}`,
       });
     });
+    // Bundle memberships resolve like edge targets: a program must be an
+    // existing prg cell, a hyperedge must already exist. Dangling memberships
+    // reject rather than silently dropping, same contract as edges.
+    const watchingPrograms: string[] = [];
+    (proposal.programs ?? []).forEach((target, i) => {
+      const t = store.get(target) ?? store.getByHandle(target);
+      if (!t || t.kind !== "prg") {
+        unresolved.push({
+          path: `programs[${i}]`,
+          message: `program target does not resolve to a prg cell: ${target}`,
+        });
+        return;
+      }
+      if (!watchingPrograms.includes(t.key)) watchingPrograms.push(t.key);
+    });
+    (proposal.hyperedges ?? []).forEach((h, i) => {
+      if (!store.getHyperedge(h.id)) {
+        unresolved.push({
+          path: `hyperedges[${i}].id`,
+          message: `hyperedge does not exist: ${h.id}`,
+        });
+      }
+    });
     if (unresolved.length > 0) {
-      return { accepted: false, issues: unresolved, warnings: att.warnings, attenuations };
+      return { accepted: false, issues: unresolved, warnings: [...screenWarnings, ...att.warnings], attenuations };
     }
+    cell.programs = watchingPrograms;
 
     // Dedup: an identical active cell (same kind+title+body) is a no-op.
     const dup = store.findByContentKey(cell.kind, contentKey(cell.kind, cell.title));
@@ -108,18 +147,38 @@ export function admit(
         accepted: true,
         cell: dup,
         issues: [],
-        warnings: [...att.warnings, "deduplicated: identical active cell exists"],
+        warnings: [...screenWarnings, ...att.warnings, "deduplicated: identical active cell exists"],
         attenuations,
       };
     }
 
     store.put(cell); // store first so the new cell's edges exist for the walks
 
+    // Join declared hyperedges: append this cell as a member (next ordinal)
+    // unless it already belongs. Resolution above guarantees existence.
+    for (const h of proposal.hyperedges ?? []) {
+      const bundle = store.getHyperedge(h.id)!;
+      if (bundle.members.some((m) => m.key === cell.key)) continue;
+      const ordinal = bundle.members.reduce((max, m) => Math.max(max, m.ordinal), -1) + 1;
+      bundle.members.push({
+        key: cell.key,
+        role: h.role ?? "member",
+        ordinal,
+        ...(h.weight !== undefined ? { weight: h.weight } : {}),
+      });
+      store.putHyperedge(bundle);
+    }
+
     // Supersede: an explicit supersedes edge demotes its target and extends lineage.
+    // Targets resolve by key or handle (the validator above accepts both); the
+    // stored edge target is normalized to the full key so lineage and any later
+    // resolution stay key-canonical.
     for (const e of cell.edgesOut) {
       if (e.relation !== "supersedes") continue;
-      const t = store.get(e.target);
-      if (t && t.status === "active") {
+      const t = store.get(e.target) ?? store.getByHandle(e.target);
+      if (!t) continue;
+      e.target = t.key;
+      if (t.status === "active") {
         t.status = "superseded";
         store.put(t);
         if (!cell.lineage.includes(t.key)) cell.lineage.unshift(t.key);
@@ -172,7 +231,7 @@ export function admit(
     accepted: true,
     cell,
     issues: [],
-    warnings: [...att.warnings, ...relWarnings],
+    warnings: [...screenWarnings, ...att.warnings, ...relWarnings],
     attenuations,
   };
 }

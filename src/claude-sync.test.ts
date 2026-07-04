@@ -276,7 +276,7 @@ test("runClaudeSync apply installs the recall-session-start.py hook asset and re
   try {
     const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
     assert.equal(existsSync(hookAssetPath(home)), true);
-    assert.deepEqual(result.assetsInstalled, [hookAssetPath(home)]);
+    assert.ok(result.assetsInstalled.includes(hookAssetPath(home)));
     assert.equal(result.assetsSkipped, undefined);
     const installed = readFileSync(hookAssetPath(home), "utf8");
     const source = readFileSync(join(process.cwd(), "integrations", "claude", "hooks", "recall-session-start.py"), "utf8");
@@ -305,7 +305,7 @@ test("runClaudeSync backs up the hook asset only when overwriting a changed exis
     writeFileSync(hookAssetPath(home), "# stale local copy\n");
 
     const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
-    assert.deepEqual(result.assetsInstalled, [hookAssetPath(home)]);
+    assert.ok(result.assetsInstalled.includes(hookAssetPath(home)));
     assert.equal(existsSync(`${hookAssetPath(home)}.bak`), true);
     assert.equal(readFileSync(`${hookAssetPath(home)}.bak`, "utf8"), "# stale local copy\n");
   } finally {
@@ -335,26 +335,136 @@ test("runClaudeSync dry-run does not install the hook asset", () => {
   }
 });
 
-test("runClaudeSync degrades with assetsSkipped when the asset cannot be found", () => {
+test("runClaudeSync degrades with assetsSkipped when an asset cannot be found, and still installs the rest", () => {
   const home = tempHome();
   const realAsset = join(process.cwd(), "integrations", "claude", "hooks", "recall-session-start.py");
   const movedAside = `${realAsset}.moved-for-test`;
   let moved = false;
   try {
-    // Simulate a packaging state where the source asset is absent (e.g. an
-    // npm install that did not ship integrations/): rename the real file
-    // aside for the duration of this test only, then restore it in finally.
+    // Simulate a packaging state where one source asset is absent (e.g. an
+    // npm install that did not ship the hook): rename the real file aside for
+    // the duration of this test only, then restore it in finally.
     renameSync(realAsset, movedAside);
     moved = true;
 
     const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
     assert.equal(existsSync(hookAssetPath(home)), false);
-    assert.deepEqual(result.assetsInstalled, []);
+    assert.equal(result.assetsInstalled.includes(hookAssetPath(home)), false);
     assert.equal(result.assetsSkipped, "asset not found");
+    // The miss is per asset: the skills tree still lands.
+    assert.equal(existsSync(join(home, ".claude", "skills", "recall", "SKILL.md")), true);
   } finally {
     if (moved) renameSync(movedAside, realAsset);
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Skills tree install: apply lands SKILL.md plus the peek and router scripts
+// under ~/.claude/skills/recall/, with the same .bak discipline as the hook.
+// ---------------------------------------------------------------------------
+
+function skillPath(home: string, ...parts: string[]): string {
+  return join(home, ".claude", "skills", "recall", ...parts);
+}
+
+const SKILL_FILES = ["SKILL.md", join("scripts", "recall_peek.py"), join("scripts", "recall_router.py")];
+
+test("runClaudeSync apply installs the recall skills tree and reports it", () => {
+  const home = tempHome();
+  try {
+    const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    for (const rel of SKILL_FILES) {
+      const dest = skillPath(home, rel);
+      assert.equal(existsSync(dest), true, `skill file not installed: ${dest}`);
+      assert.ok(result.assetsInstalled.includes(dest), `skill file not reported installed: ${dest}`);
+    }
+    const installed = readFileSync(skillPath(home, "SKILL.md"), "utf8");
+    const source = readFileSync(join(process.cwd(), "integrations", "claude", "skill", "SKILL.md"), "utf8");
+    assert.equal(installed, source);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync second apply is a no-op for the skills tree (idempotent, no backups)", () => {
+  const home = tempHome();
+  try {
+    runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    const second = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    assert.deepEqual(second.assetsInstalled, []);
+    assert.deepEqual(second.backups, []);
+    for (const rel of SKILL_FILES) {
+      assert.equal(existsSync(`${skillPath(home, rel)}.bak`), false);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync backs up a locally modified skill file before overwriting it", () => {
+  const home = tempHome();
+  try {
+    mkdirSync(dirname(skillPath(home, "SKILL.md")), { recursive: true });
+    writeFileSync(skillPath(home, "SKILL.md"), "# stale local skill\n");
+
+    const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    assert.ok(result.assetsInstalled.includes(skillPath(home, "SKILL.md")));
+    assert.equal(readFileSync(`${skillPath(home, "SKILL.md")}.bak`, "utf8"), "# stale local skill\n");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync installAssets: false installs no skills tree either", () => {
+  const home = tempHome();
+  try {
+    runClaudeSync({ home, apply: true, importMemory: false, installAssets: false, now: NOW });
+    assert.equal(existsSync(skillPath(home, "SKILL.md")), false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("skill scripts/recall_peek.py is a byte-identical copy of python/recall_peek.py", () => {
+  const skillCopy = readFileSync(
+    join(process.cwd(), "integrations", "claude", "skill", "scripts", "recall_peek.py"),
+    "utf8",
+  );
+  const canonical = readFileSync(join(process.cwd(), "python", "recall_peek.py"), "utf8");
+  assert.equal(skillCopy, canonical);
+});
+
+// Doc truth: every `recall <verb>` SKILL.md mentions must be a verb the CLI
+// help actually lists, so the skill never documents a command that exits 1.
+test("SKILL.md documents only recall verbs the CLI help lists", () => {
+  const cliSource = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
+  const cliVerbs = new Set<string>();
+  for (const m of cliSource.matchAll(/^ {2}recall ([a-z-]+)/gm)) cliVerbs.add(m[1]!);
+  assert.ok(
+    cliVerbs.has("compile") && cliVerbs.has("diff") && cliVerbs.has("health"),
+    "failed to parse the CLI help text out of src/cli.ts",
+  );
+
+  const skill = readFileSync(join(process.cwd(), "integrations", "claude", "skill", "SKILL.md"), "utf8");
+  const documented = new Set<string>();
+  for (const m of skill.matchAll(/`recall ([a-z-]+)/g)) documented.add(m[1]!);
+  const fenceParts = skill.split("```");
+  for (let i = 1; i < fenceParts.length; i += 2) {
+    for (const m of fenceParts[i]!.matchAll(/^\s*recall ([a-z-]+)/gm)) documented.add(m[1]!);
+  }
+
+  const required = ["compile", "search", "cell", "diff", "health", "admit", "hyperedge", "program", "maintain"];
+  for (const verb of required) {
+    assert.ok(documented.has(verb), `SKILL.md must document 'recall ${verb}'`);
+  }
+  for (const verb of documented) {
+    assert.ok(cliVerbs.has(verb), `SKILL.md documents 'recall ${verb}' but the CLI help does not list that verb`);
+  }
+});
+
+test("the stale codex skill generation is deleted", () => {
+  assert.equal(existsSync(join(process.cwd(), "integrations", "codex", "skill")), false);
 });
 
 test("runClaudeSync writeGate wires the node prompt/stop hook bin names into written settings.json", () => {
