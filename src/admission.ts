@@ -116,10 +116,15 @@ export function admit(
     store.put(cell); // store first so the new cell's edges exist for the walks
 
     // Supersede: an explicit supersedes edge demotes its target and extends lineage.
+    // Targets resolve by key or handle (the validator above accepts both); the
+    // stored edge target is normalized to the full key so lineage and any later
+    // resolution stay key-canonical.
     for (const e of cell.edgesOut) {
       if (e.relation !== "supersedes") continue;
-      const t = store.get(e.target);
-      if (t && t.status === "active") {
+      const t = store.get(e.target) ?? store.getByHandle(e.target);
+      if (!t) continue;
+      e.target = t.key;
+      if (t.status === "active") {
         t.status = "superseded";
         store.put(t);
         if (!cell.lineage.includes(t.key)) cell.lineage.unshift(t.key);

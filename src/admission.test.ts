@@ -90,6 +90,20 @@ test("admit with a store: a supersedes edge demotes the target and extends linea
   store.close();
 });
 
+test("supersede by handle demotes the target and preserves lineage", () => {
+  const store = new SqliteStore(":memory:");
+  const a = admit({ kind: "dec", title: "Original decision", body: "b", confidence: 0.6 }, { store }).cell!;
+  const b = admit(
+    { kind: "dec", title: "Replacement decision", body: "b", confidence: 0.6, edges: [{ relation: "supersedes", target: a.handle, weight: 0 }] },
+    { store },
+  ).cell!;
+  assert.equal(store.get(a.key)?.status, "superseded");
+  assert.ok(b.lineage.includes(a.key)); // same lineage record as the full-key path
+  const storedEdge = store.get(b.key)?.edgesOut.find((e) => e.relation === "supersedes");
+  assert.equal(storedEdge?.target, a.key); // edge target normalized to the full key
+  store.close();
+});
+
 test("admit with a store rejects an edge whose target does not resolve and stores nothing", () => {
   const store = new SqliteStore(":memory:");
   const r = admit(
