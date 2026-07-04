@@ -120,6 +120,74 @@ test("a pre-0.9 cell with a random key but a matching props.import.fingerprint s
   }
 });
 
+test("a same-batch duplicate (identical record listed twice in one export) is caught by probe 1 in apply mode", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const record = {
+      ref: "dup-1",
+      source: "mem0",
+      title: "Duplicate fact",
+      body: "Same record appears twice in one export.",
+    };
+    const now = "2026-06-26T12:00:00.000Z";
+    // Two ImportItems built from the identical record share the same
+    // fingerprint. byFingerprint is a pre-loop snapshot of the store, so it
+    // cannot see the first item's cell; only probe 1 (store.get(importCellKey))
+    // can catch the second item, since apply mode writes the first item's
+    // cell before the second item is processed.
+    const item1 = importedRecordToItem(record, now);
+    const item2 = importedRecordToItem(record, now);
+    assert.equal(item1.fingerprint, item2.fingerprint);
+
+    const applied = importItems(store, "mem0", [item1, item2], { apply: true, now });
+    assert.equal(applied.created, 1);
+    assert.equal(applied.skipped, 1);
+    assert.equal(applied.items[0]?.action, "create");
+    assert.equal(applied.items[1]?.action, "skip");
+    assert.equal(applied.items[1]?.reason, "unchanged");
+    assert.equal(store.stats().cells, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("probe 1 (deterministic import key) alone dedups a cell whose fingerprint prop is gone", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const item = importedRecordToItem(
+      {
+        ref: "probe-only-1",
+        source: "mem0",
+        title: "Probe only fact",
+        body: "Only the key probe should catch this one.",
+      },
+      "2026-06-26T12:00:00.000Z",
+    );
+    const key = importCellKey(item.fingerprint);
+    const proposal = item.proposal([]);
+    // Build a cell at the deterministic import key but strip props.import
+    // entirely, so byFingerprint (which reads props.import.fingerprint) has
+    // nothing to index for this cell. Only probe 1's store.get(key) lookup
+    // can find it.
+    const { import: _import, ...propsWithoutImport } = proposal.props as Record<string, unknown>;
+    const seeded = buildCell(
+      { ...proposal, props: propsWithoutImport },
+      { key, now: "2026-06-26T12:00:00.000Z" },
+    );
+    store.put(seeded);
+    assert.equal(store.get(key)?.props.import, undefined);
+    assert.equal(store.stats().cells, 1);
+
+    const summary = importItems(store, "mem0", [item], { apply: true, now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(summary.skipped, 1);
+    assert.equal(summary.created, 0);
+    assert.equal(summary.items[0]?.reason, "unchanged");
+    assert.equal(store.stats().cells, 1);
+  } finally {
+    store.close();
+  }
+});
+
 test("the created cell's key equals importCellKey(fingerprint)", () => {
   const store = new SqliteStore(":memory:");
   try {
