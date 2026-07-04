@@ -116,7 +116,7 @@ Recall attaches to the harness instead of the prompt chain. Delivery is the prod
 
 ## When not to use Recall
 
-- You need a hosted, multi-tenant memory API for a fleet of users. Use mem0 or Zep; Recall is local-first and single-machine by design.
+- You want memory as a managed service someone else operates. Recall has no hosted API; it runs where your agents run. The write model itself is multi-actor by design: any human, agent, daemon, or connector whose proposal clears the admission gate writes to the same graph, every cell carries actor provenance and a tenant scope, calibration is tracked per actor, and quorum programs arbitrate when actors disagree. Sharing a graph is a deployment question, not a design limit.
 - You want the agent itself to manage its context window as editable memory blocks. That is Letta's model.
 - Your harness exposes no hook points and cannot run MCP. Recall's query surfaces still work anywhere (CLI, library), but the push loop needs hooks; Claude Code and Codex are wired today.
 - You need vector search over millions of documents. Recall is agent memory, not a document retrieval engine.
