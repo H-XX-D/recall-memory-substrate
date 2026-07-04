@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maintainAll, maintainStore } from "./maintain.js";
+import { runEvalAndDerive } from "./evals.js";
 import { homeDbPath, registerProject, registryDbPath } from "./routing.js";
 import { SqliteStore } from "./store.js";
 import { buildCell } from "./build.js";
@@ -306,3 +307,14 @@ test("maintainAll survives a corrupt home store: projects still enumerate and ge
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "recall-v5-maintain-"));
 }
+
+test("eval run --derive on the same day as maintain dedups instead of minting a second witness", () => {
+  const store = new SqliteStore(":memory:");
+  const day = new Date("2026-07-04T08:00:00.000Z");
+  maintainStore(store, "beta", day);
+  const { derived } = runEvalAndDerive(store, undefined, new Date("2026-07-04T11:00:00.000Z"), { project: "beta" });
+  assert.ok(derived.duplicateOf, "same-day same-project eval derive must return duplicateOf");
+  const witnesses = store.active().filter((c) => c.title.startsWith("Eval "));
+  assert.equal(witnesses.length, 1);
+  store.close();
+});

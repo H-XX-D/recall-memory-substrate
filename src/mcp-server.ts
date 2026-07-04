@@ -57,7 +57,7 @@ export const TOOLS = [
   { name: "recall_dag_analyze", description: "Analyze a DAG overlay for cycles and holonomy witnesses; with derive:true, admit keyed derived writes and report accepted/duplicate/rejected counts.", inputSchema: { type: "object", properties: { id: { type: "string" }, derive: { type: "boolean" } }, required: ["id"] } },
   { name: "recall_program_run", description: "Run a standing program cell by key or handle; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { key: { type: "string" }, derive: { type: "boolean" } }, required: ["key"] } },
   { name: "recall_program_runs", description: "List program run history, optionally filtered to one program key or handle.", inputSchema: { type: "object", properties: { key: { type: "string" }, limit: { type: "number" } } } },
-  { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
+  { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write (day-bucketed per project).", inputSchema: { type: "object", properties: { derive: { type: "boolean" }, project: { type: "string" } } } },
   { name: "recall_subgraph", description: "Tag-composed retrieval over active cells (AND across kinds/project/topics/entities/since; every listed value within an array family required), newest-updated first.", inputSchema: { type: "object", properties: { kinds: { type: "array", items: { type: "string" } }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } } } },
   { name: "recall_health", description: "Memory health report: belief pressure, staleness, contradictions, dangling edges, and provenance concentration; with derive:true, admit a day-bucketed witness cell and report accepted/duplicateOf.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
   { name: "recall_storage", description: "Storage stats: database path/bytes (including WAL sidecars), per-table row counts, average and maximum cell size.", inputSchema: { type: "object", properties: {} } },
@@ -251,7 +251,9 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       const derive = args.derive === true;
       const now = new Date();
       if (derive) {
-        const { result, derived } = runEvalAndDerive(store, undefined, now);
+        const { result, derived } = runEvalAndDerive(store, undefined, now, {
+          project: typeof args.project === "string" ? args.project : undefined,
+        });
         return JSON.stringify({
           name: result.name,
           passed: result.passed,

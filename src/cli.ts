@@ -520,7 +520,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       try {
         const now = options.now ? new Date(options.now) : new Date();
         if (args.derive) {
-          const { result, derived } = runEvalAndDerive(store, suite, now);
+          const { result, derived } = runEvalAndDerive(store, suite, now, { project: route.slug ?? args.project });
           outJson(out, { ...result, derived: { accepted: derived.accepted, duplicateOf: derived.duplicateOf } });
         } else {
           const result = runAndRecordEval(store, suite, now);
