@@ -42,7 +42,13 @@ test("compile ranks the more on-topic cell first via BM25", () => {
   store.put(buildCell({ kind: "obs", title: "watchdog watchdog watchdog", body: "watchdog", confidence: 0.6 }, { key: "hot" }));
   store.put(buildCell({ kind: "obs", title: "a watchdog mention", body: "mostly other words here", confidence: 0.6 }, { key: "cold" }));
   const r = compile(store, "watchdog");
-  assert.equal(r.hits[0]!.cell.key, "hot"); // higher term frequency, shorter doc
+  // Node builds whose bundled SQLite lacks FTS5 (22.13 to 22.20) degrade to
+  // LIKE by design; BM25 ordering is only a contract on the fts5 backend.
+  if (store.lexicalBackend() === "fts5-bm25") {
+    assert.equal(r.hits[0]!.cell.key, "hot"); // higher term frequency, shorter doc
+  } else {
+    assert.equal(r.hits.length, 2);
+  }
   store.close();
 });
 
@@ -302,6 +308,13 @@ test("fuseCandidates via compile: higher BM25 cell ranks above lower BM25 cell w
 
   assert.ok(hotIdx !== -1, "hot should be in relevantMemory");
   assert.ok(coldIdx !== -1, "cold should be in relevantMemory");
+
+  // LIKE-backend builds (Node without FTS5) have no BM25 signal to fuse;
+  // ordering is only a contract on the fts5 backend.
+  if (store.lexicalBackend() !== "fts5-bm25") {
+    store.close();
+    return;
+  }
 
   // The high-frequency cell must rank first. Under the zeroed-lexical bug the
   // lexical term collapses to 0 for every candidate (because -c.bm25 <= 0
