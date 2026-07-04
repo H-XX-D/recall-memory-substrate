@@ -10,6 +10,7 @@ import type { AdmissionResult, Cell, Kind, Store, WriteProposal } from "./types.
 export const EXPORT_SCHEMA_VERSION = "recall.cells.export.v1";
 export const MAX_IMPORT_BYTES = 134_217_728;
 export const MAX_BODY_CHARS = 32_768;
+export const MAX_PRIOR_VERSIONS = 1000;
 
 export interface ImportItem {
   ref: string;
@@ -143,9 +144,17 @@ export function importItems(
   let skipped = 0;
 
   const byFingerprint = new Map<string, Cell>();
+  const byEntity = new Map<string, Cell[]>();
   for (const cell of store.all()) {
     const fingerprint = stringValue(toRecord(cell.props.import).fingerprint);
     if (fingerprint) byFingerprint.set(fingerprint, cell);
+    if (cell.status === "active") {
+      for (const entity of cell.tags.entities) {
+        const bucket = byEntity.get(entity);
+        if (bucket) bucket.push(cell);
+        else byEntity.set(entity, [cell]);
+      }
+    }
   }
 
   for (const item of items) {
@@ -156,10 +165,11 @@ export function importItems(
       continue;
     }
 
+    const priorTags = [item.sourceTag, ...(item.supersedesTags ?? [])];
     const priorKeys = unique([
-      ...findBySourceTags(store, [item.sourceTag, ...(item.supersedesTags ?? [])]).map((cell) => cell.key),
+      ...priorTags.flatMap((tag) => (byEntity.get(tag) ?? []).map((cell) => cell.key)),
       ...(item.supersedesTags ?? []).flatMap((tag) => admittedThisBatch.get(tag) ?? []),
-    ]);
+    ]).slice(0, MAX_PRIOR_VERSIONS);
     const proposal = item.proposal(priorKeys);
     const predicted = admit(proposal, { now });
     if (!predicted.accepted) {
@@ -551,13 +561,6 @@ export function parseCellArchive(input: unknown): RecallCellArchive {
       : { cells: 0, activeCells: 0, edges: 0, indexedCells: 0, lexicalBackend: "like" },
     cells: input.cells.map(assertCell),
   };
-}
-
-function findBySourceTags(store: Store, tags: string[]): Cell[] {
-  const set = new Set(tags);
-  return store
-    .all()
-    .filter((cell) => set.has(stringValue(toRecord(cell.props.import).sourceTag) ?? "") || cell.tags.entities.some((entity) => set.has(entity)));
 }
 
 function assertCell(value: unknown): Cell {

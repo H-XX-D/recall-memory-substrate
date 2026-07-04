@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  MAX_PRIOR_VERSIONS,
   exportCellArchive,
   importAutoMemory,
   importCellArchive,
@@ -241,6 +242,59 @@ test("re-importing an old export after its record's cell was superseded skips it
     assert.equal(reimportV1.items[0]?.reason, "unchanged");
     assert.equal(store.get(v2Key!)?.status, "active");
     assert.equal(store.active().length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("importing v1 then v2 then v3 of a record yields exactly one supersedes target on each import", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const v1 = { memories: [{ id: "m1", memory: "Version one of the fact.", categories: ["release"] }] };
+    importMem0(store, v1, { apply: true, now: "2026-06-26T12:00:00.000Z" });
+
+    const v2 = { memories: [{ id: "m1", memory: "Version two of the fact.", categories: ["release"] }] };
+    const v2Result = importMem0(store, v2, { apply: true, now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(v2Result.superseded, 1);
+    assert.equal(v2Result.items[0]?.supersedes?.length, 1);
+
+    const v3 = { memories: [{ id: "m1", memory: "Version three of the fact.", categories: ["release"] }] };
+    const v3Result = importMem0(store, v3, { apply: true, now: "2026-06-26T12:02:00.000Z" });
+    assert.equal(v3Result.superseded, 1);
+    assert.equal(v3Result.items[0]?.supersedes?.length, 1);
+    assert.equal(v3Result.items[0]?.supersedes?.[0], v2Result.items[0]?.cellKey);
+  } finally {
+    store.close();
+  }
+});
+
+test("the batch-local prior lookup caps the deduped prior list at MAX_PRIOR_VERSIONS", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const sharedEntity = "capped-entity-tag";
+    for (let i = 0; i < MAX_PRIOR_VERSIONS + 5; i += 1) {
+      const cell = buildCell(
+        { kind: "obs", title: `Prior ${i}`, body: `Prior body ${i}`, confidence: 0.6, entities: [sharedEntity] },
+        { key: `prior-${i}`, now: "2026-06-26T12:00:00.000Z" },
+      );
+      store.put(cell);
+    }
+    assert.equal(store.active().length, MAX_PRIOR_VERSIONS + 5);
+
+    const item = importedRecordToItem(
+      {
+        ref: "capped-1",
+        source: "mem0",
+        title: "Capped fact",
+        body: "New fact that supersedes a huge prior set.",
+        entities: [sharedEntity],
+        sourceTag: sharedEntity,
+      },
+      "2026-06-26T12:01:00.000Z",
+    );
+    const summary = importItems(store, "mem0", [item], { apply: true, now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(summary.items[0]?.action, "supersede");
+    assert.ok((summary.items[0]?.supersedes?.length ?? 0) <= MAX_PRIOR_VERSIONS);
   } finally {
     store.close();
   }
