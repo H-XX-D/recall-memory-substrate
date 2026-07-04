@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maintainAll, maintainStore } from "./maintain.js";
-import { registerProject } from "./routing.js";
+import { homeDbPath, registerProject, registryDbPath } from "./routing.js";
 import { SqliteStore } from "./store.js";
 import { buildCell } from "./build.js";
 import type { Store } from "./types.js";
@@ -165,7 +165,7 @@ test("maintainAll iterates localGraphPaths across two temp graphs, dedups by res
   const tmp = tempDir();
   try {
     const recallHome = join(tmp, "recall-home");
-    const registry = join(recallHome, "db", "home.sqlite3");
+    const registry = join(recallHome, "db", "registry.sqlite3");
     registerProject({ root: join(tmp, "repoA") }, NOW.toISOString(), registry);
     registerProject({ root: join(tmp, "repoB") }, NOW.toISOString(), registry);
 
@@ -186,23 +186,15 @@ test("maintainAll iterates localGraphPaths across two temp graphs, dedups by res
   }
 });
 
-test("maintainAll continues past a graph whose store fails to open, and still fully maintains the rest", () => {
+test("maintainAll continues past a project whose store fails to open, and still fully maintains the rest", () => {
   const tmp = tempDir();
   try {
     const recallHome = join(tmp, "recall-home");
-    const registry = join(recallHome, "db", "home.sqlite3");
+    const registry = join(recallHome, "db", "registry.sqlite3");
 
-    // The registry (home.sqlite3) has to stay a valid, openable sqlite file:
-    // it is both the home graph's own store and the project list that
-    // listProjects reads back out. Corrupting that one shared file would
-    // blind localGraphPaths to every registered project too, not just fail
-    // to open home's own store, which would be a different (and worse, out
-    // of scope) failure mode than the one this fix addresses. So the
-    // directory-in-place-of-a-file goes on the registered project's own db
-    // path instead: repoA is the first (and, in this two-graph registry,
-    // only) db path the sweep has to open after home, so it stands in for
-    // "the first db path" the sweep can actually fail on without destroying
-    // the registry it read the graph list from.
+    // A directory in place of the project's db file makes SqliteStore throw
+    // on open. The registry stays valid, so the sweep still sees the graph
+    // list and records the failure instead of aborting.
     const repoADbPath = join(recallHome, "db", "repoA.sqlite3");
     registerProject({ root: join(tmp, "repoA"), dbPath: repoADbPath }, NOW.toISOString(), registry);
     mkdirSync(repoADbPath, { recursive: true });
@@ -228,6 +220,46 @@ test("maintainAll continues past a graph whose store fails to open, and still fu
     assert.ok("openError" in repoA);
     if ("openError" in repoA) {
       assert.equal(typeof repoA.openError, "string");
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("maintainAll survives a corrupt home store: projects still enumerate and get maintained", () => {
+  // The scenario that forced the registry split: before registry.sqlite3,
+  // the home graph's store and the project registry were one file, so a
+  // corrupt home store also blinded listProjects to every registered
+  // project. With the split, home failing to open is just one more
+  // openError row and the projects still get their full pass.
+  const tmp = tempDir();
+  try {
+    const recallHome = join(tmp, "recall-home");
+    const env = { RECALL_HOME: recallHome } as NodeJS.ProcessEnv;
+    registerProject({ root: join(tmp, "repoA") }, NOW.toISOString(), registryDbPath(env));
+
+    // A directory in place of home.sqlite3 makes home's store unopenable.
+    mkdirSync(homeDbPath(env), { recursive: true });
+
+    const results = maintainAll(env, NOW);
+
+    assert.equal(results.length, 2);
+    const [home, repoA] = results;
+    assert.ok(home && repoA);
+
+    assert.equal(home.graph, "home");
+    assert.ok("openError" in home);
+    if ("openError" in home) {
+      assert.equal(typeof home.openError, "string");
+    }
+
+    assert.equal(repoA.graph, "repoa");
+    assert.ok(!("openError" in repoA));
+    if (!("openError" in repoA)) {
+      assert.ok("ticked" in repoA.operator);
+      assert.ok("passed" in repoA.eval || "error" in repoA.eval);
+      assert.ok("accepted" in repoA.health || "error" in repoA.health);
+      assert.equal(typeof repoA.reindexed, "number");
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });

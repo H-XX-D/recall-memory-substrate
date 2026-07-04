@@ -1,10 +1,15 @@
 // R5 routing: deterministic residency for home/project SQLite locals.
 //
-// The home DB is both the default writable local and the project registry. A
-// registered project gets a central DB under RECALL_HOME/db, and cwd routing
-// chooses the deepest registered ancestor unless RECALL_DB explicitly overrides.
+// Two distinct files live under RECALL_HOME/db: home.sqlite3 is the default
+// writable local (the home graph's own store), and registry.sqlite3 holds
+// only the projects table. They used to be one file, which meant a corrupt
+// home store also blinded listProjects to every registered project; the
+// split keeps the registry readable no matter what happens to home's graph.
+// A registered project gets a central DB under RECALL_HOME/db, and cwd
+// routing chooses the deepest registered ancestor unless RECALL_DB
+// explicitly overrides.
 import { createHash } from "node:crypto";
-import { mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -52,16 +57,20 @@ export function homeDbPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function registryDbPath(env: NodeJS.ProcessEnv = process.env): string {
-  return homeDbPath(env);
+  return join(recallHomeDir(env), "db", "registry.sqlite3");
 }
 
 export function globalDbPath(env: NodeJS.ProcessEnv = process.env): string {
   return homeDbPath(env);
 }
 
+// home.sqlite3 and registry.sqlite3 are claimed by the router itself, so a
+// project slugged "home" or "registry" gets a project- prefixed filename.
+const RESERVED_DB_FILENAMES = new Set(["home", "registry"]);
+
 export function projectDbPath(slug: string, env: NodeJS.ProcessEnv = process.env): string {
   const normalized = slugify(slug);
-  const filename = normalized === "home" ? "project-home" : normalized;
+  const filename = RESERVED_DB_FILENAMES.has(normalized) ? `project-${normalized}` : normalized;
   return join(recallHomeDir(env), "db", `${filename}.sqlite3`);
 }
 
@@ -81,6 +90,7 @@ export function registerProject(
 ): ProjectRecord {
   const rootPath = canonicalPath(input.root);
   mkdirSync(dirname(registryDb), { recursive: true });
+  migrateLegacyRegistry(registryDb);
   const db = new DatabaseSync(registryDb);
   try {
     ensureProjectsTable(db);
@@ -93,7 +103,8 @@ export function registerProject(
 
     const baseSlug = slugify(input.slug ?? basename(rootPath) ?? "project");
     const slug = uniqueSlug(db, baseSlug, rootPath);
-    const dbPath = input.dbPath ? resolve(input.dbPath) : join(dirname(registryDb), `${slug}.sqlite3`);
+    const filename = RESERVED_DB_FILENAMES.has(slug) ? `project-${slug}` : slug;
+    const dbPath = input.dbPath ? resolve(input.dbPath) : join(dirname(registryDb), `${filename}.sqlite3`);
     db.prepare(
       "INSERT INTO projects(root_path, slug, db_path, description, created_at) VALUES(?,?,?,?,?)",
     ).run(rootPath, slug, dbPath, input.description ?? null, nowIso);
@@ -105,6 +116,7 @@ export function registerProject(
 
 export function listProjects(registryDb = registryDbPath()): ProjectRecord[] {
   try {
+    migrateLegacyRegistry(registryDb);
     const db = new DatabaseSync(registryDb, { readOnly: true });
     try {
       const rows = db
@@ -131,6 +143,7 @@ export function loadRegistry(registryDb = registryDbPath()): Map<string, Project
 
 export function resolveDbForSlug(slug: string, registryDb = registryDbPath()): string | null {
   try {
+    migrateLegacyRegistry(registryDb);
     const db = new DatabaseSync(registryDb, { readOnly: true });
     try {
       const row = db.prepare("SELECT db_path FROM projects WHERE slug = ?").get(slug) as
@@ -149,14 +162,16 @@ export function resolveDbForCwd(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
   registryDb = registryDbPath(env),
+  homeDb = homeDbPath(env),
 ): string {
-  return whereProject(cwd, env, registryDb).dbPath;
+  return whereProject(cwd, env, registryDb, homeDb).dbPath;
 }
 
 export function whereProject(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
   registryDb = registryDbPath(env),
+  homeDb = homeDbPath(env),
 ): RoutedDb {
   const explicit = env.RECALL_DB?.trim();
   if (explicit) {
@@ -173,14 +188,15 @@ export function whereProject(
     };
   }
 
-  return { scope: "home", dbPath: registryDb, reason: "no registered project ancestor" };
+  return { scope: "home", dbPath: homeDb, reason: "no registered project ancestor" };
 }
 
 export function localGraphPaths(
   env: NodeJS.ProcessEnv = process.env,
   registryDb = registryDbPath(env),
+  homeDb = homeDbPath(env),
 ): Array<{ graph: string; path: string }> {
-  const members = [{ graph: "home", path: registryDb, root: "home" }];
+  const members = [{ graph: "home", path: homeDb, root: "home" }];
   for (const project of listProjects(registryDb)) {
     members.push({ graph: project.slug, path: project.dbPath, root: project.rootPath });
   }
@@ -205,6 +221,46 @@ export function localGraphPaths(
 
 function ensureProjectsTable(db: DatabaseSync): void {
   db.exec(PROJECTS_DDL);
+}
+
+// Registry layouts before the home/registry split kept the projects table
+// inside home.sqlite3. When the registry file is missing but a sibling
+// legacy home.sqlite3 holds project rows, copy them over once so an
+// upgraded install keeps every registration. The copy is non-destructive:
+// the legacy rows stay in place, so an older binary pointed at the same
+// RECALL_HOME keeps working, and nothing on the new layout reads them.
+function migrateLegacyRegistry(registryDb: string): void {
+  if (registryDb === ":memory:" || existsSync(registryDb)) return;
+  const legacy = join(dirname(registryDb), "home.sqlite3");
+  if (resolve(legacy) === resolve(registryDb) || !existsSync(legacy)) return;
+
+  let rows: ProjectRow[];
+  try {
+    const source = new DatabaseSync(legacy, { readOnly: true });
+    try {
+      rows = source
+        .prepare("SELECT slug, root_path, db_path, description, created_at FROM projects")
+        .all() as unknown as ProjectRow[];
+    } finally {
+      source.close();
+    }
+  } catch {
+    return; // no projects table, or an unreadable legacy file: nothing to migrate
+  }
+  if (rows.length === 0) return;
+
+  const db = new DatabaseSync(registryDb);
+  try {
+    ensureProjectsTable(db);
+    const insert = db.prepare(
+      "INSERT OR IGNORE INTO projects(root_path, slug, db_path, description, created_at) VALUES(?,?,?,?,?)",
+    );
+    for (const row of rows) {
+      insert.run(row.root_path, row.slug, row.db_path, row.description, row.created_at);
+    }
+  } finally {
+    db.close();
+  }
 }
 
 function getProjectByRoot(db: DatabaseSync, rootPath: string): ProjectRecord | undefined {

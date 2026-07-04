@@ -31,6 +31,11 @@ recall search "routing" --project my-project
 recall cell show <key-or-handle> --project my-project
 ```
 
+`project init` records the project in the central registry at
+`~/.recall/db/registry.sqlite3`, kept separate from the home graph's own store
+(`home.sqlite3`) so a damaged home db can never hide the project list. Installs
+that predate the split migrate their registrations automatically on first use.
+
 Writes enter through proposal JSON:
 
 ```sh
