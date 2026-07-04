@@ -1294,6 +1294,39 @@ test("health --derive with --project buckets the witness key separately per proj
   }
 });
 
+test("storage prints the storage stats report over a routed on-disk db", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "dec",
+        title: "storage verb decision",
+        body: "The CLI should expose storage stats.",
+        confidence: 0.8,
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--db", db], {
+      now: "2026-07-03T12:00:00.000Z",
+    });
+    assert.equal(admitted.code, 0, admitted.stderr);
+
+    const storage = capture(["storage", "--db", db]);
+    assert.equal(storage.code, 0, storage.stderr);
+    const report = JSON.parse(storage.stdout);
+    assert.equal(report.databasePath, db);
+    assert.equal(typeof report.databaseBytes, "number");
+    assert.equal(report.tables.cells, 1);
+    assert.equal(report.tables.edges, 0);
+    assert.equal(report.maximumCell.title, "storage verb decision");
+    assert.equal(typeof report.averageCellBytes, "number");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("import auto-memory with an explicit --root imports the fixture tree", () => {
   const tmp = tempDir();
   const root = mkdtempSync(join(tmpdir(), "recall-v5-cli-auto-memory-"));

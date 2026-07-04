@@ -1,11 +1,11 @@
 // v5 MCP server: a hand-rolled JSON-RPC-2.0-over-stdio dispatcher (mirrors the
 // shipped recall MCP, no SDK). handleMcpRequest is the pure, testable core; the
-// stdio readline loop is thin glue in mcp-cli.ts. Seventeen tools: recall_status,
+// stdio readline loop is thin glue in mcp-cli.ts. Eighteen tools: recall_status,
 // recall_search, recall_compile, recall_cell, recall_write, recall_semantic,
 // recall_ref, recall_page, recall_hyperedge_add, recall_hyperedge_show,
 // recall_hyperedge_list, recall_dag_analyze, recall_program_run,
-// recall_program_runs, recall_eval_run, recall_subgraph, recall_health. The
-// daemon/operator tick runs from the Stop hook, not here.
+// recall_program_runs, recall_eval_run, recall_subgraph, recall_health,
+// recall_storage. The daemon/operator tick runs from the Stop hook, not here.
 import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
@@ -59,6 +59,7 @@ export const TOOLS = [
   { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
   { name: "recall_subgraph", description: "Tag-composed retrieval over active cells (AND across kinds/project/topics/entities/since; every listed value within an array family required), newest-updated first.", inputSchema: { type: "object", properties: { kinds: { type: "array", items: { type: "string" } }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } } } },
   { name: "recall_health", description: "Memory health report: belief pressure, staleness, contradictions, dangling edges, and provenance concentration; with derive:true, admit a day-bucketed witness cell and report accepted/duplicateOf.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
+  { name: "recall_storage", description: "Storage stats: database path/bytes (including WAL sidecars), per-table row counts, average and maximum cell size.", inputSchema: { type: "object", properties: {} } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -287,6 +288,12 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       const proposal = memoryHealthToProposal(report, {});
       const derived = deriveAdmit(store, proposal, memoryHealthDerivationKey(now), now.toISOString());
       return JSON.stringify({ ...report, derived: { accepted: derived.accepted, duplicateOf: derived.duplicateOf } });
+    }
+    case "recall_storage": {
+      if (!("storageStats" in store)) {
+        return JSON.stringify({ error: "storage stats are unavailable on this store" });
+      }
+      return JSON.stringify((store as SqliteStore).storageStats());
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

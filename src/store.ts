@@ -1,6 +1,7 @@
 // SqliteStore: the R2 Store contract over node:sqlite. The cell persists as a
 // JSON blob (minus its edges) plus indexed columns; edges live only in the
 // edges table and are rehydrated on read.
+import { existsSync, statSync } from "node:fs";
 import type {
   Cell,
   DagOverlay,
@@ -51,6 +52,37 @@ interface FtsRow extends CellRow {
 }
 interface CountRow {
   count: number;
+}
+
+// SqliteStore-only (NOT on the Store interface, same convention as
+// recordProgramRun/recordEvalRun/recordOperatorRun): a deeper on-disk view than
+// stats()/StoreStats, for operational inspection of the substrate itself
+// rather than the graph it holds.
+export interface StorageStatsReport {
+  databasePath?: string;
+  databaseBytes?: number;
+  tables: {
+    cells: number;
+    edges: number;
+    hyperedges: number;
+    semanticVectors: number;
+    dagOverlays: number;
+    programRuns: number;
+    evalRuns: number;
+    operatorRuns: number;
+  };
+  averageCellBytes: number;
+  maximumCell: { key: string; handle: string; title: string; bytes: number } | null;
+}
+
+interface CellSizeRow {
+  key: string;
+  handle: string;
+  title: string | null;
+  bytes: number;
+}
+interface AverageRow {
+  average: number | null;
 }
 interface HyperedgeRow {
   id: string;
@@ -447,6 +479,50 @@ export class SqliteStore implements Store {
     };
   }
 
+  // SqliteStore only (NOT on the Store interface, same convention as
+  // recordProgramRun/recordEvalRun/recordOperatorRun): every metric is a SQL
+  // aggregate, never an app-side scan. databaseBytes adds the -wal and -shm
+  // sidecar files to the main file size (db.ts sets WAL mode, so a lot of live
+  // data can sit in the sidecars rather than the main file); undefined for
+  // ":memory:" and for a missing on-disk file.
+  storageStats(): StorageStatsReport {
+    const tables = {
+      cells: this.count("cells"),
+      edges: this.count("edges"),
+      hyperedges: this.count("hyperedges"),
+      semanticVectors: this.count("semantic_index"),
+      dagOverlays: this.count("dag_overlays"),
+      programRuns: this.count("program_runs"),
+      evalRuns: this.count("eval_runs"),
+      operatorRuns: this.count("operator_runs"),
+    };
+
+    const avgRow = this.db
+      .prepare(`SELECT AVG(length(json)) AS average FROM cells`)
+      .get() as unknown as AverageRow;
+    const averageCellBytes = avgRow.average === null ? 0 : Math.round(avgRow.average);
+
+    const maxRow = this.db
+      .prepare(
+        `SELECT key, handle, json_extract(json, '$.title') AS title, length(json) AS bytes
+         FROM cells
+         ORDER BY length(json) DESC, key ASC
+         LIMIT 1`,
+      )
+      .get() as unknown as CellSizeRow | undefined;
+    const maximumCell = maxRow
+      ? { key: maxRow.key, handle: maxRow.handle, title: maxRow.title ?? "", bytes: maxRow.bytes }
+      : null;
+
+    return {
+      databasePath: this.path === ":memory:" ? undefined : this.path,
+      databaseBytes: this.databaseBytes(),
+      tables,
+      averageCellBytes,
+      maximumCell,
+    };
+  }
+
   close(): void {
     this.db.close();
   }
@@ -530,6 +606,20 @@ export class SqliteStore implements Store {
     const sql = where ? `SELECT COUNT(*) AS count FROM ${table} WHERE ${where}` : `SELECT COUNT(*) AS count FROM ${table}`;
     const row = this.db.prepare(sql).get() as unknown as CountRow;
     return row.count;
+  }
+
+  // Main file size plus the -wal and -shm sidecars, if present (db.ts sets WAL
+  // mode, so a legacy stat of the main file alone undercounts live bytes).
+  // undefined for ":memory:" or when the main file itself does not exist.
+  private databaseBytes(): number | undefined {
+    if (this.path === ":memory:") return undefined;
+    if (!existsSync(this.path)) return undefined;
+    let total = statSync(this.path).size;
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = `${this.path}${suffix}`;
+      if (existsSync(sidecar)) total += statSync(sidecar).size;
+    }
+    return total;
   }
 
   private hydrate(row: CellRow): Cell {

@@ -156,6 +156,17 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       return 0;
     }
 
+    if (command === "storage") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        if (!("storageStats" in store)) throw new Error("storage stats are unavailable on this store");
+        outJson(out, store.storageStats());
+      } finally {
+        store.close();
+      }
+      return 0;
+    }
+
     if (command === "admit" || command === "write-propose") {
       const proposal = readProposal(args);
       const store = openWriteStore(route.dbPath);
@@ -846,6 +857,7 @@ Commands:
   recall project where
   recall where
   recall status [--db path] [--project slug]
+  recall storage [--db path] [--project slug]
   recall compile "task" [--words 900] [--limit 10] [--no-health] [--inline-refs] [--ref-params] [--db path] [--project slug]
   recall search "query" [--limit 10] [--db path] [--project slug]
   recall cell show <key-or-handle> [--db path] [--project slug]

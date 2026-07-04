@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the seventeen-tool surface", () => {
+test("tools/list returns exactly the eighteen-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -44,6 +44,7 @@ test("tools/list returns exactly the seventeen-tool surface", () => {
     "recall_eval_run",
     "recall_subgraph",
     "recall_health",
+    "recall_storage",
   ]);
   store.close();
 });
@@ -95,8 +96,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the seventeen-tool surface", () => {
-  assert.equal(TOOLS.length, 17);
+test("TOOLS is the eighteen-tool surface", () => {
+  assert.equal(TOOLS.length, 18);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -684,5 +685,20 @@ test("recall_compile health:false suppresses the health compilerState line", () 
     arguments: { task: "compile fragile", health: false },
   }), store)?.result as any;
   assert.ok(!/health=beliefs:/.test(withoutHealth.content[0].text), "health:false should suppress the health line");
+  store.close();
+});
+
+test("recall_storage returns the storage stats report, mirroring recall_status's shape", () => {
+  const store = new SqliteStore(":memory:");
+  admit(
+    { kind: "dec", title: "mcp storage decision", body: "b", confidence: 0.8, topics: [], entities: [] },
+    { store },
+  );
+  const report = callText(handleMcpRequest(req("tools/call", { name: "recall_storage", arguments: {} }), store));
+  assert.equal(report.databasePath, undefined);
+  assert.equal(report.databaseBytes, undefined);
+  assert.equal(report.tables.cells, 1);
+  assert.equal(report.maximumCell.title, "mcp storage decision");
+  assert.equal(typeof report.averageCellBytes, "number");
   store.close();
 });

@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SqliteStore, contentKey } from "./store.js";
 import { buildCell } from "./build.js";
+
+function tempDbDir(): string {
+  return mkdtempSync(join(tmpdir(), "recall-v5-storage-stats-"));
+}
 
 test("put then get round-trips a cell by key", () => {
   const store = new SqliteStore(":memory:");
@@ -658,4 +665,180 @@ test("recordOperatorRun prunes the ledger to the keep cap, newest surviving", ()
     ["run-11", "run-10", "run-9", "run-8", "run-7", "run-6", "run-5", "run-4", "run-3", "run-2"],
   );
   store.close();
+});
+
+test("storageStats on an empty :memory: store reports zero counts, no path/bytes, averageCellBytes 0, maximumCell null", () => {
+  const store = new SqliteStore(":memory:");
+  const report = store.storageStats();
+  assert.equal(report.databasePath, undefined);
+  assert.equal(report.databaseBytes, undefined);
+  assert.deepEqual(report.tables, {
+    cells: 0,
+    edges: 0,
+    hyperedges: 0,
+    semanticVectors: 0,
+    dagOverlays: 0,
+    programRuns: 0,
+    evalRuns: 0,
+    operatorRuns: 0,
+  });
+  assert.equal(report.averageCellBytes, 0);
+  assert.equal(report.maximumCell, null);
+  store.close();
+});
+
+test("storageStats counts all eight tables via SQL aggregates", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(
+    buildCell(
+      { kind: "obs", title: "A", body: "a", confidence: 0.7, edges: [{ relation: "supports", target: "bbbb" }] },
+      { key: "aaaa" },
+    ),
+  );
+  store.put(buildCell({ kind: "obs", title: "B", body: "b", confidence: 0.7 }, { key: "bbbb" }));
+  store.putHyperedge({
+    id: "hyper-1",
+    kind: "cluster",
+    title: "H",
+    members: [
+      { key: "aaaa", role: "member", ordinal: 0 },
+      { key: "bbbb", role: "member", ordinal: 1 },
+    ],
+    metadata: {},
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.putSemanticVector({
+    nodeId: "aaaa",
+    backend: "hash256",
+    dims: 4,
+    vector: [1, 0, 0, 0],
+    indexedAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.putDagOverlay({
+    id: "dag-1",
+    title: "D",
+    nodeIds: ["aaaa", "bbbb"],
+    edges: [],
+    metadata: {},
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.recordProgramRun({
+    id: "prog-1",
+    programKey: "aaaa",
+    operation: "score",
+    memberKeys: ["aaaa"],
+    output: { operation: "score", memberCount: 1, memberReferences: [], tripped: false },
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.recordEvalRun({
+    id: "eval-1",
+    name: "suite",
+    result: { name: "suite", passed: true, score: 1, cases: [], createdAt: "2026-07-01T00:00:00.000Z" },
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.recordOperatorRun({
+    id: "op-1",
+    status: "ran",
+    summary: "ticked",
+    result: { ticked: 1, programRuns: 0, derivedAccepted: 0 },
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+
+  const report = store.storageStats();
+  assert.deepEqual(report.tables, {
+    cells: 2,
+    edges: 1,
+    hyperedges: 1,
+    semanticVectors: 1,
+    dagOverlays: 1,
+    programRuns: 1,
+    evalRuns: 1,
+    operatorRuns: 1,
+  });
+  store.close();
+});
+
+test("storageStats computes maximumCell (largest json blob, key ascending tie-break) and integer averageCellBytes", () => {
+  const store = new SqliteStore(":memory:");
+  const small = buildCell({ kind: "obs", title: "small", body: "x", confidence: 0.7 }, { key: "aaaa" });
+  const big = buildCell(
+    { kind: "obs", title: "the biggest cell body by far", body: "y".repeat(500), confidence: 0.7 },
+    { key: "bbbb" },
+  );
+  store.put(small);
+  store.put(big);
+
+  const report = store.storageStats();
+  assert.equal(report.maximumCell?.key, "bbbb");
+  assert.equal(report.maximumCell?.handle, big.handle);
+  assert.equal(report.maximumCell?.title, "the biggest cell body by far");
+  assert.ok(report.maximumCell!.bytes > 0);
+  assert.equal(Number.isInteger(report.averageCellBytes), true);
+  assert.ok(report.averageCellBytes > 0);
+  store.close();
+});
+
+test("storageStats breaks a maximumCell tie (equal json length) on key ascending", () => {
+  const store = new SqliteStore(":memory:");
+  // Same kind/body length so the stored json blobs are byte-identical in length;
+  // only the key differs, so key ASC must decide it deterministically.
+  store.put(buildCell({ kind: "obs", title: "same", body: "z", confidence: 0.7 }, { key: "zzzz" }));
+  store.put(buildCell({ kind: "obs", title: "same", body: "z", confidence: 0.7 }, { key: "aaaa" }));
+
+  const report = store.storageStats();
+  assert.equal(report.maximumCell?.key, "aaaa");
+  store.close();
+});
+
+test("storageStats on an on-disk store reports databasePath and databaseBytes including -wal/-shm sidecars", () => {
+  const dir = tempDbDir();
+  try {
+    const dbPath = join(dir, "recall.sqlite3");
+    const store = new SqliteStore(dbPath);
+    try {
+      // Write enough rows to force real WAL content on disk.
+      for (let i = 0; i < 50; i += 1) {
+        const key = `k${String(i).padStart(4, "0")}`;
+        store.put(
+          buildCell(
+            { kind: "obs", title: `cell ${i}`, body: "x".repeat(200), confidence: 0.7 },
+            { key },
+          ),
+        );
+      }
+
+      const report = store.storageStats();
+      assert.equal(report.databasePath, dbPath);
+      assert.equal(typeof report.databaseBytes, "number");
+
+      let expected = statSync(dbPath).size;
+      for (const suffix of ["-wal", "-shm"]) {
+        const sidecar = `${dbPath}${suffix}`;
+        if (existsSync(sidecar)) expected += statSync(sidecar).size;
+      }
+      assert.equal(report.databaseBytes, expected);
+      assert.ok(report.databaseBytes! > 0);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("storageStats reports databaseBytes undefined when the on-disk file is missing", () => {
+  const dir = tempDbDir();
+  try {
+    const dbPath = join(dir, "does-not-exist.sqlite3");
+    const store = new SqliteStore(":memory:");
+    // Simulate a store whose declared path does not correspond to a file on
+    // disk: storageStats must guard the missing-file case, not throw.
+    Object.defineProperty(store, "path", { value: dbPath });
+    const report = store.storageStats();
+    assert.equal(report.databasePath, dbPath);
+    assert.equal(report.databaseBytes, undefined);
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
