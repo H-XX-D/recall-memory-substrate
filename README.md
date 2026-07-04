@@ -23,9 +23,9 @@ A prompt arrives. Before the model sees it, the hook has already injected this:
 ```
 [Recall mini-index for THIS prompt (ids + titles only). You now know what
 exists, so do not ask or assert blind:]
-- dec_98ee "Canonical polarity locked for the memory axis"  [dec:98eec1f4]
-- bel_2b0a "Cache layer is safe to remove"  [bel:2b0ae4c3]  [SUPERSEDED?]
-- tsk_8686 "Wire the write surface into review"  [tsk:86868f00]
+- dec_4f21 "Use SQLite WAL mode for the event store"  [dec:4f21c09a]
+- bel_9d3e "Cache layer is safe to remove"  [bel:9d3e57b1]  [SUPERSEDED?]
+- tsk_71ac "Wire the retry path into review"  [tsk:71ac2e8d]
 DIG REQUIRED: a row above is marked [SUPERSEDED?]; its title may be out of
 date. Run recall compile "<task>" and recall cell show <id> on it BEFORE you
 act on it.
