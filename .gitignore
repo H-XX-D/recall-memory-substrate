@@ -75,3 +75,8 @@ scratch-*
 # local drafts, never commit
 posts/
 *.tgz
+
+# Blog post exports live on Hashnode; keep them out of the repo.
+cmq*.md
+posts/
+content/
