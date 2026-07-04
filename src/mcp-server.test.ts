@@ -688,6 +688,68 @@ test("recall_compile health:false suppresses the health compilerState line", () 
   store.close();
 });
 
+test("recall_write schema declares the evidence fields", () => {
+  const store = new SqliteStore(":memory:");
+  const res = handleMcpRequest(req("tools/list"), store)?.result as any;
+  const writeTool = res.tools.find((t: any) => t.name === "recall_write");
+  const props = writeTool.inputSchema.properties as Record<string, any>;
+  assert.equal(props.entities?.type, "array");
+  assert.equal(props.sourceRefs?.type, "array");
+  assert.equal(props.verification?.type, "string");
+  assert.deepEqual(props.verification?.enum, ["unverified", "checked", "tested", "external"]);
+  assert.equal(props.suggestPrograms?.type, "boolean");
+  store.close();
+});
+
+test("recall_write with verification tested keeps confidence 0.9", () => {
+  const store = new SqliteStore(":memory:");
+  const wr = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "obs", title: "verified strong claim over mcp", body: "measured directly", confidence: 0.9, verification: "tested" },
+  }), store));
+  assert.equal(wr.accepted, true);
+  assert.deepEqual(wr.attenuations, []);
+  store.close();
+});
+
+test("recall_write response includes guidance; programSuggestions empty by default", () => {
+  delete process.env["RECALL_SUGGEST_PROGRAMS"];
+  const store = new SqliteStore(":memory:");
+  callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "bel", title: "WAL checkpoints stall under heavy write load", body: "claim to verify", confidence: 0.6, topics: ["storage"] },
+  }), store));
+  const wr = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "obs", title: "WAL checkpoint stall reproduced during bulk import", body: "measured on the event store", confidence: 0.6, topics: ["storage"] },
+  }), store));
+  assert.equal(wr.accepted, true);
+  assert.ok(wr.guidance, "accepted write must carry guidance");
+  assert.ok(wr.guidance.candidateEdges.length >= 1);
+  assert.deepEqual(wr.guidance.programSuggestions, []);
+  store.close();
+});
+
+test("recall_write suggestPrograms=true returns suggestions", () => {
+  delete process.env["RECALL_SUGGEST_PROGRAMS"];
+  const store = new SqliteStore(":memory:");
+  for (let i = 0; i < 5; i++) {
+    callText(handleMcpRequest(req("tools/call", {
+      name: "recall_write",
+      arguments: { kind: "obs", title: `latency observation number ${i}`, body: `cell ${i}`, confidence: 0.6, topics: ["latency"] },
+    }), store));
+  }
+  const wr = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "obs", title: "latency spike observed again", body: "b", confidence: 0.6, topics: ["latency"], suggestPrograms: true },
+  }), store));
+  assert.equal(wr.accepted, true);
+  const watch = wr.guidance.programSuggestions.find((s: any) => s.operation === "watch");
+  assert.ok(watch, "expected a watch suggestion");
+  assert.equal(watch.proposal.kind, "prg");
+  store.close();
+});
+
 test("recall_storage returns the storage stats report, mirroring recall_status's shape", () => {
   const store = new SqliteStore(":memory:");
   admit(

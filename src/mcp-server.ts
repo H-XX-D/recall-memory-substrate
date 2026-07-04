@@ -10,6 +10,7 @@ import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { admit } from "./admission.js";
+import { buildWriteGuidance } from "./guidance.js";
 import { semanticSearch } from "./semantic.js";
 import { resolveCellReference, cellReferenceView } from "./references.js";
 import { getRecallPage } from "./pages.js";
@@ -46,7 +47,7 @@ export const TOOLS = [
   { name: "recall_search", description: "Lexical search; returns id, kind, title, score.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
   { name: "recall_compile", description: "Compile a budgeted context packet for a task.", inputSchema: { type: "object", properties: { task: { type: "string" }, words: { type: "number" }, health: { type: "boolean" }, inlineRefs: { type: "boolean" }, refParams: { type: "boolean" } }, required: ["task"] } },
   { name: "recall_cell", description: "Expand one cell by id, prefix, handle, or address.", inputSchema: { type: "object", properties: { idOrAddress: { type: "string" } }, required: ["idOrAddress"] } },
-  { name: "recall_write", description: "Admit a durable write through the admission gate.", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, topics: { type: "array" }, edges: { type: "array" } }, required: ["kind", "title", "body", "confidence"] } },
+  { name: "recall_write", description: "Admit a durable write through the admission gate. kind: dec (decision made), obs (observation), bel (claim to later confirm or refute), tsk (open action), obj (objective), rsk (risk), ref (source reference), ver (verification result), hyp (hypothesis). Prefer bel, tsk, rsk over flat observations when they fit; contradicts and depends_on edges feed the compile packet's conflicts and dependencies sections. Confidence above 0.7 needs verification, sourceRefs, or a weighted supports edge, else it is attenuated. The response includes guidance (candidate edges to similar cells; standing-program suggestions when suggestPrograms is true).", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, edges: { type: "array" }, sourceRefs: { type: "array", items: { type: "string" } }, verification: { type: "string", enum: ["unverified", "checked", "tested", "external"] }, suggestPrograms: { type: "boolean" } }, required: ["kind", "title", "body", "confidence"] } },
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
   { name: "recall_ref", description: "Resolve a cell reference (handle#field.path) to the addressed value.", inputSchema: { type: "object", properties: { reference: { type: "string" } }, required: ["reference"] } },
   { name: "recall_page", description: "Return a curated kind-filtered page view (reflections, objectives, workbench, witnesses, handoffs, team-metrics, agent-profile, user-profile, index).", inputSchema: { type: "object", properties: { name: { type: "string" }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } }, required: ["name"] } },
@@ -130,12 +131,15 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
     }
     case "recall_write": {
       const r = admit(toProposal(args), { store });
+      const suggest = args.suggestPrograms === true || process.env.RECALL_SUGGEST_PROGRAMS === "1";
+      const guidance = r.accepted && r.cell ? buildWriteGuidance(store, r.cell, r, { suggestPrograms: suggest }) : undefined;
       return JSON.stringify({
         accepted: r.accepted,
         id: r.cell?.key,
         issues: r.issues,
         warnings: r.warnings,
         attenuations: r.attenuations,
+        ...(guidance ? { guidance } : {}),
       });
     }
     case "recall_semantic": {
