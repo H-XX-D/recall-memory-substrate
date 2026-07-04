@@ -601,3 +601,20 @@ test("empty packet sections say what would populate them", () => {
   assert.match(text, /tasks:\n- none \(populated by tsk cells\)/);
   store.close();
 });
+
+test("expansion handles render categorized with handle, title, and full key; raw keys preserved", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "bel", title: "watchdog trips are usually real", body: "claim", confidence: 0.6 }, { key: "belk" }));
+  store.put(buildCell({ kind: "dec", title: "add watchdog op to the operator", body: "tripwire on eff", confidence: 0.8 }, { key: "deck" }));
+
+  const packet = compileContext(store, "watchdog", { limit: 5 });
+  assert.deepEqual([...packet.expansionHandles].sort(), ["belk", "deck"]);
+  assert.ok(packet.expansionIndex.length === 2);
+
+  const formatted = formatContextPacket(packet);
+  const section = formatted.split("expansion_handles:")[1]!;
+  assert.match(section, /- decisions: dec_[0-9a-f]+ "add watchdog op to the operator" \[deck\]/);
+  assert.match(section, /- beliefs: bel_[0-9a-f]+ "watchdog trips are usually real" \[belk\]/);
+  assert.ok(section.indexOf("- decisions:") < section.indexOf("- beliefs:"), "decisions category comes first");
+  store.close();
+});

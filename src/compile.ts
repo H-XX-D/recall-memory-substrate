@@ -1,8 +1,9 @@
 // compile: the read side. It asks the store for lexical hits (FTS5/BM25 when
 // available, LIKE fallback otherwise) and renders the mini-index seeds. A
 // zero-vocabulary or no-match query yields zero hits: a loud miss, not garbage.
-import type { Cell, SearchHit, Store } from "./types.js";
+import type { Cell, Kind, SearchHit, Store } from "./types.js";
 import { renderMiniIndexLine } from "./render.js";
+import { quoteString } from "./address.js";
 import {
   degreeMap,
   fuseCandidates,
@@ -48,7 +49,8 @@ export interface ContextPacket {
   referenceParameters: string[];
   staleOrLowTrust: string[];
   suggestedNextActions: string[];
-  expansionHandles: string[];
+  expansionHandles: string[]; // machine-readable keys; expansionIndex is the rendered view
+  expansionIndex: string[];
   wordCount: number;
 }
 
@@ -111,6 +113,7 @@ export function compileContext(
     staleOrLowTrust: [],
     suggestedNextActions: [],
     expansionHandles: [],
+    expansionIndex: [],
     wordCount: 0,
   };
 
@@ -145,8 +148,40 @@ export function compileContext(
     packet.suggestedNextActions.push("Expand only the handles needed for exact evidence before writing durable claims.");
   }
 
+  packet.expansionIndex = buildExpansionIndex(store, packet.expansionHandles);
   trimPacket(packet, budget);
   return packet;
+}
+
+// Categorized, human-scannable view of expansionHandles: the raw key list
+// stays machine-readable while this index carries what each key IS, so a
+// reader never has to expand blind. Stable sort keeps ranking order within a
+// category.
+const EXPANSION_CATEGORY: Record<Kind, string> = {
+  dec: "decisions",
+  bel: "beliefs",
+  tsk: "tasks",
+  obj: "objectives",
+  rsk: "risks",
+  obs: "observations",
+  ver: "verifications",
+  ref: "references",
+  hyp: "hypotheses",
+  prg: "programs",
+};
+const EXPANSION_ORDER: Kind[] = ["dec", "bel", "tsk", "obj", "rsk", "obs", "ver", "ref", "hyp", "prg"];
+
+function buildExpansionIndex(store: Store, keys: string[]): string[] {
+  const rank = (cell: Cell | undefined): number =>
+    cell ? EXPANSION_ORDER.indexOf(cell.kind) : EXPANSION_ORDER.length;
+  return keys
+    .map((key) => ({ key, cell: store.get(key) }))
+    .sort((a, b) => rank(a.cell) - rank(b.cell))
+    .map(({ key, cell }) =>
+      cell
+        ? `${EXPANSION_CATEGORY[cell.kind]}: ${cell.handle} ${quoteString(trimWords(cell.title, 12))} [${key}]`
+        : key,
+    );
 }
 
 export function formatContextPacket(packet: ContextPacket): string {
@@ -165,7 +200,10 @@ export function formatContextPacket(packet: ContextPacket): string {
     section("reference_parameters", packet.referenceParameters),
     section("stale_or_low_trust", packet.staleOrLowTrust),
     section("suggested_next_actions", packet.suggestedNextActions),
-    section("expansion_handles", packet.expansionHandles),
+    section(
+      "expansion_handles",
+      packet.expansionIndex.length > 0 ? packet.expansionIndex : packet.expansionHandles,
+    ),
   ].join("\n\n");
 }
 
@@ -469,7 +507,7 @@ function trimPacket(packet: ContextPacket, budget: number): void {
     | "dependencies"
     | "staleOrLowTrust"
     | "suggestedNextActions"
-    | "expansionHandles"
+    | "expansionIndex"
   >)[] = [
     "referenceParameters",
     "cellState",
@@ -481,7 +519,7 @@ function trimPacket(packet: ContextPacket, budget: number): void {
     "dependencies",
     "staleOrLowTrust",
     "suggestedNextActions",
-    "expansionHandles",
+    "expansionIndex",
   ];
   while (countPacketWords(packet) > budget) {
     const key = sections.find((name) => packet[name].length > 1);
@@ -507,7 +545,7 @@ function countPacketWords(packet: ContextPacket): number {
     ...packet.referenceParameters,
     ...packet.staleOrLowTrust,
     ...packet.suggestedNextActions,
-    ...packet.expansionHandles,
+    ...(packet.expansionIndex.length > 0 ? packet.expansionIndex : packet.expansionHandles),
   ].reduce((sum, line) => sum + countWords(line), 0);
 }
 
