@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { SqliteStore } from "./store.js";
 import { admit } from "./admission.js";
 import { buildWriteGuidance } from "./guidance.js";
+import { validateProgramSpec } from "./programs.js";
 import type { Cell } from "./types.js";
 
 function seeded(): { store: SqliteStore; wal: Cell } {
@@ -78,5 +79,65 @@ test("evidence hint appears exactly when confidence was attenuated", () => {
   const g2 = buildWriteGuidance(store, fine.cell!, fine);
   assert.equal(g2.evidenceHint, undefined);
   assert.deepEqual(g2.programSuggestions, []);
+  store.close();
+});
+
+function admitMany(store: SqliteStore, kind: "obs" | "tsk", n: number, topic: string): void {
+  for (let i = 0; i < n; i++) {
+    admit({ kind, title: `${topic} ${kind} number ${i}`, body: `cell ${i}`, confidence: 0.6, topics: [topic] }, { store });
+  }
+}
+
+test("recurring topic suggests a watch program only when opted in", () => {
+  const store = new SqliteStore(":memory:");
+  admitMany(store, "obs", 5, "latency");
+  const r = admit({ kind: "obs", title: "latency spike observed again", body: "b", confidence: 0.6, topics: ["latency"] }, { store });
+  const off = buildWriteGuidance(store, r.cell!, r);
+  assert.deepEqual(off.programSuggestions, []);
+  const on = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  const watch = on.programSuggestions.find((s) => s.operation === "watch");
+  assert.ok(watch, "expected a watch suggestion");
+  assert.equal(watch!.proposal.kind, "prg");
+  assert.doesNotThrow(() => validateProgramSpec((watch!.proposal.props as { program: unknown }).program));
+  const admitted = admit(watch!.proposal, { store });
+  assert.equal(admitted.accepted, true);
+  store.close();
+});
+
+test("an existing program covering the topic suppresses the suggestion", () => {
+  const store = new SqliteStore(":memory:");
+  admitMany(store, "obs", 6, "latency");
+  admit(
+    { kind: "prg", title: "watch latency", body: "standing", confidence: 0.6, props: { program: { schemaVersion: "recall.program.v1", operation: "watch", target: { topics: ["latency"] } } } },
+    { store },
+  );
+  const r = admit({ kind: "obs", title: "latency yet again", body: "b", confidence: 0.6, topics: ["latency"] }, { store });
+  const g = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  assert.equal(g.programSuggestions.filter((s) => s.operation === "watch").length, 0);
+  store.close();
+});
+
+test("a task pool suggests allocate ahead of watch", () => {
+  const store = new SqliteStore(":memory:");
+  admitMany(store, "tsk", 4, "migration");
+  const r = admit({ kind: "tsk", title: "migration cleanup pass", body: "b", confidence: 0.6, topics: ["migration"] }, { store });
+  const g = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  assert.equal(g.programSuggestions[0]?.operation, "allocate");
+  store.close();
+});
+
+test("a contradicts edge onto a belief suggests a quorum program targeted at it", () => {
+  const store = new SqliteStore(":memory:");
+  const bel = admit({ kind: "bel", title: "The cache layer is safe to remove", body: "claim", confidence: 0.6 }, { store }).cell!;
+  const r = admit(
+    { kind: "obs", title: "Removing the cache doubled p99", body: "measured", confidence: 0.6, edges: [{ relation: "contradicts", target: bel.key }] },
+    { store },
+  );
+  const g = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  const q = g.programSuggestions.find((s) => s.operation === "quorum");
+  assert.ok(q);
+  const spec = (q!.proposal.props as { program: { target: { keys: string[] } } }).program;
+  assert.deepEqual(spec.target.keys, [bel.key]);
+  assert.ok(g.programSuggestions.length <= 2);
   store.close();
 });
