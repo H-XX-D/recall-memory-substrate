@@ -329,9 +329,12 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const since = parseSince(args.since, options.now ?? new Date().toISOString());
       const kinds = args.kinds === undefined ? undefined : parseKinds(args.kinds);
       return withReadStore(args, route, env, (store) => {
+        // No scope.project filter here: routing already picked the store.
+        // A project route opens that project's own DB file, whose cells keep
+        // scope.project === "default" unless an import stamped it, so
+        // re-filtering by the routing slug would report zero activity.
         const result = diffStore(store, {
           since,
-          project: route.slug,
           kinds,
           maxItems: args.maxItems,
         });

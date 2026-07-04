@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { admit } from "./admission.js";
@@ -218,6 +218,54 @@ test("recall diff CLI: relative --since, JSON default, --summary markdown, and a
     const kinds = capture(["diff", "--since", "2h", "--kinds", "dec,bel", "--db", db], { now: "2026-07-04T12:00:00.000Z" });
     assert.equal(kinds.code, 0);
     assert.deepEqual(JSON.parse(kinds.stdout).newCells, []);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// A cell admitted through a project route keeps scope.project === "default";
+// the project's own DB file IS the scope. diff must not re-filter that store
+// by the routing slug, or every project-routed diff reports zero activity
+// (the SessionStart hook's daily-driver case: cwd inside a registered root).
+test("recall diff routed to a project reports that project's activity", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "recall-diff-route-"));
+  try {
+    const env = { RECALL_HOME: join(tmp, "rhome") } as NodeJS.ProcessEnv;
+    const root = join(tmp, "workroot");
+    const sub = join(root, "sub");
+    mkdirSync(sub, { recursive: true });
+    assert.equal(capture(["project", "init", "--slug", "work", "--root", root], { env }).code, 0);
+
+    const proposalPath = join(tmp, "cell.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({ kind: "dec", title: "Decision made inside", body: "b", confidence: 0.8 }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--project", "work"], {
+      env,
+      now: "2026-07-04T11:30:00.000Z",
+    });
+    assert.equal(admitted.code, 0);
+    const key = JSON.parse(admitted.stdout).cell.key as string;
+
+    // Explicit --project routing.
+    const viaFlag = capture(["diff", "--since", "2h", "--project", "work"], {
+      env,
+      now: "2026-07-04T12:00:00.000Z",
+    });
+    assert.equal(viaFlag.code, 0);
+    assert.deepEqual(JSON.parse(viaFlag.stdout).newCells.map((c: { key: string }) => c.key), [key]);
+
+    // cwd routing from inside the registered root (what the hook does).
+    const viaCwd = capture(["diff", "--since", "2h", "--summary"], {
+      env,
+      cwd: sub,
+      now: "2026-07-04T12:00:00.000Z",
+    });
+    assert.equal(viaCwd.code, 0);
+    assert.match(viaCwd.stdout, /^# Recall diff in project `work` since /m);
+    assert.match(viaCwd.stdout, /^\*\*Summary:\*\* 1 new cells · 0 updated · 0 new edges · 0 supersede events$/m);
+    assert.match(viaCwd.stdout, new RegExp(`^- \`${key.slice(0, 8)}\` \\[dec\\] Decision made inside$`, "m"));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
