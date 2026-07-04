@@ -100,6 +100,9 @@ export function buildCell(proposal: WriteProposal, opts: BuildOpts = {}): Cell {
     tags: {
       topics: proposal.topics ?? [],
       entities: proposal.entities ?? [],
+      ...(proposal.lifecycle !== undefined ? { lifecycle: proposal.lifecycle } : {}),
+      ...(proposal.quality !== undefined ? { quality: proposal.quality } : {}),
+      ...(proposal.subject !== undefined ? { subject: proposal.subject } : {}),
     },
     policy: {
       sensitivity: proposal.sensitivity ?? "private",

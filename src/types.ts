@@ -167,6 +167,9 @@ export interface WriteProposal {
   summary?: string;
   topics?: string[];
   entities?: string[];
+  lifecycle?: string[];
+  quality?: string[];
+  subject?: string[];
   edges?: { relation: string; target: string; weight?: number }[];
   sourceRefs?: string[];
   uncertainty?: number;       // model may state it; else derived from confidence

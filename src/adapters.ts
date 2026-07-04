@@ -48,6 +48,9 @@ export interface ImportedMemoryRecord {
   confidence?: number;
   topics?: string[];
   entities?: string[];
+  lifecycle?: string[];
+  quality?: string[];
+  subject?: string[];
   sourceRefs?: string[];
   createdAt?: string;
   project?: string;
@@ -274,6 +277,9 @@ export function importedRecordToProposal(
     owner: record.owner ?? `${record.source}-adapter`,
     topics: unique([record.source, "imported", ...(record.topics ?? [])]),
     entities: unique([opts.sourceTag, ...(record.entities ?? [])]),
+    ...(record.lifecycle !== undefined ? { lifecycle: record.lifecycle } : {}),
+    ...(record.quality !== undefined ? { quality: record.quality } : {}),
+    ...(record.subject !== undefined ? { subject: record.subject } : {}),
     sourceRefs: unique([`${record.source}:${record.ref}`, ...(record.sourceRefs ?? [])]),
     edges: opts.priorKeys.map((target) => ({ relation: "supersedes", target })),
     project: record.project ?? "Recall",
@@ -515,9 +521,18 @@ export function zepImportItems(json: unknown, opts: { project?: string; now?: st
             body: fact.fact,
             topics: ["zep", fact.relation].filter(Boolean),
             entities: [fact.source, fact.target, `zep-uuid:${fact.uuid}`].filter(Boolean),
+            // Legacy semantics: a fact with an invalid_at is expired, else active.
+            lifecycle: [fact.invalidAt ? "expired" : "active"],
             createdAt: fact.validAt ?? fact.createdAt,
             project,
             supersedesTags,
+            // props.zep.invalidAt stays as the raw datum (dry-run/apply predecessor
+            // supersede lookups and the exported archive read it directly).
+            // Known legacy limitation, carried over unchanged: the import
+            // fingerprint below hashes only source:sha12(ref):sha12(body), so a
+            // fact whose text is unchanged but which GAINED invalid_at (e.g. it
+            // just expired) still re-skips on reimport as "unchanged" even though
+            // its lifecycle tag would now differ.
             props: { zep: { relation: fact.relation, source: fact.source, target: fact.target, invalidAt: fact.invalidAt ?? null } },
           },
           opts.now,

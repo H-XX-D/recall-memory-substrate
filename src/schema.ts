@@ -39,6 +39,9 @@ export function validateProposal(input: unknown): ValidationResult {
   optionalString(p.tenant, "tenant", issues);
   optionalStringArray(p.topics, "topics", issues);
   optionalStringArray(p.entities, "entities", issues);
+  optionalStringArray(p.lifecycle, "lifecycle", issues);
+  optionalStringArray(p.quality, "quality", issues);
+  optionalStringArray(p.subject, "subject", issues);
   optionalStringArray(p.sourceRefs, "sourceRefs", issues);
   optionalProbability(p.uncertainty, "uncertainty", issues);
   optionalProbability(p.concern, "concern", issues);

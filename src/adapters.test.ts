@@ -18,6 +18,7 @@ import {
 } from "./adapters.js";
 import { buildCell } from "./build.js";
 import { SqliteStore } from "./store.js";
+import { subgraphCells } from "./subgraph.js";
 
 test("parseMem0Export accepts common envelopes and metadata categories", () => {
   const rows = parseMem0Export({
@@ -400,6 +401,47 @@ test("importZep reconstructs invalidated predecessor supersession", () => {
     assert.equal(applied.created, 1);
     assert.equal(applied.superseded, 1);
     assert.equal(store.all().filter((cell) => cell.status === "superseded").length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("importZep stamps lifecycle expired/active from invalid_at, findable via subgraphCells", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const json = {
+      facts: [
+        {
+          uuid: "z-expired",
+          fact: "Alice worked on Recall v4.",
+          source_node: "Alice",
+          name: "worked_on",
+          target_node: "Recall v4",
+          valid_at: "2026-01-01T00:00:00.000Z",
+          invalid_at: "2026-02-01T00:00:00.000Z",
+        },
+        {
+          uuid: "z-active",
+          fact: "Bob works on Recall v5.",
+          source_node: "Bob",
+          name: "works_on",
+          target_node: "Recall v5",
+          valid_at: "2026-02-02T00:00:00.000Z",
+        },
+      ],
+    };
+
+    importZep(store, json, { apply: true, now: "2026-06-26T12:00:00.000Z" });
+
+    const cells = store.all();
+    const expiredCell = cells.find((c) => c.sourceRefs.some((r) => r.includes("z-expired")));
+    const activeCell = cells.find((c) => c.sourceRefs.some((r) => r.includes("z-active")));
+    assert.deepEqual(expiredCell?.tags.lifecycle, ["expired"]);
+    assert.deepEqual(activeCell?.tags.lifecycle, ["active"]);
+
+    const found = subgraphCells(store, { lifecycle: ["expired"] });
+    assert.ok(found.some((c) => c.key === expiredCell?.key));
+    assert.ok(!found.some((c) => c.key === activeCell?.key));
   } finally {
     store.close();
   }

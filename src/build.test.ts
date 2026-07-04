@@ -114,3 +114,23 @@ test("buildCell rejects invalid kind and confidence even when called directly", 
   assert.throws(() => buildCell({ kind: "nope", title: "t", body: "b", confidence: 0.6 }));
   assert.throws(() => buildCell({ kind: "obs", title: "t", body: "b", confidence: 0 }));
 });
+
+test("buildCell threads lifecycle/quality/subject tags when provided", () => {
+  const c = buildCell(
+    {
+      kind: "obs", title: "t", body: "b", confidence: 0.6,
+      lifecycle: ["expired"], quality: ["verified"], subject: ["infra"],
+    },
+    { key: "eeee5555" },
+  );
+  assert.deepEqual(c.tags.lifecycle, ["expired"]);
+  assert.deepEqual(c.tags.quality, ["verified"]);
+  assert.deepEqual(c.tags.subject, ["infra"]);
+});
+
+test("buildCell omits lifecycle/quality/subject tags when not provided", () => {
+  const c = buildCell({ kind: "obs", title: "t", body: "b", confidence: 0.6 }, { key: "ffff6666" });
+  assert.equal(c.tags.lifecycle, undefined);
+  assert.equal(c.tags.quality, undefined);
+  assert.equal(c.tags.subject, undefined);
+});

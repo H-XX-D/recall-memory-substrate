@@ -93,6 +93,9 @@ test("valid optional proposal fields pass", () => {
     summary: "",
     topics: ["recall-v5"],
     entities: ["Recall"],
+    lifecycle: ["active"],
+    quality: ["verified"],
+    subject: ["infra"],
     sourceRefs: ["src/schema.ts"],
     uncertainty: 0.2,
     concern: 0.1,
@@ -124,6 +127,19 @@ test("invalid optional arrays and probabilities fail with indexed paths", () => 
   assert.ok(r.issues.some((i) => i.path === "entities"));
   assert.ok(r.issues.some((i) => i.path === "uncertainty"));
   assert.ok(r.issues.some((i) => i.path === "concern"));
+});
+
+test("invalid lifecycle/quality/subject entries fail with indexed paths", () => {
+  const r = validateProposal({
+    ...valid,
+    lifecycle: ["expired", 7],
+    quality: "verified",
+    subject: ["ok", ""],
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.issues.some((i) => i.path === "lifecycle[1]"));
+  assert.ok(r.issues.some((i) => i.path === "quality"));
+  assert.ok(r.issues.some((i) => i.path === "subject[1]"));
 });
 
 test("invalid optional enums, flags, dates, and props fail", () => {
