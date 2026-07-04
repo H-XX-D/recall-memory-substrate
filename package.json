@@ -53,6 +53,8 @@
     "integrations/claude/hooks/",
     "!integrations/claude/hooks/__pycache__",
     "!integrations/claude/hooks/test_*.py",
+    "integrations/claude/skill/",
+    "!integrations/claude/skill/scripts/__pycache__",
     "README.md",
     "CHANGELOG.md",
     "CITATION.cff",
