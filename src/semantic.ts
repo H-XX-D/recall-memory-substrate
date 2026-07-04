@@ -196,3 +196,18 @@ export function indexCell(cell: Cell, store: Store): void {
     indexedAt: new Date().toISOString(),
   });
 }
+
+// Reindexes cells into the semantic vector table. With onlyMissing, cells
+// already carrying a semantic vector are skipped, so a large store can be
+// brought up to date incrementally instead of re-embedding everything.
+// Returns the count of cells actually indexed.
+export function reindexSemantic(store: Store, opts: { onlyMissing?: boolean } = {}): number {
+  const skip = opts.onlyMissing ? new Set(store.listSemanticVectorIds()) : undefined;
+  let count = 0;
+  for (const cell of store.all()) {
+    if (skip?.has(cell.key)) continue;
+    indexCell(cell, store);
+    count += 1;
+  }
+  return count;
+}

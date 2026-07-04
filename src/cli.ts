@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 // R8 CLI surface over the implemented v5 core. Server, TUI, import adapters,
 // and installer sync commands stay deferred; this is the npm/bin entry point.
-import { mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { admit } from "./admission.js";
@@ -24,6 +24,7 @@ import { compileContext, formatContextPacket } from "./compile.js";
 import { FederatedReadStore } from "./federated-store.js";
 import { runOperatorCycle } from "./operator.js";
 import { runProgramCell } from "./programs.js";
+import { reindexSemantic } from "./semantic.js";
 import { serializeGraph, parseNetlist, loadNetlist, type LoadMode } from "./netlist.js";
 import {
   homeDbPath,
@@ -63,8 +64,11 @@ interface ParsedArgs {
   root?: string;
   file?: string;
   mode?: string;
+  out?: string;
   derive: boolean;
   apply: boolean;
+  reindex: boolean;
+  missingOnly: boolean;
   words: number;
   limit: number;
   noHealth: boolean;
@@ -156,10 +160,21 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    // export/import archive: the archive format (v2) carries cells plus
+    // hyperedges/semanticVectors/dagOverlays/programRuns/evalRuns/operatorRuns.
+    // A partial archive (e.g. hand-edited to drop some cells) still imports
+    // cleanly, but importing it rewrites each imported cell's edgesOut to the
+    // archived snapshot: it is an overwrite of that cell's edges, not a merge
+    // with whatever edges the target store already has for that key.
     if (command === "export") {
       const store = openWriteStore(route.dbPath);
       try {
-        outJson(out, exportCellArchive(store, options.now ?? new Date().toISOString()));
+        const archive = exportCellArchive(store, options.now ?? new Date().toISOString());
+        if (args.out) {
+          writeFileSync(args.out, JSON.stringify(archive, null, 2));
+        } else {
+          outJson(out, archive);
+        }
         return 0;
       } finally {
         store.close();
@@ -170,7 +185,13 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const store = openWriteStore(route.dbPath);
       try {
         if (subcommand === "archive") {
-          outJson(out, importCellArchive(store, readJsonValue(args, "archive import"), { apply: args.apply }));
+          const summary = importCellArchive(store, readJsonValue(args, "archive import"), { apply: args.apply });
+          if (args.apply && args.reindex) {
+            const reindexed = reindexSemantic(store);
+            outJson(out, { ...summary, reindexed });
+          } else {
+            outJson(out, summary);
+          }
           return 0;
         }
         if (subcommand === "mem0") {
@@ -530,6 +551,17 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    if (command === "reindex") {
+      const store = openWriteStore(route.dbPath);
+      try {
+        const indexed = reindexSemantic(store, { onlyMissing: args.missingOnly });
+        outJson(out, { indexed });
+        return 0;
+      } finally {
+        store.close();
+      }
+    }
+
     throw new Error(`Unknown command: ${args.command.join(" ")}`);
   } catch (error) {
     err(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -539,7 +571,18 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command: string[] = [];
-  const parsed: ParsedArgs = { command, derive: false, apply: false, words: 900, limit: 10, noHealth: false, inlineRefs: false, refParams: false };
+  const parsed: ParsedArgs = {
+    command,
+    derive: false,
+    apply: false,
+    reindex: false,
+    missingOnly: false,
+    words: 900,
+    limit: 10,
+    noHealth: false,
+    inlineRefs: false,
+    refParams: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--db") parsed.db = requireValue(argv, ++i, arg);
@@ -551,8 +594,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--root") parsed.root = requireValue(argv, ++i, arg);
     else if (arg === "--file") parsed.file = requireValue(argv, ++i, arg);
     else if (arg === "--mode") parsed.mode = requireValue(argv, ++i, arg);
+    else if (arg === "--out") parsed.out = requireValue(argv, ++i, arg);
     else if (arg === "--derive") parsed.derive = true;
     else if (arg === "--apply") parsed.apply = true;
+    else if (arg === "--reindex") parsed.reindex = true;
+    else if (arg === "--missing-only") parsed.missingOnly = true;
     else if (arg === "--no-health") parsed.noHealth = true;
     else if (arg === "--inline-refs") parsed.inlineRefs = true;
     else if (arg === "--ref-params") parsed.refParams = true;
@@ -725,11 +771,12 @@ Commands:
   recall operate show <id> [--db path] [--project slug]
   recall render [--db path] [--project slug]
   recall load --file netlist.mal [--mode replay|verify|merge] [--db path] [--project slug]
-  recall export [--db path] [--project slug]
-  recall import archive --json archive.json [--apply] [--db path] [--project slug]
+  recall export [--out file.json] [--db path] [--project slug]
+  recall import archive --json archive.json [--apply] [--reindex] [--db path] [--project slug]
   recall import mem0 --json mem0.json [--apply] [--db path] [--project slug]
   recall import zep --json zep.json [--apply] [--db path] [--project slug]
   recall import auto-memory --root path [--apply] [--db path] [--project slug]
+  recall reindex [--missing-only] [--db path] [--project slug]
   recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json
   recall admit --json proposal.json [--db path] [--project slug]

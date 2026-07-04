@@ -4,6 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  EXPORT_SCHEMA_VERSION,
+  EXPORT_SCHEMA_VERSION_V2,
   MAX_PRIOR_VERSIONS,
   exportCellArchive,
   importAutoMemory,
@@ -14,11 +16,98 @@ import {
   importMem0,
   importZep,
   parseAutoMemoryFile,
+  parseCellArchive,
   parseMem0Export,
 } from "./adapters.js";
 import { buildCell } from "./build.js";
 import { SqliteStore } from "./store.js";
 import { subgraphCells } from "./subgraph.js";
+import type {
+  Cell,
+  DagOverlay,
+  Hyperedge,
+  Kind,
+  LexicalBackend,
+  NeighborLink,
+  SearchHit,
+  SemanticVector,
+  Store,
+  StoreStats,
+} from "./types.js";
+
+// A Store double implementing only the base interface: no ledger accessors
+// (no listProgramRuns/listEvalRuns/listOperatorRuns/recordProgramRun/etc), so
+// exportCellArchive's feature-detection must omit ledger sections for it.
+class BareStore implements Store {
+  private cells = new Map<string, Cell>();
+  private vectors = new Map<string, SemanticVector>();
+  private hyperedges = new Map<string, Hyperedge>();
+  private dagOverlays = new Map<string, DagOverlay>();
+
+  put(cell: Cell): void {
+    this.cells.set(cell.key, cell);
+  }
+  get(key: string): Cell | undefined {
+    return this.cells.get(key);
+  }
+  getByHandle(handle: string): Cell | undefined {
+    return [...this.cells.values()].find((c) => c.handle === handle);
+  }
+  all(): Cell[] {
+    return [...this.cells.values()];
+  }
+  active(): Cell[] {
+    return this.all().filter((c) => c.status === "active");
+  }
+  neighbors(_key: string): NeighborLink[] {
+    return [];
+  }
+  findByContentKey(_kind: Kind, _contentKey: string): Cell | undefined {
+    return undefined;
+  }
+  search(_query: string, _opts?: { limit?: number }): SearchHit[] {
+    return [];
+  }
+  lexicalBackend(): LexicalBackend {
+    return "like";
+  }
+  stats(): StoreStats {
+    return { cells: this.cells.size, activeCells: this.active().length, edges: 0, indexedCells: 0, lexicalBackend: "like" };
+  }
+  close(): void {
+    // no-op
+  }
+  putSemanticVector(v: SemanticVector): void {
+    this.vectors.set(v.nodeId, v);
+  }
+  getSemanticVector(nodeId: string): SemanticVector | undefined {
+    return this.vectors.get(nodeId);
+  }
+  listSemanticVectorIds(): string[] {
+    return [...this.vectors.keys()];
+  }
+  putHyperedge(h: Hyperedge): void {
+    this.hyperedges.set(h.id, h);
+  }
+  getHyperedge(id: string): Hyperedge | undefined {
+    return this.hyperedges.get(id);
+  }
+  listHyperedges(_limit?: number): Hyperedge[] {
+    return [...this.hyperedges.values()];
+  }
+  hyperedgesForCell(key: string, _limit?: number): Hyperedge[] {
+    return [...this.hyperedges.values()].filter((h) => h.members.some((m) => m.key === key));
+  }
+  putDagOverlay(d: DagOverlay): void {
+    this.dagOverlays.set(d.id, d);
+  }
+  getDagOverlay(id: string): DagOverlay | undefined {
+    return this.dagOverlays.get(id);
+  }
+  listDagOverlays(_limit?: number): DagOverlay[] {
+    return [...this.dagOverlays.values()];
+  }
+}
 
 test("parseMem0Export accepts common envelopes and metadata categories", () => {
   const rows = parseMem0Export({
@@ -486,7 +575,7 @@ test("cell archives round-trip exact cells and edges", () => {
     source.put(b);
 
     const archive = exportCellArchive(source, "2026-06-26T12:00:00.000Z");
-    assert.equal(archive.schemaVersion, "recall.cells.export.v1");
+    assert.equal(archive.schemaVersion, "recall.cells.export.v2");
     assert.equal(archive.cells.length, 2);
 
     const dry = importCellArchive(target, archive);
@@ -501,6 +590,298 @@ test("cell archives round-trip exact cells and edges", () => {
     source.close();
     target.close();
   }
+});
+
+test("a v2 archive with a hyperedge, a dag overlay, a semantic vector, and one run per ledger round-trips losslessly into a fresh SqliteStore", () => {
+  const source = new SqliteStore(":memory:");
+  const target = new SqliteStore(":memory:");
+  try {
+    const a = buildCell({ kind: "obs", title: "A", body: "a", confidence: 0.7 }, { key: "aaaa" });
+    const b = buildCell(
+      { kind: "obs", title: "B", body: "b", confidence: 0.8, edges: [{ relation: "supports", target: "aaaa" }] },
+      { key: "bbbb" },
+    );
+    source.put(a);
+    source.put(b);
+
+    source.putHyperedge({
+      id: "hedge-1",
+      kind: "quorum",
+      title: "Test hyperedge",
+      members: [{ key: "aaaa", role: "member", ordinal: 0 }],
+      metadata: {},
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.putDagOverlay({
+      id: "dag-1",
+      title: "Test overlay",
+      nodeIds: ["aaaa", "bbbb"],
+      edges: [{ source: "aaaa", target: "bbbb" }],
+      metadata: {},
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.putSemanticVector({
+      nodeId: "aaaa",
+      backend: "hash:v1",
+      dims: 4,
+      vector: [0.1, 0.2, 0.3, 0.4],
+      indexedAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.recordProgramRun({
+      id: "prun-1",
+      programKey: "aaaa",
+      operation: "score",
+      createdAt: "2026-06-26T12:00:00.000Z",
+      memberKeys: ["aaaa"],
+      output: { operation: "score", memberCount: 1, memberReferences: [] },
+    });
+    source.recordEvalRun({
+      id: "erun-1",
+      name: "recall-default",
+      result: { name: "recall-default", passed: true, score: 1, cases: [], createdAt: "2026-06-26T12:00:00.000Z" },
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.recordOperatorRun({
+      id: "orun-1",
+      status: "ran",
+      summary: "ticked 2; programs 0; derived 0",
+      result: { ticked: 2 },
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+
+    const archive = exportCellArchive(source, "2026-06-26T12:01:00.000Z");
+    assert.equal(archive.schemaVersion, EXPORT_SCHEMA_VERSION_V2);
+    assert.equal(archive.cells?.length, 2);
+    assert.equal(archive.hyperedges?.length, 1);
+    assert.equal(archive.dagOverlays?.length, 1);
+    assert.equal(archive.semanticVectors?.length, 1);
+    assert.equal(archive.programRuns?.length, 1);
+    assert.equal(archive.evalRuns?.length, 1);
+    assert.equal(archive.operatorRuns?.length, 1);
+
+    const dry = importCellArchive(target, archive);
+    assert.equal(dry.dryRun, true);
+    assert.equal(dry.imported, 2);
+    assert.equal(dry.hyperedges.imported, 1);
+    assert.equal(dry.dagOverlays.imported, 1);
+    assert.equal(dry.semanticVectors.imported, 1);
+    assert.equal(dry.programRuns.imported, 1);
+    assert.equal(dry.evalRuns.imported, 1);
+    assert.equal(dry.operatorRuns.imported, 1);
+    assert.equal(target.stats().cells, 0);
+
+    const applied = importCellArchive(target, archive, { apply: true });
+    assert.equal(applied.imported, 2);
+    assert.equal(applied.hyperedges.imported, 1);
+    assert.equal(applied.dagOverlays.imported, 1);
+    assert.equal(applied.semanticVectors.imported, 1);
+    assert.equal(applied.programRuns.imported, 1);
+    assert.equal(applied.evalRuns.imported, 1);
+    assert.equal(applied.operatorRuns.imported, 1);
+    // Dry-run counts must exactly equal apply-mode counts for every section.
+    assert.equal(dry.hyperedges.imported, applied.hyperedges.imported);
+    assert.equal(dry.dagOverlays.imported, applied.dagOverlays.imported);
+    assert.equal(dry.semanticVectors.imported, applied.semanticVectors.imported);
+    assert.equal(dry.programRuns.imported, applied.programRuns.imported);
+    assert.equal(dry.evalRuns.imported, applied.evalRuns.imported);
+    assert.equal(dry.operatorRuns.imported, applied.operatorRuns.imported);
+
+    assert.equal(target.get("bbbb")?.edgesOut[0]?.target, "aaaa");
+    assert.deepEqual(target.getHyperedge("hedge-1")?.members[0]?.key, "aaaa");
+    assert.deepEqual(target.getDagOverlay("dag-1")?.nodeIds, ["aaaa", "bbbb"]);
+    assert.deepEqual(target.getSemanticVector("aaaa")?.vector, [0.1, 0.2, 0.3, 0.4]);
+    assert.ok(target.getProgramRun("prun-1"));
+    assert.ok(target.getEvalRun("erun-1"));
+    assert.ok(target.getOperatorRun("orun-1"));
+  } finally {
+    source.close();
+    target.close();
+  }
+});
+
+test("a v1 archive (no sections) still imports correctly: cells only, all six new section counts zero", () => {
+  const target = new SqliteStore(":memory:");
+  try {
+    const a = buildCell({ kind: "obs", title: "V1 A", body: "a", confidence: 0.7 }, { key: "v1aa" });
+    const v1Archive = {
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      exportedAt: "2026-06-26T12:00:00.000Z",
+      stats: { cells: 1, activeCells: 1, edges: 0, indexedCells: 0, lexicalBackend: "like" as const },
+      cells: [a],
+    };
+
+    const parsed = parseCellArchive(v1Archive);
+    assert.equal(parsed.schemaVersion, EXPORT_SCHEMA_VERSION);
+    assert.equal(parsed.hyperedges, undefined);
+    assert.equal(parsed.semanticVectors, undefined);
+    assert.equal(parsed.dagOverlays, undefined);
+    assert.equal(parsed.programRuns, undefined);
+    assert.equal(parsed.evalRuns, undefined);
+    assert.equal(parsed.operatorRuns, undefined);
+
+    const applied = importCellArchive(target, v1Archive, { apply: true });
+    assert.equal(applied.imported, 1);
+    assert.equal(applied.hyperedges.imported, 0);
+    assert.equal(applied.hyperedges.skipped, 0);
+    assert.equal(applied.semanticVectors.imported, 0);
+    assert.equal(applied.dagOverlays.imported, 0);
+    assert.equal(applied.programRuns.imported, 0);
+    assert.equal(applied.evalRuns.imported, 0);
+    assert.equal(applied.operatorRuns.imported, 0);
+    assert.ok(target.get("v1aa"));
+  } finally {
+    target.close();
+  }
+});
+
+test("re-importing the identical v2 archive a second time reports everything as skip with no double-inserts or errors", () => {
+  const source = new SqliteStore(":memory:");
+  const target = new SqliteStore(":memory:");
+  try {
+    const a = buildCell({ kind: "obs", title: "Repeat A", body: "a", confidence: 0.7 }, { key: "rpta" });
+    source.put(a);
+    source.putHyperedge({
+      id: "hedge-repeat",
+      kind: "quorum",
+      title: "Repeat hyperedge",
+      members: [{ key: "rpta", role: "member", ordinal: 0 }],
+      metadata: {},
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.putDagOverlay({
+      id: "dag-repeat",
+      title: "Repeat overlay",
+      nodeIds: ["rpta"],
+      edges: [],
+      metadata: {},
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.putSemanticVector({
+      nodeId: "rpta",
+      backend: "hash:v1",
+      dims: 2,
+      vector: [1, 0],
+      indexedAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.recordProgramRun({
+      id: "prun-repeat",
+      programKey: "rpta",
+      operation: "score",
+      createdAt: "2026-06-26T12:00:00.000Z",
+      memberKeys: ["rpta"],
+      output: { operation: "score", memberCount: 1, memberReferences: [] },
+    });
+    source.recordEvalRun({
+      id: "erun-repeat",
+      name: "recall-default",
+      result: { name: "recall-default", passed: true, score: 1, cases: [], createdAt: "2026-06-26T12:00:00.000Z" },
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+    source.recordOperatorRun({
+      id: "orun-repeat",
+      status: "ran",
+      summary: "ticked 1; programs 0; derived 0",
+      result: { ticked: 1 },
+      createdAt: "2026-06-26T12:00:00.000Z",
+    });
+
+    const archive = exportCellArchive(source, "2026-06-26T12:01:00.000Z");
+    const first = importCellArchive(target, archive, { apply: true });
+    assert.equal(first.imported, 1);
+    assert.equal(first.hyperedges.imported, 1);
+    assert.equal(first.dagOverlays.imported, 1);
+    assert.equal(first.semanticVectors.imported, 1);
+    assert.equal(first.programRuns.imported, 1);
+    assert.equal(first.evalRuns.imported, 1);
+    assert.equal(first.operatorRuns.imported, 1);
+
+    const second = importCellArchive(target, archive, { apply: true });
+    assert.equal(second.imported, 0);
+    assert.equal(second.skipped, 1);
+    assert.equal(second.hyperedges.imported, 0);
+    assert.equal(second.hyperedges.skipped, 1);
+    assert.equal(second.dagOverlays.imported, 0);
+    assert.equal(second.dagOverlays.skipped, 1);
+    assert.equal(second.semanticVectors.imported, 0);
+    assert.equal(second.semanticVectors.skipped, 1);
+    assert.equal(second.programRuns.imported, 0);
+    assert.equal(second.programRuns.skipped, 1);
+    assert.equal(second.evalRuns.imported, 0);
+    assert.equal(second.evalRuns.skipped, 1);
+    assert.equal(second.operatorRuns.imported, 0);
+    assert.equal(second.operatorRuns.skipped, 1);
+
+    assert.equal(target.stats().cells, 1);
+  } finally {
+    source.close();
+    target.close();
+  }
+});
+
+test("a Store double without ledger accessors exports without ledger sections and imports a v2 archive with ledger sections without crashing", () => {
+  const bare = new BareStore();
+  const a = buildCell({ kind: "obs", title: "Bare A", body: "a", confidence: 0.7 }, { key: "bare1" });
+  bare.put(a);
+  bare.putHyperedge({
+    id: "hedge-bare",
+    kind: "quorum",
+    title: "Bare hyperedge",
+    members: [{ key: "bare1", role: "member", ordinal: 0 }],
+    metadata: {},
+    createdAt: "2026-06-26T12:00:00.000Z",
+  });
+
+  const archive = exportCellArchive(bare, "2026-06-26T12:01:00.000Z");
+  assert.equal(archive.schemaVersion, EXPORT_SCHEMA_VERSION_V2);
+  assert.equal(archive.hyperedges?.length, 1);
+  assert.equal(archive.programRuns, undefined);
+  assert.equal(archive.evalRuns, undefined);
+  assert.equal(archive.operatorRuns, undefined);
+
+  // Feed the bare store a v2 archive that DOES have ledger sections (as if it
+  // came from a full SqliteStore export); the bare store cannot record them,
+  // so importCellArchive must skip those sections without crashing.
+  const archiveWithLedgers = {
+    ...archive,
+    programRuns: [
+      {
+        id: "prun-x",
+        programKey: "bare1",
+        operation: "score" as const,
+        createdAt: "2026-06-26T12:00:00.000Z",
+        memberKeys: ["bare1"],
+        output: { operation: "score" as const, memberCount: 1, memberReferences: [] },
+      },
+    ],
+    evalRuns: [
+      {
+        id: "erun-x",
+        name: "recall-default",
+        result: { name: "recall-default", passed: true, score: 1, cases: [], createdAt: "2026-06-26T12:00:00.000Z" },
+        createdAt: "2026-06-26T12:00:00.000Z",
+      },
+    ],
+    operatorRuns: [
+      {
+        id: "orun-x",
+        status: "ran" as const,
+        summary: "ticked 1; programs 0; derived 0",
+        result: { ticked: 1 },
+        createdAt: "2026-06-26T12:00:00.000Z",
+      },
+    ],
+  };
+
+  const target = new BareStore();
+  const applied = importCellArchive(target, archiveWithLedgers, { apply: true });
+  assert.equal(applied.imported, 1);
+  assert.equal(applied.hyperedges.imported, 1);
+  assert.equal(applied.programRuns.imported, 0);
+  assert.equal(applied.programRuns.skipped, 0);
+  assert.equal(applied.evalRuns.imported, 0);
+  assert.equal(applied.evalRuns.skipped, 0);
+  assert.equal(applied.operatorRuns.imported, 0);
+  assert.equal(applied.operatorRuns.skipped, 0);
 });
 
 test("a second source importing identical kind+title+body reports content-duplicate skip in both dry-run and apply, with matching counts", () => {

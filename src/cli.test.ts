@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCli } from "./cli.js";
+import { parseCellArchive } from "./adapters.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -197,8 +198,107 @@ test("import mem0 is dry-run by default and export emits a portable archive", ()
     const exported = capture(["export", "--db", db], { now: "2026-06-26T12:01:00.000Z" });
     assert.equal(exported.code, 0, exported.stderr);
     const archive = JSON.parse(exported.stdout);
-    assert.equal(archive.schemaVersion, "recall.cells.export.v1");
+    assert.equal(archive.schemaVersion, "recall.cells.export.v2");
     assert.equal(archive.cells.length, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("export --out writes a file containing a valid, parseable archive", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const outPath = join(tmp, "archive.json");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "export out target",
+        body: "A cell that should end up in the exported file.",
+        confidence: 0.8,
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(admitted.code, 0, admitted.stderr);
+
+    const exported = capture(["export", "--db", db, "--out", outPath], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(exported.code, 0, exported.stderr);
+    assert.equal(exported.stdout, "");
+
+    const fileContents = readFileSync(outPath, "utf8");
+    const parsedJson = JSON.parse(fileContents);
+    assert.equal(parsedJson.schemaVersion, "recall.cells.export.v2");
+    assert.equal(parsedJson.cells.length, 1);
+
+    const archive = parseCellArchive(parsedJson);
+    assert.equal(archive.cells.length, 1);
+    assert.equal(archive.cells[0]?.title, "export out target");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("import archive --reindex runs a full semantic reindex after an applied import", () => {
+  const tmp = tempDir();
+  try {
+    const sourceDb = join(tmp, "source.sqlite3");
+    const targetDb = join(tmp, "target.sqlite3");
+    const archivePath = join(tmp, "archive.json");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "reindex target cell",
+        body: "A cell that should get a semantic vector after --reindex.",
+        confidence: 0.8,
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--db", sourceDb], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(admitted.code, 0, admitted.stderr);
+
+    const exported = capture(["export", "--db", sourceDb, "--out", archivePath], { now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(exported.code, 0, exported.stderr);
+
+    const imported = capture(
+      ["import", "archive", "--json", archivePath, "--apply", "--reindex", "--db", targetDb],
+      { now: "2026-06-26T12:02:00.000Z" },
+    );
+    assert.equal(imported.code, 0, imported.stderr);
+    const importedJson = JSON.parse(imported.stdout);
+    assert.equal(importedJson.imported, 1);
+    assert.equal(importedJson.reindexed, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("recall reindex indexes all cells, and --missing-only only indexes cells missing a semantic vector", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "standalone reindex cell",
+        body: "A cell indexed by the standalone reindex verb.",
+        confidence: 0.8,
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--db", db], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(admitted.code, 0, admitted.stderr);
+
+    const reindexed = capture(["reindex", "--db", db]);
+    assert.equal(reindexed.code, 0, reindexed.stderr);
+    assert.equal(JSON.parse(reindexed.stdout).indexed, 1);
+
+    const missingOnly = capture(["reindex", "--missing-only", "--db", db]);
+    assert.equal(missingOnly.code, 0, missingOnly.stderr);
+    assert.equal(JSON.parse(missingOnly.stdout).indexed, 0);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

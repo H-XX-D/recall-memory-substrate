@@ -6,12 +6,29 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { basename, join } from "node:path";
 import { admit } from "./admission.js";
 import { contentKey } from "./store.js";
-import type { AdmissionResult, Cell, Kind, Store, WriteProposal } from "./types.js";
+import type { OperatorRun } from "./operator.js";
+import type { ProgramRun } from "./programs.js";
+import type { StoredEvalRun } from "./evals.js";
+import type {
+  AdmissionResult,
+  Cell,
+  DagOverlay,
+  Hyperedge,
+  Kind,
+  SemanticVector,
+  Store,
+  WriteProposal,
+} from "./types.js";
 
 export const EXPORT_SCHEMA_VERSION = "recall.cells.export.v1";
+export const EXPORT_SCHEMA_VERSION_V2 = "recall.cells.export.v2";
 export const MAX_IMPORT_BYTES = 134_217_728;
 export const MAX_BODY_CHARS = 32_768;
 export const MAX_PRIOR_VERSIONS = 1000;
+// Explicit large limit for the bounded listers (listHyperedges, listDagOverlays,
+// listProgramRuns, listEvalRuns, listOperatorRuns), so a full archive export
+// is not silently truncated to each lister's small default page size.
+export const ARCHIVE_LIST_LIMIT = 1_000_000;
 
 export interface ImportItem {
   ref: string;
@@ -94,10 +111,21 @@ export interface ZepFact {
 }
 
 export interface RecallCellArchive {
-  schemaVersion: typeof EXPORT_SCHEMA_VERSION;
+  schemaVersion: typeof EXPORT_SCHEMA_VERSION | typeof EXPORT_SCHEMA_VERSION_V2;
   exportedAt: string;
   stats: ReturnType<Store["stats"]>;
   cells: Cell[];
+  hyperedges?: Hyperedge[];
+  semanticVectors?: SemanticVector[];
+  dagOverlays?: DagOverlay[];
+  programRuns?: ProgramRun[];
+  evalRuns?: StoredEvalRun[];
+  operatorRuns?: OperatorRun[];
+}
+
+export interface ArchiveSectionSummary {
+  imported: number;
+  skipped: number;
 }
 
 export interface ArchiveImportSummary {
@@ -105,6 +133,12 @@ export interface ArchiveImportSummary {
   imported: number;
   skipped: number;
   items: { key: string; action: "import" | "skip"; reason?: string }[];
+  hyperedges: ArchiveSectionSummary;
+  semanticVectors: ArchiveSectionSummary;
+  dagOverlays: ArchiveSectionSummary;
+  programRuns: ArchiveSectionSummary;
+  evalRuns: ArchiveSectionSummary;
+  operatorRuns: ArchiveSectionSummary;
 }
 
 export function readJsonFile(file: string, label = "json", maxBytes = MAX_IMPORT_BYTES): unknown {
@@ -558,14 +592,43 @@ export function importZep(
 }
 
 export function exportCellArchive(store: Store, now = new Date().toISOString()): RecallCellArchive {
-  return {
-    schemaVersion: EXPORT_SCHEMA_VERSION,
+  const archive: RecallCellArchive = {
+    schemaVersion: EXPORT_SCHEMA_VERSION_V2,
     exportedAt: now,
     stats: store.stats(),
     cells: store.all(),
+    hyperedges: store.listHyperedges(ARCHIVE_LIST_LIMIT),
+    dagOverlays: store.listDagOverlays(ARCHIVE_LIST_LIMIT),
+    semanticVectors: store
+      .listSemanticVectorIds()
+      .map((id) => store.getSemanticVector(id))
+      .filter((v): v is SemanticVector => v !== undefined),
   };
+  // Ledger sections (programRuns/evalRuns/operatorRuns) live only on
+  // SqliteStore, not the base Store interface, so they are feature-detected
+  // here; a plain Store double omits them entirely (undefined, not []).
+  if (typeof (store as { listProgramRuns?: unknown }).listProgramRuns === "function") {
+    archive.programRuns = (store as unknown as { listProgramRuns: (opts: { limit: number }) => ProgramRun[] }).listProgramRuns({
+      limit: ARCHIVE_LIST_LIMIT,
+    });
+  }
+  if (typeof (store as { listEvalRuns?: unknown }).listEvalRuns === "function") {
+    archive.evalRuns = (store as unknown as { listEvalRuns: (limit: number) => StoredEvalRun[] }).listEvalRuns(
+      ARCHIVE_LIST_LIMIT,
+    );
+  }
+  if (typeof (store as { listOperatorRuns?: unknown }).listOperatorRuns === "function") {
+    archive.operatorRuns = (store as unknown as { listOperatorRuns: (limit: number) => OperatorRun[] }).listOperatorRuns(
+      ARCHIVE_LIST_LIMIT,
+    );
+  }
+  return archive;
 }
 
+// NOTE (partial-merge caveat): importing a partial archive rewrites each
+// imported cell's edgesOut to the archived snapshot via store.put, which
+// replaces the cell wholesale. This is not a merge of edge lists with
+// whatever the target store already has for that key, it is an overwrite.
 export function importCellArchive(
   store: Store,
   archive: unknown,
@@ -576,6 +639,8 @@ export function importCellArchive(
   const items: ArchiveImportSummary["items"] = [];
   let imported = 0;
   let skipped = 0;
+  // Cells first, so hyperedge members / vector nodeIds / overlay nodeIds
+  // resolve against restored cells when the sections below are applied.
   for (const cell of parsed.cells) {
     const existing = store.get(cell.key);
     if (existing && JSON.stringify(existing) === JSON.stringify(cell)) {
@@ -587,22 +652,150 @@ export function importCellArchive(
     items.push({ key: cell.key, action: "import" });
     if (apply) store.put(cell);
   }
-  return { dryRun: !apply, imported, skipped, items };
+
+  const hyperedges = importUpsertSection(
+    parsed.hyperedges,
+    (id) => store.getHyperedge(id),
+    (record) => store.putHyperedge(record),
+    (record) => record.id,
+    apply,
+  );
+  const semanticVectors = importUpsertSection(
+    parsed.semanticVectors,
+    (id) => store.getSemanticVector(id),
+    (record) => store.putSemanticVector(record),
+    (record) => record.nodeId,
+    apply,
+  );
+  const dagOverlays = importUpsertSection(
+    parsed.dagOverlays,
+    (id) => store.getDagOverlay(id),
+    (record) => store.putDagOverlay(record),
+    (record) => record.id,
+    apply,
+  );
+
+  // Ledger sections: feature-detect the record*/get* methods on the store
+  // (SqliteStore-only, not on the base Store interface). Existence check via
+  // get* first makes re-import idempotent (skip rather than re-record).
+  const programRuns = importLedgerSection(
+    parsed.programRuns,
+    (id) => (store as { getProgramRun?: (id: string) => ProgramRun | undefined }).getProgramRun?.(id),
+    (record) => (store as { recordProgramRun?: (run: ProgramRun) => void }).recordProgramRun?.(record),
+    (record) => record.id,
+    typeof (store as { recordProgramRun?: unknown }).recordProgramRun === "function",
+    apply,
+  );
+  const evalRuns = importLedgerSection(
+    parsed.evalRuns,
+    (id) => (store as { getEvalRun?: (id: string) => StoredEvalRun | undefined }).getEvalRun?.(id),
+    (record) => (store as { recordEvalRun?: (run: StoredEvalRun) => void }).recordEvalRun?.(record),
+    (record) => record.id,
+    typeof (store as { recordEvalRun?: unknown }).recordEvalRun === "function",
+    apply,
+  );
+  // Restoring more than 1000 operator runs will self-truncate to the newest
+  // 1000: recordOperatorRun prunes to its `keep` cap (default 1000) after
+  // each insert, so a very large archived operator_runs section will not
+  // fully survive an import.
+  const operatorRuns = importLedgerSection(
+    parsed.operatorRuns,
+    (id) => (store as { getOperatorRun?: (id: string) => OperatorRun | undefined }).getOperatorRun?.(id),
+    (record) => (store as { recordOperatorRun?: (run: OperatorRun) => OperatorRun }).recordOperatorRun?.(record),
+    (record) => record.id,
+    typeof (store as { recordOperatorRun?: unknown }).recordOperatorRun === "function",
+    apply,
+  );
+
+  return {
+    dryRun: !apply,
+    imported,
+    skipped,
+    items,
+    hyperedges,
+    semanticVectors,
+    dagOverlays,
+    programRuns,
+    evalRuns,
+    operatorRuns,
+  };
+}
+
+// Shared upsert-section logic for hyperedges/semanticVectors/dagOverlays: the
+// interface putters are INSERT OR REPLACE upserts, so "import" (action) means
+// the id is new or the stored JSON differs from what is already there;
+// "skip" means byte-identical (compared via JSON.stringify).
+function importUpsertSection<T>(
+  records: T[] | undefined,
+  getExisting: (id: string) => T | undefined,
+  put: (record: T) => void,
+  idOf: (record: T) => string,
+  apply: boolean,
+): ArchiveSectionSummary {
+  let imported = 0;
+  let skipped = 0;
+  for (const record of records ?? []) {
+    const existing = getExisting(idOf(record));
+    if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(record)) {
+      skipped += 1;
+      continue;
+    }
+    imported += 1;
+    if (apply) put(record);
+  }
+  return { imported, skipped };
+}
+
+// Shared ledger-section logic for programRuns/evalRuns/operatorRuns: these
+// are feature-detected (SqliteStore-only), and existence (not content
+// equality) gates the import, since a ledger row is immutable once recorded.
+function importLedgerSection<T>(
+  records: T[] | undefined,
+  getExisting: (id: string) => T | undefined,
+  record: (value: T) => void,
+  idOf: (value: T) => string,
+  supported: boolean,
+  apply: boolean,
+): ArchiveSectionSummary {
+  let imported = 0;
+  let skipped = 0;
+  if (!supported) return { imported, skipped };
+  for (const value of records ?? []) {
+    const existing = getExisting(idOf(value));
+    if (existing !== undefined) {
+      skipped += 1;
+      continue;
+    }
+    imported += 1;
+    if (apply) record(value);
+  }
+  return { imported, skipped };
 }
 
 export function parseCellArchive(input: unknown): RecallCellArchive {
-  if (!isRecord(input) || input.schemaVersion !== EXPORT_SCHEMA_VERSION) {
-    throw new Error(`archive schemaVersion must be ${EXPORT_SCHEMA_VERSION}`);
+  if (!isRecord(input)) {
+    throw new Error(`archive schemaVersion must be ${EXPORT_SCHEMA_VERSION} or ${EXPORT_SCHEMA_VERSION_V2}`);
+  }
+  const schemaVersion = input.schemaVersion;
+  if (schemaVersion !== EXPORT_SCHEMA_VERSION && schemaVersion !== EXPORT_SCHEMA_VERSION_V2) {
+    throw new Error(`archive schemaVersion must be ${EXPORT_SCHEMA_VERSION} or ${EXPORT_SCHEMA_VERSION_V2}`);
   }
   if (!Array.isArray(input.cells)) throw new Error("archive cells must be an array");
-  return {
-    schemaVersion: EXPORT_SCHEMA_VERSION,
+  const archive: RecallCellArchive = {
+    schemaVersion,
     exportedAt: typeof input.exportedAt === "string" ? input.exportedAt : new Date(0).toISOString(),
     stats: isRecord(input.stats)
       ? (input.stats as unknown as ReturnType<Store["stats"]>)
       : { cells: 0, activeCells: 0, edges: 0, indexedCells: 0, lexicalBackend: "like" },
     cells: input.cells.map(assertCell),
   };
+  if (Array.isArray(input.hyperedges)) archive.hyperedges = input.hyperedges as Hyperedge[];
+  if (Array.isArray(input.semanticVectors)) archive.semanticVectors = input.semanticVectors as SemanticVector[];
+  if (Array.isArray(input.dagOverlays)) archive.dagOverlays = input.dagOverlays as DagOverlay[];
+  if (Array.isArray(input.programRuns)) archive.programRuns = input.programRuns as ProgramRun[];
+  if (Array.isArray(input.evalRuns)) archive.evalRuns = input.evalRuns as StoredEvalRun[];
+  if (Array.isArray(input.operatorRuns)) archive.operatorRuns = input.operatorRuns as OperatorRun[];
+  return archive;
 }
 
 function assertCell(value: unknown): Cell {

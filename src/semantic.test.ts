@@ -8,6 +8,7 @@ import {
   textForEmbedding,
   embedText,
   indexCell,
+  reindexSemantic,
   semanticSearch,
 } from "./semantic.js";
 import { buildCell } from "./build.js";
@@ -253,5 +254,47 @@ describe("semanticSearch", () => {
         assert.ok(prev.score >= curr.score, "scores should be descending");
       }
     }
+  });
+});
+
+describe("reindexSemantic", () => {
+  it("indexes all currently-unindexed cells in a store and returns the correct count", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+
+    const cellA = buildCell({ kind: "obs", title: "Reindex A", body: "content a", confidence: 0.8 });
+    const cellB = buildCell({ kind: "obs", title: "Reindex B", body: "content b", confidence: 0.8 });
+    const cellC = buildCell({ kind: "obs", title: "Reindex C", body: "content c", confidence: 0.8 });
+    store.put(cellA);
+    store.put(cellB);
+    store.put(cellC);
+
+    assert.equal(store.listSemanticVectorIds().length, 0);
+
+    const count = reindexSemantic(store);
+    assert.equal(count, 3);
+    assert.equal(store.listSemanticVectorIds().length, 3);
+    assert.ok(store.getSemanticVector(cellA.key));
+    assert.ok(store.getSemanticVector(cellB.key));
+    assert.ok(store.getSemanticVector(cellC.key));
+  });
+
+  it("with onlyMissing: true skips cells that already have a semantic vector, only indexing the missing ones", () => {
+    delete process.env["RECALL_EMBEDDING_URL"];
+    const store = new SqliteStore(":memory:");
+
+    const cellA = buildCell({ kind: "obs", title: "Missing test A", body: "content a", confidence: 0.8 });
+    const cellB = buildCell({ kind: "obs", title: "Missing test B", body: "content b", confidence: 0.8 });
+    store.put(cellA);
+    store.put(cellB);
+
+    // Pre-index only cellA.
+    indexCell(cellA, store);
+    assert.equal(store.listSemanticVectorIds().length, 1);
+
+    const count = reindexSemantic(store, { onlyMissing: true });
+    assert.equal(count, 1);
+    assert.equal(store.listSemanticVectorIds().length, 2);
+    assert.ok(store.getSemanticVector(cellB.key));
   });
 });
