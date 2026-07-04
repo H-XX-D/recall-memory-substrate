@@ -11,6 +11,7 @@ import {
   importCellArchive,
   importMem0,
   importZep,
+  MAX_IMPORT_BYTES,
   readJsonFile,
 } from "./adapters.js";
 import { claudeSyncStatus, DEFAULT_AUTO_MEMORY_ROOT, runClaudeSync } from "./claude-sync.js";
@@ -203,7 +204,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
             now: options.now,
           });
           outJson(out, summary);
-          return 0;
+          return importExitCode(summary);
         } finally {
           local.close();
         }
@@ -223,32 +224,35 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
           } else {
             outJson(out, summary);
           }
-          return 0;
+          return importExitCode(summary);
         }
         if (subcommand === "mem0") {
-          outJson(out, importMem0(store, readJsonValue(args, "mem0 import"), {
+          const summary = importMem0(store, readJsonValue(args, "mem0 import"), {
             apply: args.apply,
             now: options.now,
             project: route.slug ?? args.project,
-          }));
-          return 0;
+          });
+          outJson(out, summary);
+          return importExitCode(summary);
         }
         if (subcommand === "zep") {
-          outJson(out, importZep(store, readJsonValue(args, "zep import"), {
+          const summary = importZep(store, readJsonValue(args, "zep import"), {
             apply: args.apply,
             now: options.now,
             project: route.slug ?? args.project,
-          }));
-          return 0;
+          });
+          outJson(out, summary);
+          return importExitCode(summary);
         }
         if (subcommand === "auto-memory") {
           const root = args.root ?? (env.HOME ? join(env.HOME, ".claude", "projects") : DEFAULT_AUTO_MEMORY_ROOT);
-          outJson(out, importAutoMemory(store, root, {
+          const summary = importAutoMemory(store, root, {
             apply: args.apply,
             now: options.now,
             project: route.slug ?? args.project,
-          }));
-          return 0;
+          });
+          outJson(out, summary);
+          return importExitCode(summary);
         }
         throw new Error("import requires one of: archive, mem0, zep, auto-memory");
       } finally {
@@ -764,7 +768,14 @@ function readProposal(args: ParsedArgs): WriteProposal {
 
 function readJsonValue(args: ParsedArgs, label: string): unknown {
   if (!args.jsonPath) throw new Error("--json <file> is required");
-  if (args.jsonPath === "-") return JSON.parse(readFileSync(0, "utf8")) as unknown;
+  if (args.jsonPath === "-") {
+    const text = readFileSync(0, "utf8");
+    const size = Buffer.byteLength(text, "utf8");
+    if (size > MAX_IMPORT_BYTES) {
+      throw new Error(`${label}: file too large (${size} bytes > ${MAX_IMPORT_BYTES})`);
+    }
+    return JSON.parse(text) as unknown;
+  }
   return readJsonFile(args.jsonPath, label);
 }
 
@@ -788,6 +799,23 @@ function readEvalSuite(args: ParsedArgs): RecallEvalSuite {
 
 function outJson(out: (text: string) => void, value: unknown): void {
   out(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+// Import verbs (archive|mem0|zep|auto-memory|local) exit 1 when at least one
+// item was rejected by admission and nothing landed: a fully-rejected import
+// should not look like a clean no-op. An all-unchanged re-run (idempotent
+// replay) has no rejected items, so it stays exit 0. Archive summaries never
+// carry a "rejected" reason (they upsert cells directly, bypassing admit),
+// so this is a no-op for import archive today; it is still applied uniformly
+// in case that changes.
+function importExitCode(summary: {
+  created?: number;
+  superseded?: number;
+  items: { reason?: string }[];
+}): number {
+  const landed = (summary.created ?? 0) + (summary.superseded ?? 0);
+  const hasRejection = summary.items.some((item) => item.reason?.startsWith("rejected"));
+  return hasRejection && landed === 0 ? 1 : 0;
 }
 
 function queryFrom(args: ParsedArgs, start: number, error: string): string {

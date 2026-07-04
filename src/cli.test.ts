@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCli } from "./cli.js";
-import { parseCellArchive } from "./adapters.js";
+import { MAX_IMPORT_BYTES, parseCellArchive } from "./adapters.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -200,6 +200,82 @@ test("import mem0 is dry-run by default and export emits a portable archive", ()
     const archive = JSON.parse(exported.stdout);
     assert.equal(archive.schemaVersion, "recall.cells.export.v2");
     assert.equal(archive.cells.length, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("import mem0 --json - with an oversized stdin payload fails too-large with exit 1", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    // Build a payload whose JSON-encoded byte length exceeds MAX_IMPORT_BYTES
+    // (134_217_728) without ever writing it to disk as a fixture.
+    const bigContent = "x".repeat(MAX_IMPORT_BYTES + 1024);
+    const stdinInput = JSON.stringify({ memories: [{ id: "m1", memory: bigContent }] });
+    assert.ok(Buffer.byteLength(stdinInput, "utf8") > MAX_IMPORT_BYTES);
+
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "cli.ts"), "import", "mem0", "--json", "-", "--db", db],
+      { input: stdinInput, encoding: "utf8", maxBuffer: 1024 * 1024 * 1024 },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /too large/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("import mem0 where every record is rejected exits 1 with the summary on stdout", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const mem0Path = join(tmp, "mem0.json");
+    // A GitHub-token-shaped string trips screenSecrets, which admit() always
+    // rejects regardless of store state: a deterministic, store-independent
+    // rejection.
+    writeFileSync(
+      mem0Path,
+      JSON.stringify({
+        memories: [{ id: "m1", memory: "leaked token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+      }),
+    );
+
+    const applied = capture(["import", "mem0", "--json", mem0Path, "--apply", "--db", db], {
+      now: "2026-06-26T12:00:00.000Z",
+    });
+    assert.equal(applied.code, 1);
+    const summary = JSON.parse(applied.stdout);
+    assert.equal(summary.created, 0);
+    assert.equal(summary.superseded, 0);
+    assert.ok(summary.items.some((item: { reason?: string }) => item.reason?.startsWith("rejected")));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("import mem0 re-run where everything is already unchanged stays exit 0", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const mem0Path = join(tmp, "mem0.json");
+    writeFileSync(mem0Path, JSON.stringify({ memories: [{ id: "m1", memory: "CLI imported memory." }] }));
+
+    const first = capture(["import", "mem0", "--json", mem0Path, "--apply", "--db", db], {
+      now: "2026-06-26T12:00:00.000Z",
+    });
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(JSON.parse(first.stdout).created, 1);
+
+    const second = capture(["import", "mem0", "--json", mem0Path, "--apply", "--db", db], {
+      now: "2026-06-26T12:01:00.000Z",
+    });
+    assert.equal(second.code, 0, second.stderr);
+    const summary = JSON.parse(second.stdout);
+    assert.equal(summary.created, 0);
+    assert.equal(summary.superseded, 0);
+    assert.ok(summary.items.every((item: { reason?: string }) => item.reason === "unchanged"));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
