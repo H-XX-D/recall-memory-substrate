@@ -60,7 +60,12 @@
     "CONTRIBUTING.md",
     "LICENSE",
     "NOTICE",
-    "SECURITY.md"
+    "SECURITY.md",
+    "docs/overview.md",
+    "docs/cli.md",
+    "docs/mcp.md",
+    "docs/integrations.md",
+    "docs/import-export.md"
   ],
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --import tsx --test \"src/**/*.test.ts\"",
