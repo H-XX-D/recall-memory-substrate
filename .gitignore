@@ -80,3 +80,10 @@ posts/
 cmq*.md
 posts/
 content/
+
+# Internal design notes and drafts; the public docs explain the shipped system.
+docs/PLAN.md
+docs/RECALL_V5_DESIGN.md
+docs/design/
+docs/subsystems/
+README.draft.md
