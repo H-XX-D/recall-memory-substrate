@@ -497,16 +497,18 @@ export class SqliteStore implements Store {
       operatorRuns: this.count("operator_runs"),
     };
 
+    // length() on TEXT counts characters, not bytes, so a CAST to BLOB is
+    // required here to get true UTF-8 byte counts for multibyte content.
     const avgRow = this.db
-      .prepare(`SELECT AVG(length(json)) AS average FROM cells`)
+      .prepare(`SELECT AVG(length(CAST(json AS BLOB))) AS average FROM cells`)
       .get() as unknown as AverageRow;
     const averageCellBytes = avgRow.average === null ? 0 : Math.round(avgRow.average);
 
     const maxRow = this.db
       .prepare(
-        `SELECT key, handle, json_extract(json, '$.title') AS title, length(json) AS bytes
+        `SELECT key, handle, json_extract(json, '$.title') AS title, length(CAST(json AS BLOB)) AS bytes
          FROM cells
-         ORDER BY length(json) DESC, key ASC
+         ORDER BY length(CAST(json AS BLOB)) DESC, key ASC
          LIMIT 1`,
       )
       .get() as unknown as CellSizeRow | undefined;

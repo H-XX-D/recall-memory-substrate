@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { SqliteStore, contentKey } from "./store.js";
 import { buildCell } from "./build.js";
 
@@ -838,6 +839,52 @@ test("storageStats reports databaseBytes undefined when the on-disk file is miss
     assert.equal(report.databasePath, dbPath);
     assert.equal(report.databaseBytes, undefined);
     store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("storageStats maximumCell.bytes counts true UTF-8 bytes, not characters, for multibyte content", () => {
+  const dir = tempDbDir();
+  try {
+    const dbPath = join(dir, "recall.sqlite3");
+    const store = new SqliteStore(dbPath);
+    try {
+      // Japanese plus accented Latin text: each of these characters is 2-3
+      // bytes in UTF-8 but 1 character in JS string / SQLite length(). This
+      // pins the char-vs-byte distinction the fix addresses.
+      const cell = buildCell(
+        { kind: "obs", title: "東京タワー", body: "café résumé 東京", confidence: 0.7 },
+        { key: "aaaa" },
+      );
+      store.put(cell);
+
+      const report = store.storageStats();
+      assert.equal(report.maximumCell?.key, "aaaa");
+
+      // Read the raw json blob back via a prepared SELECT on a separate
+      // connection to the same on-disk file (SqliteStore keeps its db
+      // handle private).
+      const raw = new DatabaseSync(dbPath);
+      try {
+        const row = raw.prepare(`SELECT json FROM cells WHERE key = ?`).get("aaaa") as
+          | { json: string }
+          | undefined;
+        assert.ok(row);
+        const rawJsonFromDb = row!.json;
+
+        const expectedBytes = Buffer.byteLength(rawJsonFromDb, "utf8");
+        assert.equal(report.maximumCell!.bytes, expectedBytes);
+
+        // Pin the char-vs-byte distinction: byte length must exceed char
+        // length once multibyte characters are present.
+        assert.ok(report.maximumCell!.bytes > rawJsonFromDb.length);
+      } finally {
+        raw.close();
+      }
+    } finally {
+      store.close();
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
