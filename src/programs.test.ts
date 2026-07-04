@@ -626,18 +626,53 @@ test("executeProgram allocate: equal scores tiebreak on key ascending, determini
   );
 });
 
-test("executeProgram allocate: witness is always present, naming top-N of memberCount and the program's first 8 words", () => {
+test("executeProgram allocate: first run (no previousRun) has changed true and a witness naming top-N of memberCount and the program's first 8 words", () => {
   const program = allocateProgram("cccccccc-a000-a000-a000-000000000008", { limit: 1 });
   const memberA = taskCell("aaaaaaaa-a000-a000-a000-000000000101", "Task Alpha", 0.9, { impact: 0.9, cost: 0.2 });
   const memberB = taskCell("bbbbbbbb-a000-a000-a000-000000000102", "Task Beta", 0.5, { impact: 0.1, cost: 0.9 });
 
   const run = executeProgram(program, [memberA, memberB], "2026-07-03T12:00:00.000Z");
-  assert.ok(run.output.witness, "witness must always be present for allocate");
+  assert.equal(run.output.changed, true);
+  assert.ok(run.output.witness, "first run (no previousRun) must carry a witness");
   const witness = run.output.witness!;
   assert.equal(witness.title, "Allocation: top 1 of 2 for Allocation pressure across the backlog");
   const selected = run.output.selected as { title: string }[];
   assert.equal(selected.length, 1);
   assert.equal(witness.summary, selected.map((s) => s.title).join("; "));
+});
+
+test("executeProgram allocate: second run with identical members and scores has changed false and no witness", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000010", { limit: 1 });
+  const memberA = taskCell("aaaaaaaa-a000-a000-a000-000000000103", "Task Alpha", 0.9, { impact: 0.9, cost: 0.2 });
+  const memberB = taskCell("bbbbbbbb-a000-a000-a000-000000000104", "Task Beta", 0.5, { impact: 0.1, cost: 0.9 });
+
+  const first = executeProgram(program, [memberA, memberB], "2026-07-03T12:00:00.000Z");
+  assert.equal(first.output.changed, true);
+  assert.ok(first.output.witness);
+
+  const second = executeProgram(program, [memberA, memberB], "2026-07-03T12:01:00.000Z", first);
+  assert.equal(second.output.changed, false);
+  assert.equal(second.output.witness, undefined, "unchanged selected set must not emit a witness");
+});
+
+test("executeProgram allocate: a run where the selected set changes (a higher-scoring member joins) has changed true and a witness", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000011", { limit: 1 });
+  const memberA = taskCell("aaaaaaaa-a000-a000-a000-000000000105", "Task Alpha", 0.9, { impact: 0.5, cost: 0.5 });
+
+  const first = executeProgram(program, [memberA], "2026-07-03T12:00:00.000Z");
+  assert.equal(first.output.changed, true);
+  const firstSelected = first.output.selected as { key: string }[];
+  assert.deepEqual(firstSelected.map((s) => s.key), [memberA.key]);
+
+  const memberBetter = taskCell("bbbbbbbb-a000-a000-a000-000000000106", "Task Beta wins", 0.9, {
+    impact: 0.9,
+    cost: 0.2,
+  });
+  const second = executeProgram(program, [memberA, memberBetter], "2026-07-03T12:01:00.000Z", first);
+  const secondSelected = second.output.selected as { key: string }[];
+  assert.deepEqual(secondSelected.map((s) => s.key), [memberBetter.key]);
+  assert.equal(second.output.changed, true);
+  assert.ok(second.output.witness, "changed selected set must carry a witness");
 });
 
 test("executeProgram allocate: witness summary joins multiple selected titles with '; '", () => {
@@ -651,7 +686,7 @@ test("executeProgram allocate: witness summary joins multiple selected titles wi
   assert.equal(run.output.witness?.summary, selected.map((s) => s.title).join("; "));
 });
 
-test("runProgramCell allocate: deriving twice with unchanged members yields exactly one witness cell (idempotent)", () => {
+test("runProgramCell allocate: deriving twice over unchanged members grows the cell count only on the first run", () => {
   const store = new SqliteStore(":memory:");
   try {
     const member = taskCell("aaaaaaaa-a000-a000-a000-000000000201", "Steady task", 0.8, { impact: 0.6, cost: 0.4 });
@@ -674,14 +709,23 @@ test("runProgramCell allocate: deriving twice with unchanged members yields exac
     store.put(member);
     store.put(program);
 
+    const countBeforeFirst = store.stats().cells;
     const first = runProgramCell(store, program.key, "2026-07-03T12:00:00.000Z", { derive: true });
+    assert.equal(first.run.output.changed, true);
     assert.equal(first.derived?.accepted, true);
     const countAfterFirst = store.stats().cells;
+    assert.equal(countAfterFirst > countBeforeFirst, true, "the first run's witness admits a new cell");
 
+    // Same member, live scores unchanged (drift in scores.uncertainty/concern
+    // would still hash differently through programRunDerivationKey, but
+    // changed=false suppresses the witness entirely, so derive has nothing to
+    // admit): the selected set is identical, so no witness, so no derive call
+    // ever reaches deriveAdmit for this run.
     const second = runProgramCell(store, program.key, "2026-07-03T12:01:00.000Z", { derive: true });
-    assert.equal(second.derived?.accepted, true);
-    assert.equal(second.derived?.duplicateOf, first.derived?.cell?.key);
-    assert.equal(store.stats().cells, countAfterFirst);
+    assert.equal(second.run.output.changed, false);
+    assert.equal(second.run.output.witness, undefined);
+    assert.equal(second.derived, undefined, "no witness means no proposal, so nothing is derived");
+    assert.equal(store.stats().cells, countAfterFirst, "cell count is unchanged by the second run");
   } finally {
     store.close();
   }

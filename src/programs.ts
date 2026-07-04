@@ -287,7 +287,7 @@ function executeSpec(
   if (spec.operation === "tag_projection") return executeTagProjection(spec, members);
   if (spec.operation === "emit_witness") return executeEmitWitness(program, members);
   if (spec.operation === "reflex") return executeReflex(spec, program, members);
-  if (spec.operation === "allocate") return executeAllocate(spec, program, members);
+  if (spec.operation === "allocate") return executeAllocate(spec, program, members, previousRun);
   return executeScore(spec, members);
 }
 
@@ -387,7 +387,27 @@ function allocateRationale(factors: AllocateFactors): string[] {
   ];
 }
 
-function executeAllocate(spec: ProgramSpec, program: Cell, members: Cell[]): ProgramOutput {
+// Selected-set fingerprint, ordered: read defensively, same idiom as drift's
+// previousValues read of previousRun.output.memberValues. Anything malformed
+// (missing array, non-record entries, non-string key) counts as "no prior
+// selection", which forces changed=true rather than silently matching.
+function previousSelectedKeys(previousRun: ProgramRun | undefined): string[] | undefined {
+  const selected = previousRun?.output.selected;
+  if (!Array.isArray(selected)) return undefined;
+  const keys: string[] = [];
+  for (const entry of selected) {
+    if (!isRecord(entry) || typeof entry.key !== "string") return undefined;
+    keys.push(entry.key);
+  }
+  return keys;
+}
+
+function executeAllocate(
+  spec: ProgramSpec,
+  program: Cell,
+  members: Cell[],
+  previousRun: ProgramRun | undefined,
+): ProgramOutput {
   const ranked = members
     .map((cell) => {
       const factors = allocateFactors(cell);
@@ -404,18 +424,28 @@ function executeAllocate(spec: ProgramSpec, program: Cell, members: Cell[]): Pro
   const limit = Math.max(1, rawLimit);
   const selected = ranked.slice(0, limit);
   const programWords = program.title.split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
-  return {
+  const previousSelected = previousSelectedKeys(previousRun);
+  const changed = previousSelected === undefined || !arraysEqual(previousSelected, selected.map((entry) => entry.key));
+  const out: ProgramOutput = {
     operation: "allocate",
     memberCount: members.length,
     memberReferences: memberReferences(members),
     limit,
     ranked,
     selected,
-    witness: {
+    changed,
+  };
+  if (changed) {
+    out.witness = {
       title: `Allocation: top ${selected.length} of ${members.length} for ${programWords}`,
       summary: selected.map((entry) => entry.title).join("; "),
-    },
-  };
+    };
+  }
+  return out;
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, i) => value === b[i]);
 }
 
 function executeScore(spec: ProgramSpec, members: Cell[]): ProgramOutput {

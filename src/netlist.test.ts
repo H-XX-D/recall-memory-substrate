@@ -357,7 +357,11 @@ test("addf allocate tick authors a working allocation-pressure program", () => {
   const run = runStandingPrograms(store, NOW).runs.find((r) => r.operation === "allocate");
   assert.ok(run, "the allocate program ran");
   assert.equal(run!.output.memberCount, 1);
-  assert.ok(run!.output.witness, "allocate always emits a witness");
+  // First run for this program (no previousRun yet): changed is always true,
+  // so it carries a witness. Later runs only witness when the selected set
+  // actually changes; see programs.test.ts for that gating.
+  assert.equal(run!.output.changed, true);
+  assert.ok(run!.output.witness, "a program's first run always emits a witness");
 });
 
 // (wire/schedule) connect compiled-in ops -> acknowledged; unknown names -> unsupported
