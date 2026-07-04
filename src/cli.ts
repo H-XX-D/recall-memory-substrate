@@ -2,7 +2,7 @@
 // R8 CLI surface over the implemented v5 core. Server, TUI, import adapters,
 // and installer sync commands stay deferred; this is the npm/bin entry point.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { admit } from "./admission.js";
 import {
@@ -13,6 +13,7 @@ import {
   importZep,
   readJsonFile,
 } from "./adapters.js";
+import { claudeSyncStatus, DEFAULT_AUTO_MEMORY_ROOT, runClaudeSync } from "./claude-sync.js";
 import { migrate } from "./migrate.js";
 import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
@@ -79,6 +80,7 @@ interface ParsedArgs {
   noHealth: boolean;
   inlineRefs: boolean;
   refParams: boolean;
+  keepAutoMemory: boolean;
 }
 
 interface Route {
@@ -240,8 +242,8 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
           return 0;
         }
         if (subcommand === "auto-memory") {
-          if (!args.root) throw new Error("import auto-memory requires --root <path>");
-          outJson(out, importAutoMemory(store, args.root, {
+          const root = args.root ?? (env.HOME ? join(env.HOME, ".claude", "projects") : DEFAULT_AUTO_MEMORY_ROOT);
+          outJson(out, importAutoMemory(store, root, {
             apply: args.apply,
             now: options.now,
             project: route.slug ?? args.project,
@@ -580,6 +582,28 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       }
     }
 
+    if (command === "claude" && subcommand === "status") {
+      outJson(out, claudeSyncStatus({ home: env.HOME }));
+      return 0;
+    }
+
+    if (command === "claude" && (!subcommand || subcommand === "sync")) {
+      const keepAutoMemory = args.keepAutoMemory;
+      outJson(
+        out,
+        runClaudeSync({
+          home: env.HOME,
+          apply: args.apply,
+          disableAutoMemory: keepAutoMemory ? false : undefined,
+          importMemory: keepAutoMemory ? false : undefined,
+          autoMemoryRoot: args.root,
+          dbPath: args.db,
+          now: options.now,
+        }),
+      );
+      return 0;
+    }
+
     if (command === "reindex") {
       const store = openWriteStore(route.dbPath);
       try {
@@ -612,6 +636,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     noHealth: false,
     inlineRefs: false,
     refParams: false,
+    keepAutoMemory: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -635,6 +660,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--no-health") parsed.noHealth = true;
     else if (arg === "--inline-refs") parsed.inlineRefs = true;
     else if (arg === "--ref-params") parsed.refParams = true;
+    else if (arg === "--keep-automemory") parsed.keepAutoMemory = true;
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--limit") {
       parsed.limit = positiveInt(requireValue(argv, i + 1, arg), arg);
@@ -818,8 +844,10 @@ Commands:
   recall import archive --json archive.json [--apply] [--reindex] [--db path] [--project slug]
   recall import mem0 --json mem0.json [--apply] [--db path] [--project slug]
   recall import zep --json zep.json [--apply] [--db path] [--project slug]
-  recall import auto-memory --root path [--apply] [--db path] [--project slug]
+  recall import auto-memory [--root path] [--apply] [--db path] [--project slug]
   recall import local [--global-db path] [--project slug] [--topics a,b] [--limit N] [--no-hyperedges] [--apply] [--db path]
+  recall claude sync [--apply] [--keep-automemory] [--root path] [--db path]
+  recall claude status
   recall reindex [--missing-only] [--db path] [--project slug]
   recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json

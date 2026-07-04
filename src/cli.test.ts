@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1078,6 +1078,80 @@ test("health --derive admits an obs cell with concerns edges into the store", ()
     assert.equal(shown.code, 0, shown.stderr);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("import auto-memory with an explicit --root imports the fixture tree", () => {
+  const tmp = tempDir();
+  const root = mkdtempSync(join(tmpdir(), "recall-v5-cli-auto-memory-"));
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const memoryDir = join(root, "demo", "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "note.md"), "---\nname: Demo note\ntype: project\n---\nProject memory.");
+
+    const result = capture(["import", "auto-memory", "--root", root, "--apply", "--db", db]);
+    assert.equal(result.code, 0, result.stderr);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.created, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import auto-memory without --root defaults to DEFAULT_AUTO_MEMORY_ROOT under HOME", () => {
+  const tmp = tempDir();
+  const home = mkdtempSync(join(tmpdir(), "recall-v5-cli-auto-memory-home-"));
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const memoryDir = join(home, ".claude", "projects", "demo", "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "note.md"), "---\nname: Demo note\ntype: project\n---\nProject memory.");
+
+    const result = capture(["import", "auto-memory", "--apply", "--db", db], { env: { HOME: home } as NodeJS.ProcessEnv });
+    assert.equal(result.code, 0, result.stderr);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.created, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("claude sync/status round-trip through the CLI against a temp HOME", () => {
+  const tmp = tempDir();
+  const home = mkdtempSync(join(tmpdir(), "recall-v5-cli-claude-sync-"));
+  try {
+    const dryRun = capture(["claude", "sync"], { env: { HOME: home } as NodeJS.ProcessEnv });
+    assert.equal(dryRun.code, 0, dryRun.stderr);
+    const dryJson = JSON.parse(dryRun.stdout);
+    assert.equal(dryJson.dryRun, true);
+    assert.ok(dryJson.settingsChanged.length > 0);
+
+    const statusBefore = capture(["claude", "status"], { env: { HOME: home } as NodeJS.ProcessEnv });
+    assert.equal(statusBefore.code, 0, statusBefore.stderr);
+    assert.equal(JSON.parse(statusBefore.stdout).hooksInstalled, false);
+
+    const db = join(tmp, "recall.sqlite3");
+    const apply = capture(["claude", "sync", "--apply", "--keep-automemory", "--db", db], {
+      env: { HOME: home } as NodeJS.ProcessEnv,
+    });
+    assert.equal(apply.code, 0, apply.stderr);
+    const applyJson = JSON.parse(apply.stdout);
+    assert.equal(applyJson.dryRun, false);
+    assert.equal(applyJson.autoMemoryImport, null);
+
+    const statusAfter = capture(["claude", "status"], { env: { HOME: home } as NodeJS.ProcessEnv });
+    assert.equal(statusAfter.code, 0, statusAfter.stderr);
+    const statusJson = JSON.parse(statusAfter.stdout);
+    assert.equal(statusJson.hooksInstalled, true);
+    // --keep-automemory maps to disableAutoMemory: false, so auto-memory stays enabled.
+    assert.equal(statusJson.autoMemoryDisabled, false);
+    assert.equal(statusJson.mcpInstalled, true);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
