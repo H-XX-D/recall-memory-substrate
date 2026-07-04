@@ -9,6 +9,7 @@ export * from "./cell-context.js";
 export * from "./claude-integration.js";
 export * from "./claude-sync.js";
 export * from "./codex-integration.js";
+export * from "./codex-sync.js";
 export * from "./compile.js";
 export * from "./dag.js";
 export * from "./derivation.js";

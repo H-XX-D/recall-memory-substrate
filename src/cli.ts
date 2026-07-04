@@ -16,6 +16,7 @@ import {
   readJsonFile,
 } from "./adapters.js";
 import { claudeSyncStatus, DEFAULT_AUTO_MEMORY_ROOT, runClaudeSync } from "./claude-sync.js";
+import { codexSyncStatus, runCodexSync } from "./codex-sync.js";
 import { migrate } from "./migrate.js";
 import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
@@ -635,6 +636,23 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       return 0;
     }
 
+    if (command === "codex" && subcommand === "status") {
+      outJson(out, codexSyncStatus({ home: env.HOME }));
+      return 0;
+    }
+
+    if (command === "codex" && (!subcommand || subcommand === "sync")) {
+      outJson(
+        out,
+        runCodexSync({
+          home: env.HOME,
+          apply: args.apply,
+          recallDb: args.db,
+        }),
+      );
+      return 0;
+    }
+
     if (command === "reindex") {
       const store = openWriteStore(route.dbPath);
       try {
@@ -986,6 +1004,8 @@ Commands:
   recall import local [--global-db path] [--project slug] [--topics a,b] [--limit N] [--no-hyperedges] [--apply] [--db path]
   recall claude sync [--apply] [--keep-automemory] [--write-gate] [--root path] [--db path]
   recall claude status
+  recall codex sync [--apply] [--db path]
+  recall codex status
   recall reindex [--missing-only] [--db path] [--project slug]
   recall maintain [--all-graphs] [--db path] [--project slug]
   recall service install [--interval-min 60]

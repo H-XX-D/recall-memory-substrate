@@ -1427,6 +1427,45 @@ test("claude sync --write-gate lands the node prompt/stop hook entries in the wr
   }
 });
 
+test("codex sync/status round-trip through the CLI against a temp HOME", () => {
+  const home = mkdtempSync(join(tmpdir(), "recall-v5-cli-codex-sync-"));
+  try {
+    const dryRun = capture(["codex", "sync"], { env: { HOME: home } as NodeJS.ProcessEnv });
+    assert.equal(dryRun.code, 0, dryRun.stderr);
+    const dryJson = JSON.parse(dryRun.stdout);
+    assert.equal(dryJson.dryRun, true);
+    assert.equal(dryJson.configChanged, true);
+    assert.equal(dryJson.agentsChanged, true);
+    assert.equal(existsSync(join(home, ".codex", "config.toml")), false);
+
+    const statusBefore = capture(["codex", "status"], { env: { HOME: home } as NodeJS.ProcessEnv });
+    assert.equal(statusBefore.code, 0, statusBefore.stderr);
+    const statusBeforeJson = JSON.parse(statusBefore.stdout);
+    assert.equal(statusBeforeJson.mcpInstalled, false);
+    assert.equal(statusBeforeJson.agentsBlockPresent, false);
+
+    const apply = capture(["codex", "sync", "--apply", "--db", "/tmp/recall-codex-cli.sqlite3"], {
+      env: { HOME: home } as NodeJS.ProcessEnv,
+    });
+    assert.equal(apply.code, 0, apply.stderr);
+    const applyJson = JSON.parse(apply.stdout);
+    assert.equal(applyJson.dryRun, false);
+    assert.equal(applyJson.configChanged, true);
+    assert.equal(applyJson.agentsChanged, true);
+
+    const config = readFileSync(join(home, ".codex", "config.toml"), "utf8");
+    assert.match(config, /RECALL_DB = "\/tmp\/recall-codex-cli\.sqlite3"/);
+
+    const statusAfter = capture(["codex", "status"], { env: { HOME: home } as NodeJS.ProcessEnv });
+    assert.equal(statusAfter.code, 0, statusAfter.stderr);
+    const statusAfterJson = JSON.parse(statusAfter.stdout);
+    assert.equal(statusAfterJson.mcpInstalled, true);
+    assert.equal(statusAfterJson.agentsBlockPresent, true);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("maintain runs the routed store by default and prints a single-element JSON list", () => {
   const tmp = tempDir();
   try {
