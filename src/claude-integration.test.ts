@@ -12,6 +12,55 @@ test("recallHookGroups wires SessionStart, prompt, and stop modes", () => {
   assert.match(JSON.stringify(groups.Stop), /--stop/);
 });
 
+test("recallHookGroups default output (no opts) is byte-identical to the pre-writeGate shape", () => {
+  const groups = recallHookGroups(HOOK);
+  assert.deepEqual(groups, {
+    SessionStart: {
+      hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)}`, timeout: 15, statusMessage: "Consulting Recall memory..." }],
+    },
+    UserPromptSubmit: {
+      hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --prompt`, timeout: 10 }],
+    },
+    Stop: {
+      hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --stop`, timeout: 10 }],
+    },
+  });
+  assert.equal(
+    JSON.stringify(groups),
+    JSON.stringify({
+      SessionStart: {
+        hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)}`, timeout: 15, statusMessage: "Consulting Recall memory..." }],
+      },
+      UserPromptSubmit: {
+        hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --prompt`, timeout: 10 }],
+      },
+      Stop: {
+        hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --stop`, timeout: 10 }],
+      },
+    }),
+  );
+});
+
+test("recallHookGroups writeGate appends the node prompt/stop hooks after the python entries", () => {
+  const withGate = recallHookGroups(HOOK, {
+    writeGate: { stopHookCommand: "recall-stop-hook", promptHookCommand: "recall-prompt-hook" },
+  });
+  const withoutGate = recallHookGroups(HOOK);
+
+  // SessionStart is untouched by writeGate.
+  assert.deepEqual(withGate.SessionStart, withoutGate.SessionStart);
+
+  const promptHooks = (withGate.UserPromptSubmit as { hooks: unknown[] }).hooks;
+  assert.equal(promptHooks.length, 2);
+  assert.match(JSON.stringify(promptHooks[0]), /python3 .*--prompt/);
+  assert.deepEqual(promptHooks[1], { type: "command", command: "recall-prompt-hook" });
+
+  const stopHooks = (withGate.Stop as { hooks: unknown[] }).hooks;
+  assert.equal(stopHooks.length, 2);
+  assert.match(JSON.stringify(stopHooks[0]), /python3 .*--stop/);
+  assert.deepEqual(stopHooks[1], { type: "command", command: "recall-stop-hook" });
+});
+
 test("mergeClaudeSettings injects Recall hooks and disables native auto-memory", () => {
   const first = mergeClaudeSettings({}, { hookCommandPath: HOOK });
   assert.deepEqual(

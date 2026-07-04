@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_AUTO_MEMORY_ROOT, claudeSyncStatus, runClaudeSync } from "./claude-sync.js";
@@ -265,4 +265,125 @@ test("claudeSyncStatus never throws on malformed json files", () => {
 
 test("DEFAULT_AUTO_MEMORY_ROOT points at ~/.claude/projects", () => {
   assert.match(DEFAULT_AUTO_MEMORY_ROOT, /\.claude[/\\]projects$/);
+});
+
+function hookAssetPath(home: string): string {
+  return join(home, ".claude", "hooks", "recall-session-start.py");
+}
+
+test("runClaudeSync apply installs the recall-session-start.py hook asset and reports it", () => {
+  const home = tempHome();
+  try {
+    const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    assert.equal(existsSync(hookAssetPath(home)), true);
+    assert.deepEqual(result.assetsInstalled, [hookAssetPath(home)]);
+    assert.equal(result.assetsSkipped, undefined);
+    const installed = readFileSync(hookAssetPath(home), "utf8");
+    const source = readFileSync(join(process.cwd(), "integrations", "claude", "hooks", "recall-session-start.py"), "utf8");
+    assert.equal(installed, source);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync second apply run reports no asset changes (idempotent, no backup)", () => {
+  const home = tempHome();
+  try {
+    runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    const second = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    assert.deepEqual(second.assetsInstalled, []);
+    assert.equal(existsSync(`${hookAssetPath(home)}.bak`), false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync backs up the hook asset only when overwriting a changed existing file", () => {
+  const home = tempHome();
+  try {
+    mkdirSync(dirname(hookAssetPath(home)), { recursive: true });
+    writeFileSync(hookAssetPath(home), "# stale local copy\n");
+
+    const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    assert.deepEqual(result.assetsInstalled, [hookAssetPath(home)]);
+    assert.equal(existsSync(`${hookAssetPath(home)}.bak`), true);
+    assert.equal(readFileSync(`${hookAssetPath(home)}.bak`, "utf8"), "# stale local copy\n");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync installAssets: false skips asset install entirely", () => {
+  const home = tempHome();
+  try {
+    const result = runClaudeSync({ home, apply: true, importMemory: false, installAssets: false, now: NOW });
+    assert.equal(existsSync(hookAssetPath(home)), false);
+    assert.deepEqual(result.assetsInstalled, []);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync dry-run does not install the hook asset", () => {
+  const home = tempHome();
+  try {
+    const result = runClaudeSync({ home, apply: false, importMemory: false, now: NOW });
+    assert.equal(existsSync(hookAssetPath(home)), false);
+    assert.deepEqual(result.assetsInstalled, []);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync degrades with assetsSkipped when the asset cannot be found", () => {
+  const home = tempHome();
+  const realAsset = join(process.cwd(), "integrations", "claude", "hooks", "recall-session-start.py");
+  const movedAside = `${realAsset}.moved-for-test`;
+  let moved = false;
+  try {
+    // Simulate a packaging state where the source asset is absent (e.g. an
+    // npm install that did not ship integrations/): rename the real file
+    // aside for the duration of this test only, then restore it in finally.
+    renameSync(realAsset, movedAside);
+    moved = true;
+
+    const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    assert.equal(existsSync(hookAssetPath(home)), false);
+    assert.deepEqual(result.assetsInstalled, []);
+    assert.equal(result.assetsSkipped, "asset not found");
+  } finally {
+    if (moved) renameSync(movedAside, realAsset);
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync writeGate wires the node prompt/stop hook bin names into written settings.json", () => {
+  const home = tempHome();
+  try {
+    const result = runClaudeSync({ home, apply: true, importMemory: false, writeGate: true, now: NOW });
+    assert.ok(result.settingsChanged.length > 0);
+    const settings = JSON.parse(readFileSync(settingsPath(home), "utf8"));
+    const promptHooks = settings.hooks.UserPromptSubmit[0].hooks;
+    const stopHooks = settings.hooks.Stop[0].hooks;
+    assert.equal(promptHooks.length, 2);
+    assert.equal(promptHooks[1].command, "recall-prompt-hook");
+    assert.equal(stopHooks.length, 2);
+    assert.equal(stopHooks[1].command, "recall-stop-hook");
+    // SessionStart is untouched by writeGate.
+    assert.equal(settings.hooks.SessionStart[0].hooks.length, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync default (no writeGate) settings.json has only the python hook entries", () => {
+  const home = tempHome();
+  try {
+    runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    const settings = JSON.parse(readFileSync(settingsPath(home), "utf8"));
+    assert.equal(settings.hooks.UserPromptSubmit[0].hooks.length, 1);
+    assert.equal(settings.hooks.Stop[0].hooks.length, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

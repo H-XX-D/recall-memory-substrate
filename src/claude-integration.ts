@@ -10,28 +10,47 @@ export interface ClaudeHookGroups {
   Stop: unknown;
 }
 
-export function recallHookGroups(hookCommandPath: string): ClaudeHookGroups {
+export interface RecallHookGroupsOpts {
+  writeGate?: { stopHookCommand: string; promptHookCommand: string };
+}
+
+export function recallHookGroups(hookCommandPath: string, opts?: RecallHookGroupsOpts): ClaudeHookGroups {
   const quoted = JSON.stringify(hookCommandPath);
+  const writeGate = opts?.writeGate;
+
+  // The python UserPromptSubmit/Stop hooks are fail-open: a crash or missing
+  // interpreter just skips the marker stamp or the write gate, never blocking
+  // the turn. The node write-gate hooks below are fail-closed: on the Stop
+  // event, no durable write this turn holds the turn. Both can run side by
+  // side, but only if the python entry runs first (it stamps the turn-start
+  // marker the node Stop hook reads); array order below is load-bearing.
+  const promptHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --prompt`, timeout: 10 }];
+  const stopHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --stop`, timeout: 10 }];
+  if (writeGate) {
+    promptHooks.push({ type: "command", command: writeGate.promptHookCommand });
+    stopHooks.push({ type: "command", command: writeGate.stopHookCommand });
+  }
+
   return {
     SessionStart: {
       hooks: [{ type: "command", command: `python3 ${quoted}`, timeout: 15, statusMessage: "Consulting Recall memory..." }],
     },
     UserPromptSubmit: {
-      hooks: [{ type: "command", command: `python3 ${quoted} --prompt`, timeout: 10 }],
+      hooks: promptHooks,
     },
     Stop: {
-      hooks: [{ type: "command", command: `python3 ${quoted} --stop`, timeout: 10 }],
+      hooks: stopHooks,
     },
   };
 }
 
 export function mergeClaudeSettings(
   existing: Record<string, unknown> | undefined | null,
-  opts: { hookCommandPath: string; disableAutoMemory?: boolean },
+  opts: { hookCommandPath: string; disableAutoMemory?: boolean; writeGate?: RecallHookGroupsOpts["writeGate"] },
 ): { next: Record<string, unknown>; changed: string[] } {
   const next: Record<string, unknown> = { ...(existing ?? {}) };
   const changed: string[] = [];
-  const groups = recallHookGroups(opts.hookCommandPath);
+  const groups = recallHookGroups(opts.hookCommandPath, opts.writeGate ? { writeGate: opts.writeGate } : undefined);
   const hooks: Record<string, unknown> = { ...((next.hooks as Record<string, unknown>) ?? {}) };
 
   for (const event of ["SessionStart", "UserPromptSubmit", "Stop"] as const) {

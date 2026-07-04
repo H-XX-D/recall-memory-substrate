@@ -1404,6 +1404,29 @@ test("claude sync/status round-trip through the CLI against a temp HOME", () => 
   }
 });
 
+test("claude sync --write-gate lands the node prompt/stop hook entries in the written settings.json", () => {
+  const home = mkdtempSync(join(tmpdir(), "recall-v5-cli-claude-writegate-"));
+  try {
+    const apply = capture(["claude", "sync", "--apply", "--keep-automemory", "--write-gate"], {
+      env: { HOME: home } as NodeJS.ProcessEnv,
+    });
+    assert.equal(apply.code, 0, apply.stderr);
+
+    const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+    const promptHooks = settings.hooks.UserPromptSubmit[0].hooks;
+    const stopHooks = settings.hooks.Stop[0].hooks;
+    assert.equal(promptHooks.length, 2);
+    assert.equal(promptHooks[1].command, "recall-prompt-hook");
+    assert.equal(stopHooks.length, 2);
+    assert.equal(stopHooks[1].command, "recall-stop-hook");
+
+    // Nothing outside the temp HOME was touched: the hook asset lands under it.
+    assert.equal(existsSync(join(home, ".claude", "hooks", "recall-session-start.py")), true);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("maintain runs the routed store by default and prints a single-element JSON list", () => {
   const tmp = tempDir();
   try {

@@ -93,6 +93,7 @@ interface ParsedArgs {
   inlineRefs: boolean;
   refParams: boolean;
   keepAutoMemory: boolean;
+  writeGate: boolean;
   allGraphs: boolean;
   intervalMin?: number;
 }
@@ -628,6 +629,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
           autoMemoryRoot: args.root,
           dbPath: args.db,
           now: options.now,
+          writeGate: args.writeGate,
         }),
       );
       return 0;
@@ -711,6 +713,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     inlineRefs: false,
     refParams: false,
     keepAutoMemory: false,
+    writeGate: false,
     allGraphs: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -736,6 +739,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--inline-refs") parsed.inlineRefs = true;
     else if (arg === "--ref-params") parsed.refParams = true;
     else if (arg === "--keep-automemory") parsed.keepAutoMemory = true;
+    else if (arg === "--write-gate") parsed.writeGate = true;
     else if (arg === "--all-graphs") parsed.allGraphs = true;
     else if (arg === "--interval-min") parsed.intervalMin = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
@@ -980,7 +984,7 @@ Commands:
   recall import zep --json zep.json [--apply] [--db path] [--project slug]
   recall import auto-memory [--root path] [--apply] [--db path] [--project slug]
   recall import local [--global-db path] [--project slug] [--topics a,b] [--limit N] [--no-hyperedges] [--apply] [--db path]
-  recall claude sync [--apply] [--keep-automemory] [--root path] [--db path]
+  recall claude sync [--apply] [--keep-automemory] [--write-gate] [--root path] [--db path]
   recall claude status
   recall reindex [--missing-only] [--db path] [--project slug]
   recall maintain [--all-graphs] [--db path] [--project slug]
