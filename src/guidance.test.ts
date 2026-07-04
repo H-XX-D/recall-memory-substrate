@@ -117,6 +117,24 @@ test("an existing program covering the topic suppresses the suggestion", () => {
   store.close();
 });
 
+test("a prg cell with a null program spec neither crashes suggestions nor covers anything", () => {
+  const store = new SqliteStore(":memory:");
+  admit(
+    { kind: "prg", title: "malformed standing program", body: "spec was lost", confidence: 0.6, props: { program: null } },
+    { store },
+  );
+  admitMany(store, "obs", 5, "latency");
+  const bel = admit({ kind: "bel", title: "latency is within budget", body: "claim", confidence: 0.6 }, { store }).cell!;
+  const r = admit(
+    { kind: "obs", title: "latency spike observed again", body: "b", confidence: 0.6, topics: ["latency"], edges: [{ relation: "contradicts", target: bel.key }] },
+    { store },
+  );
+  const g = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  assert.ok(g.programSuggestions.some((s) => s.operation === "watch"), "null spec must not count as covering the topic");
+  assert.ok(g.programSuggestions.some((s) => s.operation === "quorum"), "null spec must not block the quorum path");
+  store.close();
+});
+
 test("a task pool suggests allocate ahead of watch", () => {
   const store = new SqliteStore(":memory:");
   admitMany(store, "tsk", 4, "migration");

@@ -153,8 +153,10 @@ function programSuggestions(store: Store, cell: Cell): ProgramSuggestion[] {
 type SpecShape = { operation?: string; target?: { topics?: string[]; keys?: string[] } };
 
 function activeProgramSpecs(active: Cell[]): SpecShape[] {
+  // Admission validates props but not the spec inside it, so a prg cell may
+  // carry a null or malformed program; anything but an object covers nothing.
   return active
-    .filter((c) => c.kind === "prg" && c.props.program !== undefined)
+    .filter((c) => c.kind === "prg" && typeof c.props.program === "object" && c.props.program !== null)
     .map((c) => c.props.program as SpecShape);
 }
 
