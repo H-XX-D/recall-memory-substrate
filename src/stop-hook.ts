@@ -67,8 +67,13 @@ function main(): void {
     if (!response.decision) {
       // released: run the endcap operator cycle so the graph is current for the
       // next turn. Best-effort: a tick error must never block release.
+      // derive:true admits standing-program witnesses here too. This is
+      // idempotent by construction: deriveAdmit dedups on programRunDerivationKey
+      // (programKey + output only), so an unchanged re-run collapses onto the
+      // existing cell as a duplicateOf and admits nothing new; a changed output
+      // legitimately admits a fresh witness.
       try {
-        runOperatorCycle(store, new Date().toISOString());
+        runOperatorCycle(store, new Date().toISOString(), { derive: true });
       } catch {
         // swallow
       }
