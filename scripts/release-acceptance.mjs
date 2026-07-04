@@ -428,7 +428,9 @@ function runPythonHelperFlow(packageRoot, tempRoot) {
   const peeked = runJson("python3", [peek, key, "--db", dbPath, "--format", "json"], { cwd: packageRoot });
   assert.equal(peeked.key, key);
   assert.equal(peeked.title, "python installed helper");
-  assert.equal(peeked.bodyPreview, "The installed Python helper admitted this cell through recall-mal.");
+  // v5 peek envelope: the excerpt lives under body, not top-level bodyPreview.
+  assert.equal(peeked.body.excerpt, "The installed Python helper admitted this cell through recall-mal.");
+  assert.equal(peeked.body.truncated, false);
 }
 
 function runJson(command, args, options = {}) {
