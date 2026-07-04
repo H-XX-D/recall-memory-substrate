@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2 - 2026-07-04
+
+README positioning correction: agents run Recall themselves. The hero, the pull critique, the feature list, the quickstart, and the comparison now state the operating model plainly: one model handles the whole process, the same one already doing the work, on the subscription already paid for; the human's last act of memory management is `recall claude sync --apply`; pull layers add a metered second model to extract and embed, Recall does not.
+
 ## 0.11.1 - 2026-07-04
 
 Expansion handles you can read, and a README that states the thesis.

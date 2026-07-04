@@ -2,6 +2,8 @@
 
 **Push memory for AI agents.** Recall does not wait to be queried. It compiles what the agent needs to know and pushes it into every turn, holds the turn open until memory was actually consulted or updated, and keeps working the graph between calls.
 
+Agents run it themselves. One model handles the whole process, the same one already doing the work, on the subscription you already pay for. There is no extractor model, no memory service, and nothing for a human to curate.
+
 *Defining the Push vs Pull Memory for Agentic AI.*
 
 [![npm](https://img.shields.io/npm/v/recall-memory-substrate)](https://www.npmjs.com/package/recall-memory-substrate)
@@ -10,9 +12,9 @@
 
 ## The problem with pull
 
-Why should memory only answer when asked? An agent that has to remember to query its memory usually does not. And when it does ask, a pull pipeline is unpredictable at both ends: on the write side a separate extractor model decides what to keep, unschema'd, with no type, confidence, or contradiction link; on the read side top-k similarity returns a slice, not the relevant set, and a stale fact ranks exactly as well as the correction that replaced it.
+Why should memory only answer when asked? An agent that has to remember to query its memory usually does not. And when it does ask, a pull pipeline is unpredictable at both ends: on the write side a separate extractor model decides what to keep, unschema'd, with no type, confidence, or contradiction link; on the read side top-k similarity returns a slice, not the relevant set, and a stale fact ranks exactly as well as the correction that replaced it. That extractor is a second model in your stack, with its own latency and its own bill.
 
-Recall moves the work to the other side of the loop. Facts enter as typed, validated, confidence-calibrated cells at write time. Retrieval is compiled, ranked by evidence and graph structure, and delivered by hooks whether or not the agent thinks to ask.
+Recall moves the work to the other side of the loop. Facts enter as typed, validated, confidence-calibrated cells at write time, written by the same model that did the work, with no extraction pipeline behind it. Retrieval is compiled, ranked by evidence and graph structure, and delivered by hooks whether or not the agent thinks to ask.
 
 ## What push looks like
 
@@ -38,6 +40,7 @@ No query was issued. The hook fired, ranked the graph against the prompt, flagge
 - **A single write gate.** Every write is schema-validated, screened for credentials, deduplicated, checked for dangling references, and attenuated when a claim is stated more strongly than its evidence supports. The gate answers with guidance: similar cells to link, a better kind if one fits, what would restore capped confidence.
 - **Turn gates.** A stop hook can hold the turn open until flagged cells were actually read, or until the agent wrote back what it learned. Forgetting stops being an option.
 - **A runtime, not a store.** Decay ticks, effective-confidence recomputation, standing programs (watch, trend, drift, quorum, reflex, allocation), evals, and health checks run deterministically between turns, no model in the loop. The memory is alive between LLM calls.
+- **Agents handle their own memory.** The agent that does the work is the agent that writes the memory, through the gate, and the hooks make sure it happens. No extractor model, no embedding service required, no separate memory bill: one model start to finish, plus deterministic code for everything between turns.
 - **Local first.** One SQLite file per graph on your machine. No server, no cloud, no API key. Portable JSON archives, plus importers for mem0, Zep, and Claude Code auto-memory.
 
 ## Install
@@ -53,7 +56,14 @@ Requires Node.js 22.5 or newer (Recall uses the built-in `node:sqlite`; Node fla
 ```sh
 cd ~/code/my-project
 recall project init                 # this project gets its own graph
+recall claude sync --apply          # Codex: recall codex sync --apply
+```
 
+That is the whole setup, and the last memory management a human does. From here the agent runs its own memory: hooks prime every prompt from the graph, the agent writes back what it learns through the gate, and the substrate maintains itself between turns. Sync previews its changes by default and backs up any file it modifies.
+
+Everything the agent does you can also do by hand, which is the easiest way to watch the gate work:
+
+```sh
 echo '{ "kind": "dec",
         "title": "Use SQLite WAL mode for the event store",
         "body": "Single writer, concurrent readers.",
@@ -84,14 +94,6 @@ Then read it back the way an agent would:
 recall compile "how should the event store handle concurrent reads?"
 ```
 
-To wire the push loop into an assistant, one command registers the hooks and the MCP server and imports existing auto-memory:
-
-```sh
-recall claude sync --apply     # Codex: recall codex sync --apply
-```
-
-Both preview their changes by default and back up any file they modify.
-
 ## How it works
 
 ```mermaid
@@ -112,7 +114,7 @@ Reading is navigation, not a pre-committed blob: the compile packet leads with i
 
 A memory layer gives your code `search()` and `add()`, and memory works whenever the application remembers to call them. That is the pull assumption, and it is where the failure lives: the agent that did not know it should ask, the turn that ended without writing back, the stale fact nobody reconciled.
 
-Recall attaches to the harness instead of the prompt chain. Delivery is the product: hooks fire on every prompt, gates check every turn end, and the substrate maintains itself on a schedule. mem0 and Zep are strong hosted retrieval layers; Letta gives an agent tools to edit its own memory blocks inside its context. All of them do the work inside or on demand of the LLM loop. Recall's work happens outside it.
+Recall attaches to the harness instead of the prompt chain. Delivery is the product: hooks fire on every prompt, gates check every turn end, and the substrate maintains itself on a schedule. mem0 and Zep are strong hosted retrieval layers; Letta gives an agent tools to edit its own memory blocks inside its context. All of them do the work inside or on demand of the LLM loop, and a layer typically adds a metered second model to extract and embed. Recall's memory is written by the one model already in the loop and maintained by deterministic code, so nothing new is metered and nobody has to manage it.
 
 ## Recall and RAG
 
