@@ -114,12 +114,11 @@ A memory layer gives your code `search()` and `add()`, and memory works whenever
 
 Recall attaches to the harness instead of the prompt chain. Delivery is the product: hooks fire on every prompt, gates check every turn end, and the substrate maintains itself on a schedule. mem0 and Zep are strong hosted retrieval layers; Letta gives an agent tools to edit its own memory blocks inside its context. All of them do the work inside or on demand of the LLM loop. Recall's work happens outside it.
 
-## When not to use Recall
+## Recall and RAG
 
-- You want memory as a managed service someone else operates. Recall has no hosted API; it runs where your agents run. The write model itself is multi-actor by design: any human, agent, daemon, or connector whose proposal clears the admission gate writes to the same graph, every cell carries actor provenance and a tenant scope, calibration is tracked per actor, and quorum programs arbitrate when actors disagree. Sharing a graph is a deployment question, not a design limit.
-- You want the agent itself to manage its context window as editable memory blocks. That is Letta's model.
-- Your harness exposes no hook points and cannot run MCP. Recall's query surfaces still work anywhere (CLI, library), but the push loop needs hooks; Claude Code and Codex are wired today.
-- You need vector search over millions of documents. Recall is agent memory, not a document retrieval engine.
+One boundary worth naming: Recall is not a million-document vector store. It is agent memory, and its value comes from use: cells are born from decisions made, observations verified, tasks opened and closed, and they compound the way working knowledge does.
+
+That makes it the natural companion to RAG, not a replacement for it. The graph knows what the current branch of work is about: the active tasks, the live beliefs, the topics and entities in play. Use that to sculpt and scope retrieval: compile the packet, take its topics and entities into your RAG query, and a massive document store narrows to the slice that matters to this branch right now.
 
 ## Surfaces
 

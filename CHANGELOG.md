@@ -5,7 +5,7 @@
 Expansion handles you can read, and a README that states the thesis.
 
 - Compile: the `expansion_handles` packet section is now a categorized index instead of a bare key list. Each line carries the category (decisions, beliefs, tasks, objectives, risks, observations, verifications, references, hypotheses, programs), the cell handle, the quoted title trimmed to twelve words, and the full key in brackets, ordered by category, so choosing what to expand never requires expanding blind. The machine-readable `expansionHandles` key list is unchanged on the packet object; the new rendered view lives in `expansionIndex` and is what the word budget counts and trims.
-- README rewritten around the push vs pull design: the pull problem stated at both ends (unschema'd extractor writes, top-k similarity reads that rank a stale fact level with its correction), the per-prompt primer shown as the first demo, the write gate shown answering with attenuation and guidance, a request-lifecycle diagram, a direct comparison with memory layers, and a when-not-to-use-Recall section.
+- README rewritten around the push vs pull design: the pull problem stated at both ends (unschema'd extractor writes, top-k similarity reads that rank a stale fact level with its correction), the per-prompt primer shown as the first demo, the write gate shown answering with attenuation and guidance, a request-lifecycle diagram, a direct comparison with memory layers, and a Recall-and-RAG section positioning the graph as the scope that narrows a large document store to the current branch of work.
 
 ## 0.11.0 - 2026-07-04
 
