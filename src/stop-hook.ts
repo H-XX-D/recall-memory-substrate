@@ -61,7 +61,13 @@ function main(): void {
     return;
   }
 
-  const store = new SqliteStore(path);
+  let store: SqliteStore;
+  try {
+    store = new SqliteStore(path);
+  } catch {
+    stdout.write("{}\n"); // store failed to open: cannot gate, do not block
+    return;
+  }
   try {
     const response = stopHookResponse({ wroteThisTurn: wroteSince(store, turnStart(sessionId)) });
     if (!response.decision) {

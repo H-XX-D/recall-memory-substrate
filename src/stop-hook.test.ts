@@ -125,6 +125,22 @@ test("a second stop endcap run with unchanged output admits nothing new", () => 
   }
 });
 
+test("a store that fails to open fails open: exit 0, empty response", () => {
+  const tmp = tempDir();
+  try {
+    // RECALL_DB points at a non-sqlite file, so the SqliteStore constructor
+    // throws before the gate can run. The hook must degrade the same way as
+    // the other fail-open paths (no db path, malformed stdin): exit 0, "{}".
+    const dbPath = join(tmp, "not-a-db.txt");
+    writeFileSync(dbPath, "this is not a sqlite database\n");
+
+    const { stdout } = runStopHook({ dbPath, stateDir: join(tmp, "state"), sessionId: "sess-bad-db" });
+    assert.deepEqual(JSON.parse(stdout), {});
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("stop endcap still swallows store errors and releases the turn", () => {
   const tmp = tempDir();
   try {
