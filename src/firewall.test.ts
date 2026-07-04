@@ -42,6 +42,16 @@ test("screenSecrets scans summary, source refs, and props", () => {
   assert.ok(got.issues.some((i) => i.path === "props.nested[0]"));
 });
 
+test("screenSecrets scans lifecycle tags", () => {
+  const got = screenSecrets(
+    proposal({ lifecycle: ["AKIAABCDEFGHIJKLMNOP"] })
+  );
+  assert.equal(got.allowed, false);
+  assert.equal(got.issues.length, 1);
+  assert.equal(got.issues[0]!.path, "lifecycle[0]");
+  assert.match(got.issues[0]!.message, /AWS/i);
+});
+
 test("screenSecrets blocks public writes with personal data", () => {
   const got = screenSecrets(
     proposal({

@@ -96,6 +96,9 @@ function textFields(proposal: WriteProposal): { path: string; text: string }[] {
   pushString(fields, "summary", proposal.summary);
   pushStrings(fields, "topics", proposal.topics);
   pushStrings(fields, "entities", proposal.entities);
+  pushStrings(fields, "lifecycle", proposal.lifecycle);
+  pushStrings(fields, "quality", proposal.quality);
+  pushStrings(fields, "subject", proposal.subject);
   pushStrings(fields, "sourceRefs", proposal.sourceRefs);
   pushString(fields, "project", proposal.project);
   pushString(fields, "tenant", proposal.tenant);
