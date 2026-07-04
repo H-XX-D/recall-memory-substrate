@@ -698,6 +698,7 @@ test("recall_write schema declares the evidence fields", () => {
   assert.equal(props.verification?.type, "string");
   assert.deepEqual(props.verification?.enum, ["unverified", "checked", "tested", "external"]);
   assert.equal(props.suggestPrograms?.type, "boolean");
+  assert.equal(props.props?.type, "object");
   store.close();
 });
 
@@ -747,6 +748,47 @@ test("recall_write suggestPrograms=true returns suggestions", () => {
   const watch = wr.guidance.programSuggestions.find((s: any) => s.operation === "watch");
   assert.ok(watch, "expected a watch suggestion");
   assert.equal(watch.proposal.kind, "prg");
+  store.close();
+});
+
+test("recall_write carries props, so a suggested prg proposal round-trips intact", () => {
+  delete process.env["RECALL_SUGGEST_PROGRAMS"];
+  const store = new SqliteStore(":memory:");
+  for (let i = 0; i < 5; i++) {
+    callText(handleMcpRequest(req("tools/call", {
+      name: "recall_write",
+      arguments: { kind: "obs", title: `latency observation number ${i}`, body: `cell ${i}`, confidence: 0.6, topics: ["latency"] },
+    }), store));
+  }
+  const wr = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "obs", title: "latency spike observed again", body: "b", confidence: 0.6, topics: ["latency"], suggestPrograms: true },
+  }), store));
+  const watch = wr.guidance.programSuggestions.find((s: any) => s.operation === "watch");
+  assert.ok(watch, "expected a watch suggestion");
+  const admitted = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: watch.proposal,
+  }), store));
+  assert.equal(admitted.accepted, true);
+  const spec = (store.get(admitted.id)!.props as { program?: { operation?: string } }).program;
+  assert.equal(spec?.operation, "watch", "admitted prg cell must keep its program spec");
+  const again = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "obs", title: "latency spike observed yet again", body: "b2", confidence: 0.6, topics: ["latency"], suggestPrograms: true },
+  }), store));
+  assert.equal(again.guidance.programSuggestions.filter((s: any) => s.operation === "watch").length, 0, "the admitted program must suppress the repeat suggestion");
+  store.close();
+});
+
+test("recall_write passes non-object props through to fill-or-reject", () => {
+  const store = new SqliteStore(":memory:");
+  const wr = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write",
+    arguments: { kind: "prg", title: "bad props write", body: "b", confidence: 0.6, props: null },
+  }), store));
+  assert.equal(wr.accepted, false);
+  assert.ok(wr.issues.some((i: any) => i.path === "props"));
   store.close();
 });
 

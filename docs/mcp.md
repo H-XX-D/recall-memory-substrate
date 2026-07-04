@@ -279,6 +279,10 @@ Parameters:
 - `sourceRefs` (array of strings, optional)
 - `verification` (string, optional): one of `unverified`, `checked`,
   `tested`, `external`
+- `props` (object, optional): structured properties stored on the cell. A
+  `prg` cell carries its program spec at `props.program`, so a program
+  suggestion's `proposal` can be passed back through `recall_write`
+  unchanged to admit it.
 - `suggestPrograms` (boolean, optional, default false): include
   standing-program suggestions in the response guidance. Setting
   `RECALL_SUGGEST_PROGRAMS=1` in the server's environment is equivalent.
