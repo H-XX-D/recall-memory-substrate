@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.3 - 2026-07-04
+
+Cross-platform and CI fixes.
+
+- Service: launchd plist paths render POSIX on every host (Windows previously produced backslash paths inside the plist), and the crontab hint printed on non-macOS platforms now always emits a schedule cron honors: intervals snap to the nearest valid field step, so 90 minutes becomes `0 */2 * * *` instead of the invalid `*/90 * * * *`.
+- Tests: the service round-trip test asserts the launchctl hint only on macOS and the crontab hint elsewhere.
+- CI: the workflows now run the scripts this package actually has (build, test, typecheck per OS at Node 22.13 and 24, plus python tests and installed-artifact acceptance) instead of the retired e2e, smoke, and benchmark lanes; the release workflow extracts notes matching this changelog's heading format and passes tag inputs through environment variables.
+- Requirements: the stated Node floor rises from 22.5 to 22.13, the first release where `node:sqlite` imports without the experimental flag; 22.5 never actually worked unflagged. Early Node 22 builds also bundle SQLite without FTS5; the store already degrades to LIKE there by design, the two BM25-ordering tests now respect the active backend, and the README documents the degradation.
+
 ## 0.11.2 - 2026-07-04
 
 README positioning correction: agents run Recall themselves. The hero, the pull critique, the feature list, the quickstart, and the comparison now state the operating model plainly: one model handles the whole process, the same one already doing the work, on the subscription already paid for; the human's last act of memory management is `recall claude sync --apply`; pull layers add a metered second model to extract and embed, Recall does not.

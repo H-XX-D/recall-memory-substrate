@@ -66,9 +66,11 @@ function plistString(value: string): string {
 // pass, only schedule the next one.
 export function renderMaintainPlist(opts: Required<ServiceOptions>): string {
   const seconds = Math.max(1, Math.round(opts.intervalMinutes * 60));
-  const stdout = join(opts.logDir, `${opts.label}.out.log`);
-  const stderr = join(opts.logDir, `${opts.label}.err.log`);
-  const args = [opts.nodeBin, opts.cliPath, "maintain", "--all-graphs"];
+  // A plist is a launchd artifact; its paths are POSIX even when the file is
+  // rendered on a host whose path separator is the backslash.
+  const stdout = posixPath(join(opts.logDir, `${opts.label}.out.log`));
+  const stderr = posixPath(join(opts.logDir, `${opts.label}.err.log`));
+  const args = [posixPath(opts.nodeBin), posixPath(opts.cliPath), "maintain", "--all-graphs"];
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -142,5 +144,33 @@ export function launchctlUnloadCommand(opts: ServiceOptions = {}): string {
 // crontab-equivalent note instead of a launchctl command.
 export function crontabEquivalent(opts: ServiceOptions = {}): string {
   const resolved = resolveServiceOptions(opts);
-  return `*/${resolved.intervalMinutes} * * * * ${resolved.nodeBin} ${resolved.cliPath} maintain --all-graphs >> ${join(resolved.logDir, `${resolved.label}.out.log`)} 2>> ${join(resolved.logDir, `${resolved.label}.err.log`)}`;
+  const out = posixPath(join(resolved.logDir, `${resolved.label}.out.log`));
+  const err = posixPath(join(resolved.logDir, `${resolved.label}.err.log`));
+  return `${cronSchedule(resolved.intervalMinutes)} ${posixPath(resolved.nodeBin)} ${posixPath(resolved.cliPath)} maintain --all-graphs >> ${out} 2>> ${err}`;
+}
+
+function posixPath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
+// Cron fields cannot express arbitrary step values (*/90 in the minutes field
+// runs hourly, not every 90 minutes), so snap to the nearest divisor of the
+// field's range and always emit a schedule cron actually honors.
+const MINUTE_STEPS = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30];
+const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12];
+
+function cronSchedule(intervalMinutes: number): string {
+  const minutes = Math.max(1, Math.round(intervalMinutes));
+  if (minutes < 60) {
+    const step = nearest(MINUTE_STEPS, minutes);
+    return step === 1 ? "* * * * *" : `*/${step} * * * *`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours >= 24) return "0 0 * * *";
+  const step = nearest(HOUR_STEPS, hours);
+  return step === 1 ? "0 * * * *" : `0 */${step} * * *`;
+}
+
+function nearest(steps: number[], target: number): number {
+  return steps.reduce((best, s) => (Math.abs(s - target) < Math.abs(best - target) ? s : best));
 }

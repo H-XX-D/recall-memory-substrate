@@ -8,7 +8,7 @@ Agents run it themselves. One model handles the whole process, the same one alre
 
 [![npm](https://img.shields.io/npm/v/recall-memory-substrate)](https://www.npmjs.com/package/recall-memory-substrate)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)
+![node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen)
 
 ## The problem with pull
 
@@ -49,7 +49,7 @@ No query was issued. The hook fired, ranked the graph against the prompt, flagge
 npm install -g recall-memory-substrate
 ```
 
-Requires Node.js 22.5 or newer (Recall uses the built-in `node:sqlite`; Node flags it experimental and prints a startup warning). Installs `recall` (CLI) and `recall-mcp` (MCP server).
+Requires Node.js 22.13 or newer (Recall uses the built-in `node:sqlite`; Node flags it experimental and prints a startup warning). Early Node 22 builds bundle SQLite without FTS5; Recall detects that and degrades lexical search to a LIKE scan, reporting backend `like` instead of `fts5-bm25`. Node 22.21 or 24 gets full BM25 ranking. Installs `recall` (CLI) and `recall-mcp` (MCP server).
 
 ## Sixty seconds
 
