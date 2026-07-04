@@ -37,7 +37,13 @@ export function stableJson(value: unknown): string {
   return JSON.stringify(sortJson(value), null, 2);
 }
 
-export type DerivationKind = "program_run" | "eval_run" | "dag_witness" | "dag_concern" | "dag_cycle";
+export type DerivationKind =
+  | "memory_health"
+  | "program_run"
+  | "eval_run"
+  | "dag_witness"
+  | "dag_concern"
+  | "dag_cycle";
 
 // A clean break from the legacy `<kind>:<hex24>` key format: derivation_index
 // rows were never migrated, and a colon in the id is ambiguous once a graph
@@ -88,6 +94,15 @@ export function deriveAdmit(
 // same key instead of stacking a new witness cell each time.
 export function programRunDerivationKey(run: ProgramRun): string {
   return derivationHash("program_run", { programKey: run.programKey, output: run.output });
+}
+
+// Bucketed by calendar day (UTC, from the ISO date slice), not by report
+// content: two health --derive runs on the same day collide on this key even
+// if the underlying report changed, so only the first re-derive of the day
+// lands a witness cell. This is deliberate legacy cadence semantics, not a
+// bug: memory health is a daily pulse, not a per-change witness.
+export function memoryHealthDerivationKey(now: Date, project?: string | null): string {
+  return derivationHash("memory_health", { bucket: now.toISOString().slice(0, 10), project: project ?? null });
 }
 
 export interface KeyedWriteProposal {

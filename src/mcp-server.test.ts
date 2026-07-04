@@ -625,6 +625,40 @@ test("recall_health returns a memory health report mirroring recall_status's sim
   store.close();
 });
 
+test("recall_health without derive omits the derived field", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "obs", title: "health mcp no-derive seed", body: "seed body", confidence: 0.8, topics: [], entities: [] }, { store });
+  const out = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_health",
+    arguments: {},
+  }), store));
+  assert.equal(out.derived, undefined);
+  store.close();
+});
+
+test("recall_health with derive:true admits a memory_health witness cell and mirrors the CLI duplicate case", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "obs", title: "health mcp derive seed", body: "seed body", confidence: 0.8, topics: [], entities: [] }, { store });
+
+  const first = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_health",
+    arguments: { derive: true },
+  }), store));
+  assert.equal(typeof first.createdAt, "string");
+  assert.ok(first.derived);
+  assert.equal(first.derived.accepted, true);
+  assert.equal(first.derived.duplicateOf, undefined);
+
+  const second = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_health",
+    arguments: { derive: true },
+  }), store));
+  assert.ok(second.derived);
+  assert.equal(second.derived.accepted, true);
+  assert.match(second.derived.duplicateOf, /^drv_memory_health_[0-9a-f]{24}$/);
+  store.close();
+});
+
 test("recall_compile inputSchema exposes health, inlineRefs, and refParams booleans", () => {
   const compileTool = TOOLS.find((t) => t.name === "recall_compile")!;
   const props = compileTool.inputSchema.properties as Record<string, { type: string }>;

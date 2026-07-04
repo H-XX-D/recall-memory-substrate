@@ -6,7 +6,7 @@
 // recall_hyperedge_list, recall_dag_analyze, recall_program_run,
 // recall_program_runs, recall_eval_run, recall_subgraph, recall_health. The
 // daemon/operator tick runs from the Stop hook, not here.
-import { analyzeMemory } from "./analysis.js";
+import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { admit } from "./admission.js";
@@ -16,7 +16,7 @@ import { getRecallPage } from "./pages.js";
 import type { PageName, PageFilter } from "./pages.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { analyzeDagOverlay } from "./dag.js";
-import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
+import { dagAnalysisToKeyedProposals, deriveAdmit, memoryHealthDerivationKey } from "./derivation.js";
 import { runProgramCell } from "./programs.js";
 import { runAndRecordEval, runEvalAndDerive } from "./evals.js";
 import { subgraphCells, type SubgraphFilter } from "./subgraph.js";
@@ -58,7 +58,7 @@ export const TOOLS = [
   { name: "recall_program_runs", description: "List program run history, optionally filtered to one program key or handle.", inputSchema: { type: "object", properties: { key: { type: "string" }, limit: { type: "number" } } } },
   { name: "recall_eval_run", description: "Run the default model-free eval suite; with derive:true, admit its witness as a keyed derived write.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
   { name: "recall_subgraph", description: "Tag-composed retrieval over active cells (AND across kinds/project/topics/entities/since; every listed value within an array family required), newest-updated first.", inputSchema: { type: "object", properties: { kinds: { type: "array", items: { type: "string" } }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } } } },
-  { name: "recall_health", description: "Memory health report: belief pressure, staleness, contradictions, dangling edges, and provenance concentration.", inputSchema: { type: "object", properties: {} } },
+  { name: "recall_health", description: "Memory health report: belief pressure, staleness, contradictions, dangling edges, and provenance concentration; with derive:true, admit a day-bucketed witness cell and report accepted/duplicateOf.", inputSchema: { type: "object", properties: { derive: { type: "boolean" } } } },
 ] as const;
 
 export function handleMcpRequest(request: JsonRpcRequest, store: Store): JsonRpcResponse | undefined {
@@ -281,7 +281,12 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       return JSON.stringify(cells);
     }
     case "recall_health": {
-      return JSON.stringify(analyzeMemory(store));
+      const now = new Date();
+      const report = analyzeMemory(store, now);
+      if (args.derive !== true) return JSON.stringify(report);
+      const proposal = memoryHealthToProposal(report, {});
+      const derived = deriveAdmit(store, proposal, memoryHealthDerivationKey(now), now.toISOString());
+      return JSON.stringify({ ...report, derived: { accepted: derived.accepted, duplicateOf: derived.duplicateOf } });
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

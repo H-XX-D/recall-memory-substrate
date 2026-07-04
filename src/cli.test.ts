@@ -1213,6 +1213,87 @@ test("health --derive admits an obs cell with concerns edges into the store", ()
   }
 });
 
+test("health --derive twice on the same day admits one witness cell; the second run reports duplicateOf", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const before = capture(["status", "--db", db]);
+    assert.equal(before.code, 0, before.stderr);
+    const cellsBefore = JSON.parse(before.stdout).stats.cells as number;
+
+    const first = capture(["health", "--derive", "--db", db], { now: "2026-07-03T09:00:00.000Z" });
+    assert.equal(first.code, 0, first.stderr);
+    const firstJson = JSON.parse(first.stdout);
+    assert.equal(firstJson.derive.accepted, true, JSON.stringify(firstJson));
+    assert.equal(firstJson.derive.duplicateOf, undefined);
+    assert.match(firstJson.derive.cell.key, /^drv_memory_health_[0-9a-f]{24}$/);
+
+    const afterFirst = capture(["status", "--db", db]);
+    const cellsAfterFirst = JSON.parse(afterFirst.stdout).stats.cells as number;
+    assert.equal(cellsAfterFirst, cellsBefore + 1);
+
+    const second = capture(["health", "--derive", "--db", db], { now: "2026-07-03T21:00:00.000Z" });
+    assert.equal(second.code, 0, second.stderr);
+    const secondJson = JSON.parse(second.stdout);
+    assert.equal(secondJson.derive.accepted, true, JSON.stringify(secondJson));
+    assert.match(secondJson.derive.duplicateOf, /^drv_memory_health_[0-9a-f]{24}$/);
+    assert.equal(secondJson.derive.cell.key, firstJson.derive.cell.key);
+
+    const afterSecond = capture(["status", "--db", db]);
+    const cellsAfterSecond = JSON.parse(afterSecond.stdout).stats.cells as number;
+    assert.equal(cellsAfterSecond, cellsAfterFirst);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("health --derive on a different day bucket admits a fresh witness cell", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const day1 = capture(["health", "--derive", "--db", db], { now: "2026-07-03T09:00:00.000Z" });
+    assert.equal(day1.code, 0, day1.stderr);
+    const day1Json = JSON.parse(day1.stdout);
+    assert.equal(day1Json.derive.accepted, true, JSON.stringify(day1Json));
+
+    const day2 = capture(["health", "--derive", "--db", db], { now: "2026-07-04T09:00:00.000Z" });
+    assert.equal(day2.code, 0, day2.stderr);
+    const day2Json = JSON.parse(day2.stdout);
+    assert.equal(day2Json.derive.accepted, true, JSON.stringify(day2Json));
+    assert.equal(day2Json.derive.duplicateOf, undefined);
+    assert.notEqual(day2Json.derive.cell.key, day1Json.derive.cell.key);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("health --derive with --project buckets the witness key separately per project", () => {
+  const tmp = tempDir();
+  try {
+    const env = { RECALL_HOME: join(tmp, "recall-home") } as NodeJS.ProcessEnv;
+    const alphaCwd = join(tmp, "alpha-repo");
+    const betaCwd = join(tmp, "beta-repo");
+
+    const initAlpha = capture(["project", "init", "--slug", "alpha"], { cwd: alphaCwd, env });
+    assert.equal(initAlpha.code, 0, initAlpha.stderr);
+    const initBeta = capture(["project", "init", "--slug", "beta"], { cwd: betaCwd, env });
+    assert.equal(initBeta.code, 0, initBeta.stderr);
+
+    const alpha = capture(["health", "--derive", "--project", "alpha"], { env, now: "2026-07-03T09:00:00.000Z" });
+    assert.equal(alpha.code, 0, alpha.stderr);
+    const alphaJson = JSON.parse(alpha.stdout);
+    assert.equal(alphaJson.derive.accepted, true, JSON.stringify(alphaJson));
+
+    const beta = capture(["health", "--derive", "--project", "beta"], { env, now: "2026-07-03T09:00:00.000Z" });
+    assert.equal(beta.code, 0, beta.stderr);
+    const betaJson = JSON.parse(beta.stdout);
+    assert.equal(betaJson.derive.accepted, true, JSON.stringify(betaJson));
+    assert.notEqual(betaJson.derive.cell.key, alphaJson.derive.cell.key);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("import auto-memory with an explicit --root imports the fixture tree", () => {
   const tmp = tempDir();
   const root = mkdtempSync(join(tmpdir(), "recall-v5-cli-auto-memory-"));

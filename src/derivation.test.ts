@@ -4,6 +4,7 @@ import {
   derivationHash,
   deriveAdmit,
   dagAnalysisToKeyedProposals,
+  memoryHealthDerivationKey,
   programRunDerivationKey,
   sortJson,
   stableJson,
@@ -180,6 +181,38 @@ test("programRunDerivationKey excludes id/createdAt: identical programKey+output
     output: { ...runA.output, tripped: false },
   };
   assert.notEqual(programRunDerivationKey(runA), programRunDerivationKey(runC));
+});
+
+test("memoryHealthDerivationKey buckets by day and matches the drv_memory_health_ prefix", () => {
+  const now = new Date("2026-07-03T08:00:00Z");
+  const key = memoryHealthDerivationKey(now, null);
+  assert.match(key, /^drv_memory_health_[0-9a-f]{24}$/);
+});
+
+test("memoryHealthDerivationKey is stable for two timestamps on the same day", () => {
+  const morning = new Date("2026-07-03T00:00:01Z");
+  const night = new Date("2026-07-03T23:59:59Z");
+  assert.equal(memoryHealthDerivationKey(morning, null), memoryHealthDerivationKey(night, null));
+});
+
+test("memoryHealthDerivationKey differs across day buckets", () => {
+  const day1 = new Date("2026-07-03T23:59:59Z");
+  const day2 = new Date("2026-07-04T00:00:00Z");
+  assert.notEqual(memoryHealthDerivationKey(day1, null), memoryHealthDerivationKey(day2, null));
+});
+
+test("memoryHealthDerivationKey buckets separately per project", () => {
+  const now = new Date("2026-07-03T08:00:00Z");
+  const noProject = memoryHealthDerivationKey(now, null);
+  const projectA = memoryHealthDerivationKey(now, "alpha");
+  const projectB = memoryHealthDerivationKey(now, "beta");
+  assert.notEqual(noProject, projectA);
+  assert.notEqual(projectA, projectB);
+});
+
+test("memoryHealthDerivationKey defaults project to null when omitted", () => {
+  const now = new Date("2026-07-03T08:00:00Z");
+  assert.equal(memoryHealthDerivationKey(now), memoryHealthDerivationKey(now, null));
 });
 
 function dagAnalysis(overrides: Partial<DagAnalysis> = {}): DagAnalysis {

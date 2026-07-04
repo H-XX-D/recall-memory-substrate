@@ -18,7 +18,7 @@ import { claudeSyncStatus, DEFAULT_AUTO_MEMORY_ROOT, runClaudeSync } from "./cla
 import { migrate } from "./migrate.js";
 import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
-import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
+import { dagAnalysisToKeyedProposals, deriveAdmit, memoryHealthDerivationKey } from "./derivation.js";
 import { runAndRecordEval, runEvalAndDerive, type RecallEvalSuite } from "./evals.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { importGlobalToLocal } from "./local-import.js";
@@ -504,8 +504,9 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       try {
         const now = options.now ? new Date(options.now) : new Date();
         const report = analyzeMemory(store, now);
-        const proposal = memoryHealthToProposal(report, { project: route.slug ?? args.project });
-        const derived = admit(proposal, { store, now: now.toISOString() });
+        const project = route.slug ?? args.project;
+        const proposal = memoryHealthToProposal(report, { project });
+        const derived = deriveAdmit(store, proposal, memoryHealthDerivationKey(now, project), now.toISOString());
         outJson(out, { report, derive: derived });
         return 0;
       } finally {
