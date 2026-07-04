@@ -250,7 +250,7 @@ function runCliFlow(bin, tempRoot, projectRoot, env) {
   assert.equal(reapplied.items[0].reason, "unchanged");
 
   const archive = runJson(bin, ["export", "--project", "accept"], { cwd: projectRoot, env });
-  assert.equal(archive.schemaVersion, "recall.cells.export.v1");
+  assert.equal(archive.schemaVersion, "recall.cells.export.v2");
   assert.ok(archive.cells.length >= 5);
   assert.ok(archive.cells.some((cell) => cell.key === key && cell.body === "The installed CLI wrote and retrieved this cell."));
 
