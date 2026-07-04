@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeClaudeSettings, recallHookGroups, upsertClaudeMcpServer } from "./claude-integration.js";
 
-const HOOK = "/Users/hendrixx./.claude/hooks/recall-session-start.py";
+const HOOK = "/home/user/.claude/hooks/recall-session-start.py";
 
 test("recallHookGroups wires SessionStart, prompt, and stop modes", () => {
   const groups = recallHookGroups(HOOK);
@@ -95,7 +95,7 @@ test("mergeClaudeSettings refreshes stale Recall hooks and preserves unrelated h
   assert.ok(sessionStart);
   assert.equal(sessionStart.length, 2);
   assert.match(JSON.stringify(sessionStart[0]!), /unrelated\.js/);
-  assert.match(JSON.stringify(sessionStart[1]!), /hendrixx/);
+  assert.match(JSON.stringify(sessionStart[1]!), /home\/user/);
   assert.doesNotMatch(JSON.stringify(sessionStart), /\/old\//);
 });
 

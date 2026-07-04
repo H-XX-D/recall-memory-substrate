@@ -68,6 +68,7 @@
     "test:acceptance": "node scripts/release-acceptance.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/cli.js dist/mcp-cli.js dist/stop-hook.js dist/prompt-hook.js",
+    "prepare": "npm run build",
     "release:check": "npm test && npm run typecheck && npm run build && npm run test:python && npm run test:acceptance && npm pack --dry-run",
     "prepack": "npm run build",
     "prepublishOnly": "npm run release:check"
