@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { admit } from "./admission.js";
+import { contentKey } from "./store.js";
 import type { AdmissionResult, Cell, Kind, Store, WriteProposal } from "./types.js";
 
 export const EXPORT_SCHEMA_VERSION = "recall.cells.export.v1";
@@ -183,6 +184,18 @@ export function importItems(
     }
 
     if (!apply) {
+      // Predict admission's content dedup without giving admit a store: a
+      // storeless admit call would let the placeholder `dry-run:<ref>`
+      // supersede targets reach store-aware edge resolution, which must
+      // never happen in dry-run. Probe findByContentKey directly instead.
+      const kind = proposal.kind as Kind;
+      const dupCandidate = store.findByContentKey(kind, contentKey(kind, proposal.title));
+      if (dupCandidate && dupCandidate.body === proposal.body) {
+        skipped += 1;
+        result.push({ ref: item.ref, action: "skip", reason: `content-duplicate of ${dupCandidate.key}` });
+        fingerprintsThisBatch.add(item.fingerprint);
+        continue;
+      }
       if (priorKeys.length > 0) {
         superseded += 1;
         result.push({ ref: item.ref, action: "supersede", supersedes: priorKeys });
@@ -203,6 +216,20 @@ export function importItems(
         action: "skip",
         reason: `rejected: ${admission.issues[0]?.message ?? "admission"}`,
       });
+      continue;
+    }
+    // Content dedup: admit() returned the pre-existing active cell as-is
+    // (before store.put and before the supersede loop ran) rather than
+    // admitting at the requested key. Nothing was written, so this must not
+    // be counted as create or supersede, and it must not enter
+    // admittedThisBatch or priors would be believed superseded when they
+    // are still active.
+    const isContentDuplicate =
+      admission.warnings.some((w) => w.startsWith("deduplicated:")) || admission.cell.key !== key;
+    if (isContentDuplicate) {
+      skipped += 1;
+      result.push({ ref: item.ref, action: "skip", reason: `content-duplicate of ${admission.cell.key}` });
+      fingerprintsThisBatch.add(item.fingerprint);
       continue;
     }
     admittedThisBatch.set(item.sourceTag, admission.cell.key);

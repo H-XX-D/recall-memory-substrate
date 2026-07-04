@@ -460,3 +460,114 @@ test("cell archives round-trip exact cells and edges", () => {
     target.close();
   }
 });
+
+test("a second source importing identical kind+title+body reports content-duplicate skip in both dry-run and apply, with matching counts", () => {
+  const now = "2026-06-26T12:00:00.000Z";
+  const first = importedRecordToItem(
+    { ref: "src-a-1", source: "mem0", title: "Shared Fact", body: "Exact same body across sources." },
+    now,
+  );
+  const second = importedRecordToItem(
+    { ref: "src-b-1", source: "zep", title: "Shared Fact", body: "Exact same body across sources." },
+    now,
+  );
+  assert.notEqual(first.fingerprint, second.fingerprint);
+
+  const applyStore = new SqliteStore(":memory:");
+  try {
+    const seed = importItems(applyStore, "mem0", [first], { apply: true, now });
+    assert.equal(seed.created, 1);
+    const firstKey = seed.items[0]?.cellKey;
+    assert.ok(firstKey);
+
+    const applied = importItems(applyStore, "zep", [second], { apply: true, now });
+    assert.equal(applied.created, 0);
+    assert.equal(applied.superseded, 0);
+    assert.equal(applied.skipped, 1);
+    assert.equal(applied.items[0]?.action, "skip");
+    assert.equal(applied.items[0]?.reason, `content-duplicate of ${firstKey}`);
+    assert.equal(applyStore.stats().cells, 1);
+    assert.equal(applyStore.get(firstKey!)?.status, "active");
+  } finally {
+    applyStore.close();
+  }
+
+  const dryStore = new SqliteStore(":memory:");
+  try {
+    const seed = importItems(dryStore, "mem0", [first], { apply: true, now });
+    const firstKey = seed.items[0]?.cellKey;
+    assert.ok(firstKey);
+
+    const dry = importItems(dryStore, "zep", [second], { apply: false, now });
+    assert.equal(dry.created, 0);
+    assert.equal(dry.superseded, 0);
+    assert.equal(dry.skipped, 1);
+    assert.equal(dry.items[0]?.action, "skip");
+    assert.equal(dry.items[0]?.reason, `content-duplicate of ${firstKey}`);
+  } finally {
+    dryStore.close();
+  }
+});
+
+test("a content-duplicate that also carries supersedesTags leaves the priors active and reports skip, not supersede", () => {
+  const now = "2026-06-26T12:00:00.000Z";
+  const store = new SqliteStore(":memory:");
+  try {
+    const prior = importedRecordToItem(
+      { ref: "prior-1", source: "mem0", title: "Prior Fact", body: "Prior fact body.", sourceTag: "PRIOR" },
+      now,
+    );
+    const seed = importItems(store, "mem0", [prior], { apply: true, now });
+    const priorKey = seed.items[0]?.cellKey;
+    assert.ok(priorKey);
+
+    const dup = importedRecordToItem(
+      { ref: "dup-1", source: "mem0", title: "Prior Fact", body: "Prior fact body.", supersedesTags: ["PRIOR"] },
+      now,
+    );
+    const result = importItems(store, "mem0", [dup], { apply: true, now });
+    assert.equal(result.items[0]?.action, "skip");
+    assert.equal(result.items[0]?.reason, `content-duplicate of ${priorKey}`);
+    assert.equal(result.superseded, 0);
+    assert.equal(store.get(priorKey!)?.status, "active");
+    assert.equal(store.active().length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("re-running an import whose record is a content-duplicate is stable across repeated runs (no flapping)", () => {
+  const now = "2026-06-26T12:00:00.000Z";
+  const store = new SqliteStore(":memory:");
+  try {
+    const first = importedRecordToItem(
+      { ref: "stable-a", source: "mem0", title: "Stable Fact", body: "Stable body." },
+      now,
+    );
+    const seed = importItems(store, "mem0", [first], { apply: true, now });
+    const firstKey = seed.items[0]?.cellKey;
+    assert.ok(firstKey);
+
+    const second = importedRecordToItem(
+      { ref: "stable-b", source: "zep", title: "Stable Fact", body: "Stable body." },
+      now,
+    );
+
+    const run1 = importItems(store, "zep", [second], { apply: true, now: "2026-06-26T12:01:00.000Z" });
+    assert.equal(run1.items[0]?.action, "skip");
+    assert.equal(run1.items[0]?.reason, `content-duplicate of ${firstKey}`);
+    assert.equal(store.stats().cells, 1);
+
+    const run2 = importItems(store, "zep", [second], { apply: true, now: "2026-06-26T12:02:00.000Z" });
+    assert.equal(run2.items[0]?.action, "skip");
+    assert.equal(run2.items[0]?.reason, `content-duplicate of ${firstKey}`);
+    assert.equal(store.stats().cells, 1);
+
+    const run3 = importItems(store, "zep", [second], { apply: true, now: "2026-06-26T12:03:00.000Z" });
+    assert.equal(run3.items[0]?.action, "skip");
+    assert.equal(run3.items[0]?.reason, `content-duplicate of ${firstKey}`);
+    assert.equal(store.stats().cells, 1);
+  } finally {
+    store.close();
+  }
+});
