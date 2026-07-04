@@ -46,6 +46,19 @@ export interface MaintainResult {
   reindexed: number;
 }
 
+// A dedicated variant for a graph whose store never opened at all, kept
+// separate from MaintainResult rather than making the four engine legs
+// optional there: existing consumers and tests narrow those legs with
+// `"ticked" in result.operator` and similar, which requires operator/eval/
+// health/reindexed to stay present on MaintainResult. A graph with an
+// openError has no store to run any leg against, so it gets this shape
+// instead of a MaintainResult with fabricated leg values.
+export interface MaintainOpenError {
+  graph: string;
+  dbPath: string;
+  openError: string;
+}
+
 // Runs the fixed engine order (operator -> eval -> health -> reindex) over a
 // single store, each leg isolated so one engine's failure cannot prevent the
 // others from running. reindexed defaults to 0 when its own leg throws,
@@ -110,20 +123,29 @@ export function maintainStore(store: SqliteStore, graph: string, now: Date): Mai
 
 // Iterates localGraphPaths (home plus every registered project), deduped by
 // resolved path, opening and closing a SqliteStore per graph. A single
-// graph's store failing to open aborts the whole call (there is nothing
-// meaningful to report for that graph without a store): the per-leg error
-// capture inside maintainStore only covers the four engines, not the open
-// itself.
-export function maintainAll(env: NodeJS.ProcessEnv, now: Date): MaintainResult[] {
+// graph's store failing to open no longer aborts the whole call: the open
+// itself is wrapped in its own try/catch, distinct from the per-leg error
+// capture inside maintainStore (which only covers the four engines once a
+// store is already open). On an open failure this pushes a result carrying
+// openError and moves on to the next graph, so one corrupt or locked project
+// database cannot take down maintenance for every other graph, home
+// included, in an unattended sweep.
+export function maintainAll(env: NodeJS.ProcessEnv, now: Date): Array<MaintainResult | MaintainOpenError> {
   const graphs = localGraphPaths(env);
   const seen = new Set<string>();
-  const results: MaintainResult[] = [];
+  const results: Array<MaintainResult | MaintainOpenError> = [];
   for (const { graph, path } of graphs) {
     const resolved = resolve(path);
     if (seen.has(resolved)) continue;
     seen.add(resolved);
 
-    const store = new SqliteStore(path);
+    let store: SqliteStore;
+    try {
+      store = new SqliteStore(path);
+    } catch (error) {
+      results.push({ graph, dbPath: path, openError: errorMessage(error) });
+      continue;
+    }
     try {
       results.push(maintainStore(store, graph, now));
     } finally {

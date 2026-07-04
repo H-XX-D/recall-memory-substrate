@@ -647,6 +647,10 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
     // maintain always derives: there is no --no-derive flag, since deriving
     // (operator + eval + health witnesses) is the whole purpose of a
     // maintenance pass, not an optional extra.
+    // Note: --db <path> without --project leaves route.slug undefined, so the
+    // single-store branch below runs as graph "home" and binds the health
+    // witness's project bucket to null, not to whatever project actually
+    // owns that db file.
     if (command === "maintain") {
       const now = options.now ? new Date(options.now) : new Date();
       if (args.allGraphs) {

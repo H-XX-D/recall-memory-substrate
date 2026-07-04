@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maintainAll, maintainStore } from "./maintain.js";
@@ -176,7 +176,58 @@ test("maintainAll iterates localGraphPaths across two temp graphs, dedups by res
     const graphs = results.map((r) => r.graph).sort();
     assert.deepEqual(graphs, ["home", "repoa", "repob"]);
     for (const r of results) {
-      assert.equal(typeof r.reindexed, "number");
+      assert.ok(!("openError" in r));
+      if (!("openError" in r)) {
+        assert.equal(typeof r.reindexed, "number");
+      }
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("maintainAll continues past a graph whose store fails to open, and still fully maintains the rest", () => {
+  const tmp = tempDir();
+  try {
+    const recallHome = join(tmp, "recall-home");
+    const registry = join(recallHome, "db", "home.sqlite3");
+
+    // The registry (home.sqlite3) has to stay a valid, openable sqlite file:
+    // it is both the home graph's own store and the project list that
+    // listProjects reads back out. Corrupting that one shared file would
+    // blind localGraphPaths to every registered project too, not just fail
+    // to open home's own store, which would be a different (and worse, out
+    // of scope) failure mode than the one this fix addresses. So the
+    // directory-in-place-of-a-file goes on the registered project's own db
+    // path instead: repoA is the first (and, in this two-graph registry,
+    // only) db path the sweep has to open after home, so it stands in for
+    // "the first db path" the sweep can actually fail on without destroying
+    // the registry it read the graph list from.
+    const repoADbPath = join(recallHome, "db", "repoA.sqlite3");
+    registerProject({ root: join(tmp, "repoA"), dbPath: repoADbPath }, NOW.toISOString(), registry);
+    mkdirSync(repoADbPath, { recursive: true });
+
+    const env = { RECALL_HOME: recallHome } as NodeJS.ProcessEnv;
+    const results = maintainAll(env, NOW);
+
+    assert.equal(results.length, 2);
+    const [home, repoA] = results;
+    assert.ok(home && repoA);
+
+    assert.equal(home.graph, "home");
+    assert.ok(!("openError" in home));
+    if (!("openError" in home)) {
+      assert.ok("ticked" in home.operator);
+      assert.ok("passed" in home.eval || "error" in home.eval);
+      assert.ok("accepted" in home.health || "error" in home.health);
+      assert.equal(typeof home.reindexed, "number");
+    }
+
+    assert.equal(repoA.graph, "repoa");
+    assert.equal(repoA.dbPath, repoADbPath);
+    assert.ok("openError" in repoA);
+    if ("openError" in repoA) {
+      assert.equal(typeof repoA.openError, "string");
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
