@@ -258,13 +258,14 @@ test("import mem0 where every record is rejected exits 1 with the summary on std
   try {
     const db = join(tmp, "recall.sqlite3");
     const mem0Path = join(tmp, "mem0.json");
-    // A GitHub-token-shaped string trips screenSecrets, which admit() always
-    // rejects regardless of store state: a deterministic, store-independent
-    // rejection.
+    // A memory that lands exactly on its template instruction trips the
+    // fill-or-reject rule: a deterministic, store-independent rejection.
+    // (Credential-shaped strings no longer reject; they import flagged as
+    // sensitivity: secret.)
     writeFileSync(
       mem0Path,
       JSON.stringify({
-        memories: [{ id: "m1", memory: "leaked token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+        memories: [{ id: "m1", memory: "non-empty: the claim, the evidence, and the reasoning" }],
       }),
     );
 
@@ -286,15 +287,15 @@ test("import mem0 with a mixed batch (one clean, one rejected) exits 0 and print
   try {
     const db = join(tmp, "recall.sqlite3");
     const mem0Path = join(tmp, "mem0.json");
-    // One record admits cleanly; the other carries a GitHub-token-shaped
-    // string that trips screenSecrets and is always rejected. With at least
+    // One record admits cleanly; the other lands exactly on its template
+    // instruction and is always rejected by fill-or-reject. With at least
     // one record landed, the run should still exit 0.
     writeFileSync(
       mem0Path,
       JSON.stringify({
         memories: [
           { id: "m1", memory: "CLI imported memory." },
-          { id: "m2", memory: "leaked token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+          { id: "m2", memory: "non-empty: the claim, the evidence, and the reasoning" },
         ],
       }),
     );

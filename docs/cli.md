@@ -206,8 +206,10 @@ schema without writing anything. Prints `{ ok, issues }` and exits 0 if
 valid, 1 if not. Pass `-` to read the proposal from stdin.
 
 **`recall admit --json proposal.json`** (alias: **`recall write-propose`**)
-validates, screens for secrets, and
-if accepted, writes the cell. Prints the admission result (accepted cell, or
+validates and, if accepted, writes the cell. Credential-shaped strings do
+not block the write: the cell is marked `sensitivity: secret` and the
+result carries a warning naming the token type (see the safety practices
+in [overview.md](overview.md)). Prints the admission result (accepted cell, or
 issues/warnings if rejected) and exits 0 if accepted, 1 if rejected. Pass
 `-` to read the proposal from stdin. A proposal built from the write
 template must replace every field's instruction text: admission rejects any

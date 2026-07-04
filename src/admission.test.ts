@@ -23,11 +23,25 @@ test("admit rejects a schema-invalid proposal and builds no cell", () => {
   assert.ok(r.issues.some((i) => i.path === "kind"));
 });
 
-test("admit rejects a proposal carrying a secret and builds no cell", () => {
+test("admit accepts a proposal carrying a secret, marks it sensitivity secret, and warns", () => {
   const r = admit({ ...base, body: "token sk-abcdEFGH1234567890ijklMNOP stored" });
-  assert.equal(r.accepted, false);
-  assert.equal(r.cell, undefined);
-  assert.ok(r.issues.some((i) => /OpenAI/i.test(i.message)));
+  assert.equal(r.accepted, true);
+  assert.equal(r.cell!.policy.sensitivity, "secret");
+  assert.ok(r.warnings.some((w) => /OpenAI/i.test(w) && /sensitivity: secret/.test(w)));
+});
+
+test("a public write carrying personal data is downgraded to private with a warning", () => {
+  const r = admit({ ...base, sensitivity: "public", body: "contact ada@example.com for details" });
+  assert.equal(r.accepted, true);
+  assert.equal(r.cell!.policy.sensitivity, "private");
+  assert.ok(r.warnings.some((w) => /email/i.test(w) && /downgraded to private/.test(w)));
+});
+
+test("an explicit sensitivity secret write passes without secret warnings", () => {
+  const r = admit({ ...base, sensitivity: "secret", body: "token sk-abcdEFGH1234567890ijklMNOP stored" });
+  assert.equal(r.accepted, true);
+  assert.equal(r.cell!.policy.sensitivity, "secret");
+  assert.ok(!r.warnings.some((w) => /marked sensitivity/.test(w)), "already-secret writes need no marking warning");
 });
 
 test("admit attenuates unsupported high confidence and warns", () => {

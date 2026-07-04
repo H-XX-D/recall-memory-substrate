@@ -47,7 +47,17 @@ The accepted result is the full cell; the complete proposal field list is in [cl
 
 ## The gate argues back
 
-Every write enters through this one gate. It validates the schema, screens all text fields for credential patterns, deduplicates identical content, rejects edges pointing at cells that do not exist, applies confidence attenuation when a claim is stated more strongly than its evidence supports, and processes supersede chains. There is no path around it except restoring a portable archive.
+Every write enters through this one gate. It validates the schema, deduplicates identical content, rejects edges pointing at cells that do not exist, applies confidence attenuation when a claim is stated more strongly than its evidence supports, and processes supersede chains. There is no path around it except restoring a portable archive.
+
+Credential patterns get flagged, not blocked: a write whose text looks like a key or token is accepted, automatically marked `sensitivity: secret`, and answered with a warning naming the token type and field. A `public` write carrying personal data (an email address, a phone number) is downgraded to `private` the same way. The gate is a tripwire, not encryption; the durable protection is the safety practices below.
+
+### Safety practices
+
+Recall stores are plain SQLite files. Everything a cell carries, including anything flagged secret, is stored in readable text on your disk. Three habits keep that safe:
+
+- Keep stores out of version control. The default location `~/.recall/db/` never enters a repo; if you place a store inside a project (`recall project init --db ./memory.sqlite3`), add it to `.gitignore` first: `*.sqlite3` and `.recall/` cover the defaults.
+- Treat archives like the store. `recall export` writes every cell's full text to one JSON file; anything flagged secret travels with it. Do not commit archives or attach them to issues.
+- Prefer references over values. The memory that matters is usually that a credential exists and where it lives (`the deploy key is in 1Password under infra`), not the value itself. Real secrets belong in a secret manager or environment variable; write the pointer into Recall, not the key.
 
 The write above claimed 0.9 with no evidence, so the gate capped it at 0.7 and answered with an `evidenceHint` naming what keeps higher confidence: a `verification` level, `sourceRefs`, or a weighted `supports` edge. Satisfy it:
 

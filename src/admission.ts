@@ -2,7 +2,7 @@
 // cell. Sequences the store-free checks and assembles the verdict.
 //
 //   validate (R0 schema)  -> reject on any structural issue
-//   screenSecrets         -> reject if a credential pattern is present
+//   screenFindings        -> flag credentials (sensitivity: secret) and downgrade exposed public writes
 //   attenuateConfidence   -> cap unsupported high confidence
 //   buildCell (R0)        -> scaffold the full cell from the attenuated proposal
 //   calibrate             -> fold the actor's track record into effective
@@ -12,7 +12,7 @@
 
 import { validateProposal } from "./schema.js";
 import { templateIssues } from "./template.js";
-import { screenSecrets, attenuateConfidence } from "./firewall.js";
+import { screenFindings, attenuateConfidence } from "./firewall.js";
 import { buildCell } from "./build.js";
 import { effectiveConfidence } from "./scores.js";
 import { neighborMass } from "./mass.js";
@@ -36,9 +36,24 @@ export function admit(
     return { accepted: false, issues: validation.issues, warnings: [], attenuations: [] };
   }
 
-  const screen = screenSecrets(proposal);
-  if (!screen.allowed) {
-    return { accepted: false, issues: screen.issues, warnings: [], attenuations: [] };
+  // Credential and personal-data findings flag, never block: this is a local
+  // single-user store, and a note ABOUT a key is legitimate memory. Detected
+  // secrets force sensitivity: secret; personal data in a public write
+  // downgrades it to private. Both are reported as warnings.
+  const screen = screenFindings(proposal);
+  const screenWarnings: string[] = [];
+  if (screen.secrets.length > 0) {
+    if (proposal.sensitivity !== "secret") {
+      proposal = { ...proposal, sensitivity: "secret" };
+      for (const f of screen.secrets) {
+        screenWarnings.push(`${f.message} in ${f.path}; cell marked sensitivity: secret`);
+      }
+    }
+  } else if (screen.publicData.length > 0) {
+    proposal = { ...proposal, sensitivity: "private" };
+    for (const f of screen.publicData) {
+      screenWarnings.push(`${f.message} (${f.path}); sensitivity downgraded to private`);
+    }
   }
 
   // Fill-or-reject: any field still equal to its template description was never
@@ -121,7 +136,7 @@ export function admit(
       }
     });
     if (unresolved.length > 0) {
-      return { accepted: false, issues: unresolved, warnings: att.warnings, attenuations };
+      return { accepted: false, issues: unresolved, warnings: [...screenWarnings, ...att.warnings], attenuations };
     }
     cell.programs = watchingPrograms;
 
@@ -132,7 +147,7 @@ export function admit(
         accepted: true,
         cell: dup,
         issues: [],
-        warnings: [...att.warnings, "deduplicated: identical active cell exists"],
+        warnings: [...screenWarnings, ...att.warnings, "deduplicated: identical active cell exists"],
         attenuations,
       };
     }
@@ -216,7 +231,7 @@ export function admit(
     accepted: true,
     cell,
     issues: [],
-    warnings: [...att.warnings, ...relWarnings],
+    warnings: [...screenWarnings, ...att.warnings, ...relWarnings],
     attenuations,
   };
 }

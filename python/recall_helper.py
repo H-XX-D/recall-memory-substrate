@@ -66,8 +66,6 @@ def build_proposal(
         raise ValueError("title must be non-empty")
     if not (0 < confidence <= 1):
         raise ValueError("confidence must be in (0, 1]")
-    if sensitivity == "secret":
-        raise ValueError("normal Recall proposals must not store secrets; use the encrypted side store")
 
     proposal: dict[str, Any] = {
         "kind": kind,

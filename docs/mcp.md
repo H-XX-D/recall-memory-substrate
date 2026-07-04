@@ -275,9 +275,10 @@ Example call: `{ "kinds": ["bel", "rsk"], "topics": ["storage"], "limit": 10 }`
 ### recall_write
 
 Admits a durable write proposal through the admission gate: schema
-validation, secret screening, confidence attenuation, cell construction, and
-(with a store) dedup, supersede, and effective-confidence recalculation from
-graph mass.
+validation, confidence attenuation, cell construction, and (with a store)
+dedup, supersede, and effective-confidence recalculation from graph mass.
+Credential-shaped strings never block a write; the cell is marked
+`sensitivity: secret` and the response warns, naming the token type.
 
 Parameters:
 - `kind` (string, required): one of `dec`, `obs`, `bel`, `tsk`, `obj`,
