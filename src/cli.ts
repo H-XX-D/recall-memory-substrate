@@ -26,6 +26,7 @@ import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { importGlobalToLocal } from "./local-import.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
+import { buildWriteGuidance } from "./guidance.js";
 import { FederatedReadStore } from "./federated-store.js";
 import { runOperatorCycle } from "./operator.js";
 import { runProgramCell } from "./programs.js";
@@ -96,6 +97,8 @@ interface ParsedArgs {
   keepAutoMemory: boolean;
   writeGate: boolean;
   allGraphs: boolean;
+  suggestPrograms: boolean;
+  noGuidance: boolean;
   intervalMin?: number;
 }
 
@@ -187,7 +190,15 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const store = openWriteStore(route.dbPath);
       try {
         const result = admit(proposal, { store, now: options.now });
-        outJson(out, result);
+        if (result.accepted && result.cell && !args.noGuidance) {
+          const suggest = args.suggestPrograms || env.RECALL_SUGGEST_PROGRAMS === "1";
+          outJson(out, {
+            ...result,
+            guidance: buildWriteGuidance(store, result.cell, result, { suggestPrograms: suggest }),
+          });
+        } else {
+          outJson(out, result);
+        }
         return result.accepted ? 0 : 1;
       } finally {
         store.close();
@@ -733,6 +744,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     keepAutoMemory: false,
     writeGate: false,
     allGraphs: false,
+    suggestPrograms: false,
+    noGuidance: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -759,6 +772,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--keep-automemory") parsed.keepAutoMemory = true;
     else if (arg === "--write-gate") parsed.writeGate = true;
     else if (arg === "--all-graphs") parsed.allGraphs = true;
+    else if (arg === "--suggest-programs") parsed.suggestPrograms = true;
+    else if (arg === "--no-guidance") parsed.noGuidance = true;
     else if (arg === "--interval-min") parsed.intervalMin = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--limit") {
@@ -1013,7 +1028,9 @@ Commands:
   recall service status
   recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json
-  recall admit --json proposal.json [--db path] [--project slug]
+  recall admit --json proposal.json [--suggest-programs] [--no-guidance] [--db path] [--project slug]
+      --suggest-programs  include standing-program suggestions in guidance
+      --no-guidance       omit the guidance block
   recall version
 `;
 }

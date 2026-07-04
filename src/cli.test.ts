@@ -1569,6 +1569,190 @@ test("service install --interval-min honors a custom interval", () => {
   }
 });
 
+test("admit output includes guidance with candidate edges by default", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const seedPath = join(tmp, "seed.json");
+    writeFileSync(
+      seedPath,
+      JSON.stringify({
+        kind: "bel",
+        title: "WAL checkpoints stall under heavy write load",
+        body: "Claim to verify.",
+        confidence: 0.6,
+        topics: ["storage"],
+      }),
+    );
+    const seeded = capture(["admit", "--json", seedPath, "--db", db], { now: "2026-07-04T12:00:00.000Z" });
+    assert.equal(seeded.code, 0, seeded.stderr);
+
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "WAL mode kept readers unblocked during bulk import",
+        body: "Measured on the event store.",
+        confidence: 0.6,
+        topics: ["storage"],
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--db", db], { now: "2026-07-04T12:01:00.000Z" });
+    assert.equal(admitted.code, 0, admitted.stderr);
+    const parsed = JSON.parse(admitted.stdout);
+    assert.equal(parsed.accepted, true);
+    assert.ok(parsed.guidance, "expected a guidance field");
+    assert.ok(parsed.guidance.candidateEdges.length >= 1);
+    assert.deepEqual(parsed.guidance.programSuggestions, []);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("admit --no-guidance omits the guidance field", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "guidance suppressed cell",
+        body: "Admitted with --no-guidance.",
+        confidence: 0.6,
+        topics: ["storage"],
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--no-guidance", "--db", db], {
+      now: "2026-07-04T12:00:00.000Z",
+    });
+    assert.equal(admitted.code, 0, admitted.stderr);
+    const parsed = JSON.parse(admitted.stdout);
+    assert.equal(parsed.accepted, true);
+    assert.ok(!("guidance" in parsed));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("admit --suggest-programs surfaces program suggestions", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    for (let i = 0; i < 5; i++) {
+      const seedPath = join(tmp, `seed-${i}.json`);
+      writeFileSync(
+        seedPath,
+        JSON.stringify({
+          kind: "obs",
+          title: `latency obs number ${i}`,
+          body: `cell ${i}`,
+          confidence: 0.6,
+          topics: ["latency"],
+        }),
+      );
+      const seeded = capture(["admit", "--json", seedPath, "--db", db], { now: "2026-07-04T12:00:00.000Z" });
+      assert.equal(seeded.code, 0, seeded.stderr);
+    }
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "latency spike observed again",
+        body: "b",
+        confidence: 0.6,
+        topics: ["latency"],
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--suggest-programs", "--db", db], {
+      now: "2026-07-04T12:01:00.000Z",
+    });
+    assert.equal(admitted.code, 0, admitted.stderr);
+    const parsed = JSON.parse(admitted.stdout);
+    const watch = parsed.guidance.programSuggestions.find(
+      (s: { operation: string }) => s.operation === "watch",
+    );
+    assert.ok(watch, "expected a watch suggestion");
+    assert.equal(watch.proposal.kind, "prg");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("RECALL_SUGGEST_PROGRAMS=1 enables suggestions without the flag", () => {
+  const tmp = tempDir();
+  const previous = process.env.RECALL_SUGGEST_PROGRAMS;
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    for (let i = 0; i < 5; i++) {
+      const seedPath = join(tmp, `seed-${i}.json`);
+      writeFileSync(
+        seedPath,
+        JSON.stringify({
+          kind: "obs",
+          title: `latency obs number ${i}`,
+          body: `cell ${i}`,
+          confidence: 0.6,
+          topics: ["latency"],
+        }),
+      );
+      const seeded = capture(["admit", "--json", seedPath, "--db", db], { now: "2026-07-04T12:00:00.000Z" });
+      assert.equal(seeded.code, 0, seeded.stderr);
+    }
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "latency spike observed again",
+        body: "b",
+        confidence: 0.6,
+        topics: ["latency"],
+      }),
+    );
+    process.env.RECALL_SUGGEST_PROGRAMS = "1";
+    const admitted = capture(["admit", "--json", proposalPath, "--db", db], { now: "2026-07-04T12:01:00.000Z" });
+    assert.equal(admitted.code, 0, admitted.stderr);
+    const parsed = JSON.parse(admitted.stdout);
+    const watch = parsed.guidance.programSuggestions.find(
+      (s: { operation: string }) => s.operation === "watch",
+    );
+    assert.ok(watch, "expected a watch suggestion via the env var");
+  } finally {
+    if (previous === undefined) delete process.env.RECALL_SUGGEST_PROGRAMS;
+    else process.env.RECALL_SUGGEST_PROGRAMS = previous;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("rejected admits carry no guidance", () => {
+  const tmp = tempDir();
+  try {
+    const db = join(tmp, "recall.sqlite3");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "dangling edge proposal",
+        body: "Edge target does not exist.",
+        confidence: 0.6,
+        edges: [{ relation: "supports", target: "no-such-cell" }],
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--db", db], { now: "2026-07-04T12:00:00.000Z" });
+    assert.equal(admitted.code, 1);
+    const parsed = JSON.parse(admitted.stdout);
+    assert.equal(parsed.accepted, false);
+    assert.ok(!("guidance" in parsed));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 function capture(
   argv: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; now?: string } = {},
