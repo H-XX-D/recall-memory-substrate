@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,6 +120,52 @@ test("a second stop endcap run with unchanged output admits nothing new", () => 
     } finally {
       after.close();
     }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("with RECALL_HOME set and no RECALL_DB the stop hook resolves the store under RECALL_HOME", () => {
+  const tmp = tempDir();
+  try {
+    // The store lives under <RECALL_HOME>/db/home.sqlite3. HOME points at an
+    // empty directory: if the hook still derived the db from HOME it would
+    // find no store there (fail open, admit nothing) instead of running the
+    // endcap against the RECALL_HOME store.
+    const recallHome = join(tmp, "rhome");
+    const fakeHome = join(tmp, "fakehome");
+    mkdirSync(join(recallHome, "db"), { recursive: true });
+    mkdirSync(fakeHome, { recursive: true });
+    const dbPath = join(recallHome, "db", "home.sqlite3");
+    seedEmitWitnessProgram(dbPath);
+
+    const stateDir = join(tmp, "state");
+    mkdirSync(stateDir, { recursive: true });
+    const statePath = join(stateDir, "sess-rhome.json");
+    writeFileSync(statePath, JSON.stringify({ turnStart: "2000-01-01T00:00:00.000Z" }));
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      RECALL_HOME: recallHome,
+      RECALL_STOP_STATE: statePath,
+      HOME: fakeHome,
+    };
+    delete env.RECALL_DB;
+
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      { input: JSON.stringify({ session_id: "sess-rhome" }), encoding: "utf8", env },
+    );
+    assert.equal(result.status, 0, result.stderr);
+
+    const after = new SqliteStore(dbPath);
+    try {
+      assert.equal(after.stats().activeCells, 3); // witness admitted into the RECALL_HOME store
+    } finally {
+      after.close();
+    }
+    assert.equal(existsSync(join(fakeHome, ".recall")), false); // nothing written under $HOME
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

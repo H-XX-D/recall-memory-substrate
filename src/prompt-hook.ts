@@ -1,4 +1,4 @@
-#!/usr/bin/env -S npx tsx
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 // v5 UserPromptSubmit hook (node). Stamps the turn-start timestamp so the Stop
 // gate can tell whether a durable write happened THIS turn (any cell created
 // at/after turnStart). Injects nothing; it is purely the marker stamp half of

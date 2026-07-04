@@ -1,4 +1,4 @@
-#!/usr/bin/env -S npx tsx
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 // v5 Stop hook (node). On the Stop event it asks the store whether a durable cell
 // was created THIS turn (created at/after the turn-start timestamp that the
 // UserPromptSubmit hook stamped). If yes, it releases and runs the endcap
@@ -12,6 +12,7 @@ import { stdin, stdout, env } from "node:process";
 import { stopHookResponse } from "./stop.js";
 import { SqliteStore } from "./store.js";
 import { runOperatorCycle } from "./operator.js";
+import { homeDbPath } from "./routing.js";
 
 function markerPath(sessionId: string | undefined): string {
   return env.RECALL_STOP_STATE || (sessionId && env.HOME ? `${env.HOME}/.recall/state/stop/${sessionId}.json` : "");
@@ -26,7 +27,9 @@ function turnStart(sessionId: string | undefined): string | undefined {
   }
 }
 function dbPath(): string {
-  return env.RECALL_DB ?? (env.HOME ? `${env.HOME}/.recall/db/home.sqlite3` : "");
+  // RECALL_DB overrides; otherwise the RECALL_HOME-derived home store, which
+  // itself falls back to the HOME-derived ~/.recall/db/home.sqlite3.
+  return env.RECALL_DB ?? homeDbPath(env);
 }
 function wroteSince(store: SqliteStore, since: string | undefined): boolean {
   if (!since) return false; // no turn-start marker => fail closed (hold)
