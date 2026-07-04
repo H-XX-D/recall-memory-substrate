@@ -16,6 +16,7 @@ export * from "./derivation.js";
 export * from "./evals.js";
 export * from "./federated-store.js";
 export * from "./firewall.js";
+export * from "./guidance.js";
 export * from "./hyperedges.js";
 export * from "./local-import.js";
 export * from "./maintain.js";
