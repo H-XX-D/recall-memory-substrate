@@ -329,6 +329,37 @@ test("default trend tracks effective_confidence when no measure is given", () =>
   assert.equal(run.output.measure, "effective_confidence");
 });
 
+// (allocation-pressure) `addf allocate tick [kinds: tsk] [limit: 8]` authors a
+// working standing program purely because PROGRAM_OPERATIONS gained "allocate";
+// no netlist.ts change was needed for this to parse and schedule.
+test("addf allocate tick authors a working allocation-pressure program", () => {
+  const store = new SqliteStore();
+  const m = admit(
+    { kind: "tsk", title: "backlog item", body: "b", confidence: 0.7 },
+    { key: "t1", store, now: NOW },
+  );
+  store.put(m.cell!);
+  const res = loadNetlist(parseNetlist("addf allocate tick [kinds: tsk] [limit: 8]").nodes, store, "merge");
+  assert.equal(res.programsCreated.length, 1);
+  assert.equal(res.programsCreated[0]!.operation, "allocate");
+
+  // [limit: 8] maps onto ProgramTarget.limit (member-selection cap), the same
+  // as every other op; there is no netlist bracket for allocate's own
+  // params.limit (the ranked/selected slice size), which just defaults to 8.
+  const spec = store.active().find((c) => c.kind === "prg")!.props.program as {
+    operation: string;
+    target: { kinds: string[]; limit: number };
+  };
+  assert.equal(spec.operation, "allocate");
+  assert.deepEqual(spec.target.kinds, ["tsk"]);
+  assert.equal(spec.target.limit, 8);
+
+  const run = runStandingPrograms(store, NOW).runs.find((r) => r.operation === "allocate");
+  assert.ok(run, "the allocate program ran");
+  assert.equal(run!.output.memberCount, 1);
+  assert.ok(run!.output.witness, "allocate always emits a witness");
+});
+
 // (wire/schedule) connect compiled-in ops -> acknowledged; unknown names -> unsupported
 test("loadNetlist acknowledges net/addf for known ops and flags unknown ones", () => {
   const text = [

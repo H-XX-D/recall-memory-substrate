@@ -495,3 +495,194 @@ test("a program with target.hyperedge selects exactly the hyperedge members, and
     store.close();
   }
 });
+
+// ---------- allocate (allocation-pressure) ----------
+
+function allocateProgram(key: string, params?: Record<string, unknown>) {
+  return buildCell(
+    {
+      kind: "prg",
+      title: "Allocation pressure across the backlog",
+      body: "allocate program",
+      confidence: 0.9,
+      props: {
+        program: {
+          schemaVersion: "recall.program.v1",
+          operation: "allocate",
+          params,
+        },
+      },
+    },
+    { key },
+  );
+}
+
+function taskCell(key: string, title: string, confidence: number, work?: Record<string, unknown>) {
+  return buildCell(
+    {
+      kind: "tsk",
+      title,
+      body: title,
+      confidence,
+      props: work ? { work } : undefined,
+    },
+    { key },
+  );
+}
+
+test("executeProgram allocate: fully specified props.work pins the exact hand-computed score", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000001");
+  const member = taskCell("aaaaaaaa-a000-a000-a000-000000000001", "Full props task", 0.8, {
+    impact: 0.7,
+    uncertainty: 0.6,
+    concern: 0.5,
+    dependencyWeight: 0.8,
+    reversibility: 0.4,
+    novelty: 0.9,
+    cost: 0.5,
+  });
+  const run = executeProgram(program, [member], "2026-07-03T12:00:00.000Z");
+  assert.equal(run.output.operation, "allocate");
+  const ranked = run.output.ranked as { key: string; score: number; rationale: string[] }[];
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0]!.score, 2.548);
+  assert.equal(ranked[0]!.rationale.length, 7);
+  assert.deepEqual(ranked[0]!.rationale, [
+    "impact=0.7",
+    "uncertainty=0.6",
+    "concern=0.5",
+    "dependencyWeight=0.8",
+    "reversibility=0.4",
+    "novelty=0.9",
+    "cost=0.5",
+  ]);
+});
+
+test("executeProgram allocate: bare tsk cell (no props.work) uses live scores for uncertainty/concern and legacy defaults elsewhere", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000002");
+  const member = taskCell("aaaaaaaa-a000-a000-a000-000000000002", "Bare task", 0.8);
+  // confidence 0.8 -> scores.uncertainty = round3(0.2*0.7) = 0.14, scores.concern = round3(0.2*0.3) = 0.06
+  assert.equal(member.scores.uncertainty, 0.14);
+  assert.equal(member.scores.concern, 0.06);
+
+  const run = executeProgram(program, [member], "2026-07-03T12:00:00.000Z");
+  const ranked = run.output.ranked as { key: string; score: number; rationale: string[] }[];
+  assert.equal(ranked[0]!.score, 0.375);
+  assert.deepEqual(ranked[0]!.rationale, [
+    "impact=0.5",
+    "uncertainty=0.14",
+    "concern=0.06",
+    "dependencyWeight=0.5",
+    "reversibility=0.5",
+    "novelty=0.3",
+    "cost=0.5",
+  ]);
+});
+
+test("executeProgram allocate: cost floors at 0.05 even when props.work.cost is lower", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000003");
+  const member = taskCell("aaaaaaaa-a000-a000-a000-000000000003", "Cheap task", 0.8, { cost: 0.01 });
+  const run = executeProgram(program, [member], "2026-07-03T12:00:00.000Z");
+  const ranked = run.output.ranked as { key: string; score: number; rationale: string[] }[];
+  assert.equal(ranked[0]!.score, 3.75);
+  assert.match(ranked[0]!.rationale[6]!, /^cost=0\.05$/);
+});
+
+test("executeProgram allocate: limit defaults to 8 and floors at 1 when params.limit is 0 or negative", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000004");
+  const members = Array.from({ length: 3 }, (_, i) =>
+    taskCell(`aaaaaaaa-a000-a000-a000-00000000001${i}`, `Task ${i}`, 0.8),
+  );
+  const defaultRun = executeProgram(program, members, "2026-07-03T12:00:00.000Z");
+  assert.equal(defaultRun.output.limit, 8);
+  assert.equal((defaultRun.output.selected as unknown[]).length, 3);
+
+  const zeroLimitProgram = allocateProgram("cccccccc-a000-a000-a000-000000000005", { limit: 0 });
+  const zeroRun = executeProgram(zeroLimitProgram, members, "2026-07-03T12:00:00.000Z");
+  assert.equal(zeroRun.output.limit, 1);
+  assert.equal((zeroRun.output.selected as unknown[]).length, 1);
+
+  const negativeLimitProgram = allocateProgram("cccccccc-a000-a000-a000-000000000006", { limit: -5 });
+  const negativeRun = executeProgram(negativeLimitProgram, members, "2026-07-03T12:00:00.000Z");
+  assert.equal(negativeRun.output.limit, 1);
+  assert.equal((negativeRun.output.selected as unknown[]).length, 1);
+});
+
+test("executeProgram allocate: equal scores tiebreak on key ascending, deterministically", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000007");
+  // Identical props.work -> identical scores; only the key differs.
+  const work = { impact: 0.6, uncertainty: 0.5, concern: 0.4, dependencyWeight: 0.5, reversibility: 0.5, novelty: 0.3, cost: 0.4 };
+  const memberZ = taskCell("zzzzzzzz-a000-a000-a000-000000000001", "Z task", 0.8, work);
+  const memberA = taskCell("aaaaaaaa-a000-a000-a000-000000000099", "A task", 0.8, work);
+  const memberM = taskCell("mmmmmmmm-a000-a000-a000-000000000050", "M task", 0.8, work);
+
+  const run = executeProgram(program, [memberZ, memberA, memberM], "2026-07-03T12:00:00.000Z");
+  const ranked = run.output.ranked as { key: string; score: number }[];
+  assert.equal(ranked[0]!.score, ranked[1]!.score);
+  assert.equal(ranked[1]!.score, ranked[2]!.score);
+  assert.deepEqual(
+    ranked.map((r) => r.key),
+    [memberA.key, memberM.key, memberZ.key].sort(),
+  );
+});
+
+test("executeProgram allocate: witness is always present, naming top-N of memberCount and the program's first 8 words", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000008", { limit: 1 });
+  const memberA = taskCell("aaaaaaaa-a000-a000-a000-000000000101", "Task Alpha", 0.9, { impact: 0.9, cost: 0.2 });
+  const memberB = taskCell("bbbbbbbb-a000-a000-a000-000000000102", "Task Beta", 0.5, { impact: 0.1, cost: 0.9 });
+
+  const run = executeProgram(program, [memberA, memberB], "2026-07-03T12:00:00.000Z");
+  assert.ok(run.output.witness, "witness must always be present for allocate");
+  const witness = run.output.witness!;
+  assert.equal(witness.title, "Allocation: top 1 of 2 for Allocation pressure across the backlog");
+  const selected = run.output.selected as { title: string }[];
+  assert.equal(selected.length, 1);
+  assert.equal(witness.summary, selected.map((s) => s.title).join("; "));
+});
+
+test("executeProgram allocate: witness summary joins multiple selected titles with '; '", () => {
+  const program = allocateProgram("cccccccc-a000-a000-a000-000000000009", { limit: 2 });
+  const memberA = taskCell("aaaaaaaa-a000-a000-a000-000000000111", "Task Alpha", 0.9, { impact: 0.9, cost: 0.2 });
+  const memberB = taskCell("bbbbbbbb-a000-a000-a000-000000000112", "Task Beta", 0.7, { impact: 0.5, cost: 0.4 });
+
+  const run = executeProgram(program, [memberA, memberB], "2026-07-03T12:00:00.000Z");
+  const selected = run.output.selected as { title: string }[];
+  assert.equal(selected.length, 2);
+  assert.equal(run.output.witness?.summary, selected.map((s) => s.title).join("; "));
+});
+
+test("runProgramCell allocate: deriving twice with unchanged members yields exactly one witness cell (idempotent)", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const member = taskCell("aaaaaaaa-a000-a000-a000-000000000201", "Steady task", 0.8, { impact: 0.6, cost: 0.4 });
+    const program = buildCell(
+      {
+        kind: "prg",
+        title: "Allocate steady",
+        body: "allocate program",
+        confidence: 0.9,
+        props: {
+          program: {
+            schemaVersion: "recall.program.v1",
+            operation: "allocate",
+            target: { keys: [member.key] },
+          },
+        },
+      },
+      { key: "cccccccc-a000-a000-a000-000000000202" },
+    );
+    store.put(member);
+    store.put(program);
+
+    const first = runProgramCell(store, program.key, "2026-07-03T12:00:00.000Z", { derive: true });
+    assert.equal(first.derived?.accepted, true);
+    const countAfterFirst = store.stats().cells;
+
+    const second = runProgramCell(store, program.key, "2026-07-03T12:01:00.000Z", { derive: true });
+    assert.equal(second.derived?.accepted, true);
+    assert.equal(second.derived?.duplicateOf, first.derived?.cell?.key);
+    assert.equal(store.stats().cells, countAfterFirst);
+  } finally {
+    store.close();
+  }
+});

@@ -19,6 +19,7 @@ export const PROGRAM_OPERATIONS = [
   "quorum",
   "trend",
   "reflex",
+  "allocate",
 ] as const;
 export type ProgramOperation = (typeof PROGRAM_OPERATIONS)[number];
 
@@ -286,6 +287,7 @@ function executeSpec(
   if (spec.operation === "tag_projection") return executeTagProjection(spec, members);
   if (spec.operation === "emit_witness") return executeEmitWitness(program, members);
   if (spec.operation === "reflex") return executeReflex(spec, program, members);
+  if (spec.operation === "allocate") return executeAllocate(spec, program, members);
   return executeScore(spec, members);
 }
 
@@ -335,6 +337,85 @@ function executeReflex(spec: ProgramSpec, program: Cell, members: Cell[]): Progr
     };
   }
   return out;
+}
+
+// legacy "substrate-lo-nlo-v1" allocation-pressure formula. props.work (a plain
+// record) pins each factor when it is a finite number; otherwise the factor
+// falls back per field below. uncertainty/concern fall back to the LIVE cell
+// scores (not a static default) -- the graph is the state, and those two
+// fields always exist on a Cell, so the legacy static defaults for them are
+// unreachable by construction. All factors clamp to [0, 1] except cost, which
+// only floors (a cheap-enough task should not get an unbounded score).
+interface AllocateFactors {
+  impact: number;
+  uncertainty: number;
+  concern: number;
+  dependencyWeight: number;
+  reversibility: number;
+  novelty: number;
+  cost: number;
+}
+
+function allocateFactors(cell: Cell): AllocateFactors {
+  const work = isRecord(cell.props.work) ? cell.props.work : {};
+  const finite = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+  return {
+    impact: probability(finite(work.impact) ?? 0.5),
+    uncertainty: probability(finite(work.uncertainty) ?? cell.scores.uncertainty),
+    concern: probability(finite(work.concern) ?? cell.scores.concern),
+    dependencyWeight: probability(finite(work.dependencyWeight) ?? 0.5),
+    reversibility: probability(finite(work.reversibility) ?? 0.5),
+    novelty: probability(finite(work.novelty) ?? 0.3),
+    cost: Math.max(0.05, finite(work.cost) ?? 0.5),
+  };
+}
+
+function allocateScore(factors: AllocateFactors): number {
+  const { impact, uncertainty, concern, dependencyWeight, reversibility, novelty, cost } = factors;
+  return round((impact * (uncertainty + concern + novelty) * (0.5 + dependencyWeight) * (0.5 + reversibility / 2)) / cost);
+}
+
+function allocateRationale(factors: AllocateFactors): string[] {
+  return [
+    `impact=${factors.impact}`,
+    `uncertainty=${factors.uncertainty}`,
+    `concern=${factors.concern}`,
+    `dependencyWeight=${factors.dependencyWeight}`,
+    `reversibility=${factors.reversibility}`,
+    `novelty=${factors.novelty}`,
+    `cost=${factors.cost}`,
+  ];
+}
+
+function executeAllocate(spec: ProgramSpec, program: Cell, members: Cell[]): ProgramOutput {
+  const ranked = members
+    .map((cell) => {
+      const factors = allocateFactors(cell);
+      return {
+        key: cell.key,
+        handle: cell.handle,
+        title: cell.title,
+        score: allocateScore(factors),
+        rationale: allocateRationale(factors),
+      };
+    })
+    .sort((a, b) => b.score - a.score || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const rawLimit = typeof spec.params?.limit === "number" ? spec.params.limit : 8;
+  const limit = Math.max(1, rawLimit);
+  const selected = ranked.slice(0, limit);
+  const programWords = program.title.split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
+  return {
+    operation: "allocate",
+    memberCount: members.length,
+    memberReferences: memberReferences(members),
+    limit,
+    ranked,
+    selected,
+    witness: {
+      title: `Allocation: top ${selected.length} of ${members.length} for ${programWords}`,
+      summary: selected.map((entry) => entry.title).join("; "),
+    },
+  };
 }
 
 function executeScore(spec: ProgramSpec, members: Cell[]): ProgramOutput {
