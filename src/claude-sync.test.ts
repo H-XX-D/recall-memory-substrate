@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DEFAULT_AUTO_MEMORY_ROOT, claudeSyncStatus, runClaudeSync } from "./claude-sync.js";
 import { SqliteStore } from "./store.js";
 
@@ -168,6 +168,61 @@ test("runClaudeSync auto-memory lift mkdirs a fresh-machine db parent directory"
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync with home and no dbPath/autoMemoryRoot resolves under home and touches no disk on dry-run", () => {
+  const home = tempHome();
+  try {
+    const result = runClaudeSync({ home, apply: false });
+    const expectedDb = join(home, ".recall", "db", "home.sqlite3");
+    assert.equal(result.autoMemoryDb, expectedDb);
+    assert.equal(result.autoMemoryImport, null);
+    assert.equal(existsSync(join(home, ".recall")), false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runClaudeSync dry-run against a pre-created store predicts the lift, and apply performs it", () => {
+  const home = tempHome();
+  try {
+    const dbPath = join(home, ".recall", "db", "home.sqlite3");
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const seedStore = new SqliteStore(dbPath);
+    seedStore.close();
+
+    const projectsDir = join(home, ".claude", "projects");
+    const memoryDir = join(projectsDir, "demo", "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "note.md"), "---\nname: Demo note\ntype: project\n---\nProject memory.");
+
+    const dryRun = runClaudeSync({ home, apply: false, now: NOW });
+    assert.ok(dryRun.autoMemoryImport);
+    assert.equal(dryRun.autoMemoryImport?.created, 1);
+    assert.equal(dryRun.autoMemoryImport?.dryRun, true);
+    assert.equal(dryRun.autoMemoryDb, dbPath);
+
+    const store = new SqliteStore(dbPath);
+    try {
+      assert.equal(store.active().length, 0);
+    } finally {
+      store.close();
+    }
+
+    const apply = runClaudeSync({ home, apply: true, now: NOW });
+    assert.ok(apply.autoMemoryImport);
+    assert.equal(apply.autoMemoryImport?.created, dryRun.autoMemoryImport?.created);
+    assert.equal(apply.autoMemoryImport?.dryRun, false);
+
+    const storeAfter = new SqliteStore(dbPath);
+    try {
+      assert.equal(storeAfter.active().length, 1);
+    } finally {
+      storeAfter.close();
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

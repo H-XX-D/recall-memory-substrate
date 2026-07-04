@@ -103,17 +103,33 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
   let autoMemoryImport: ImportSummary | null = null;
   let autoMemoryDb: string | null = null;
   if (importMemory) {
-    const dbPath = opts.dbPath ?? homeDbPath(process.env);
-    autoMemoryDb = dbPath;
-    mkdirSync(dirname(dbPath), { recursive: true });
-    const store = new SqliteStore(dbPath);
-    try {
-      autoMemoryImport = importAutoMemory(store, opts.autoMemoryRoot ?? DEFAULT_AUTO_MEMORY_ROOT, {
-        apply,
-        now: opts.now,
-      });
-    } finally {
-      store.close();
+    const resolvedDb =
+      opts.dbPath ?? (opts.home ? join(opts.home, ".recall", "db", "home.sqlite3") : homeDbPath(process.env));
+    const resolvedRoot =
+      opts.autoMemoryRoot ?? (opts.home ? join(opts.home, ".claude", "projects") : DEFAULT_AUTO_MEMORY_ROOT);
+    autoMemoryDb = resolvedDb;
+
+    if (apply) {
+      mkdirSync(dirname(resolvedDb), { recursive: true });
+      const store = new SqliteStore(resolvedDb);
+      try {
+        autoMemoryImport = importAutoMemory(store, resolvedRoot, { apply, now: opts.now });
+      } finally {
+        store.close();
+      }
+    } else if (existsSync(resolvedDb)) {
+      // Dry-run against a store that already exists: open it to predict the
+      // lift, but never create anything on disk.
+      const store = new SqliteStore(resolvedDb);
+      try {
+        autoMemoryImport = importAutoMemory(store, resolvedRoot, { apply, now: opts.now });
+      } finally {
+        store.close();
+      }
+    } else {
+      // Dry-run with no store yet: report where the lift would land without
+      // touching disk.
+      autoMemoryImport = null;
     }
   }
 

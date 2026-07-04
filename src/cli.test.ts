@@ -1128,6 +1128,9 @@ test("claude sync/status round-trip through the CLI against a temp HOME", () => 
     const dryJson = JSON.parse(dryRun.stdout);
     assert.equal(dryJson.dryRun, true);
     assert.ok(dryJson.settingsChanged.length > 0);
+    // The auto-memory leg must stay inside the temp HOME, never the real machine.
+    assert.ok(dryJson.autoMemoryDb.startsWith(home));
+    assert.equal(dryJson.autoMemoryImport, null);
 
     const statusBefore = capture(["claude", "status"], { env: { HOME: home } as NodeJS.ProcessEnv });
     assert.equal(statusBefore.code, 0, statusBefore.stderr);
