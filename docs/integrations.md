@@ -12,10 +12,12 @@ All sync commands are dry run by default. They print what would change and touch
 recall claude sync --apply
 ```
 
-This updates two files under your home directory:
+This updates two settings files under your home directory and installs the bundled assets:
 
-- `~/.claude/settings.json`: adds `SessionStart`, `UserPromptSubmit`, and `Stop` hook entries, sets `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` to `"1"`, and installs the bundled hook script to `~/.claude/hooks/recall-session-start.py`.
+- `~/.claude/settings.json`: adds `SessionStart`, `UserPromptSubmit`, and `Stop` hook entries and sets `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` to `"1"`.
 - `~/.claude.json`: registers the `recall` MCP server (`type: stdio`, `command: recall-mcp`) so Claude Code can call the `recall_search`, `recall_compile`, `recall_cell`, `recall_write`, and `recall_status` tools.
+- `~/.claude/hooks/recall-session-start.py`: the bundled hook script that serves all the hook events.
+- `~/.claude/skills/recall/`: the Recall skills tree (see below).
 
 Run without `--apply` first to preview the diff: the command reports which settings keys would change (`settingsChanged`), whether the MCP block would change (`mcpChanged`), and where backups would land, without writing anything.
 
@@ -39,11 +41,26 @@ Reports whether the three hooks are installed, whether auto-memory is disabled, 
 
 ### What each hook does
 
-- **SessionStart**: runs `recall-session-start.py` with no arguments. It prints a standing directive telling the assistant to consult Recall before trusting its own recollection, plus a 7-day recent-activity summary scoped to whichever database the current directory routes to (a registered project, or the global store).
-- **UserPromptSubmit**: runs `recall-session-start.py --prompt` on every prompt. It compiles a mini index (just cell ids and titles, not bodies) of memory relevant to that prompt, and flags any row that is stale or has been superseded so the assistant cannot act on outdated context without noticing. This hook is deliberately incomplete: it points at what exists so the assistant runs a real `recall compile` or `recall search` for the full picture, rather than replacing that step.
-- **Stop**: runs `recall-session-start.py --stop`. If the prompt hook flagged a stale or superseded cell during this turn, this hook checks whether the transcript shows Recall actually being read since the flag was raised. If not, and if the reply appears to have relied on that cell, it blocks the turn once with a message asking the assistant to dig into the flagged cell and correct anything asserted from it. It never blocks more than once per flagged turn.
+One script serves every event; the argument selects the mode.
 
-The Python hooks are fail-open: any crash, timeout, or missing dependency falls back to emitting the directive alone (or nothing) rather than blocking your session.
+- **SessionStart**: runs `recall-session-start.py` with no arguments. It prints a standing directive telling the assistant to consult Recall before trusting its own recollection, plus a 7-day recent-activity summary produced by `recall diff --since 7d --summary` and labelled with the scope `recall where` reports (a registered project, or the graph-wide home store). If the installed CLI predates the `diff` verb, the summary degrades silently and only the directive is emitted. Timeouts: 12 seconds for the diff, 6 for the scope label.
+- **UserPromptSubmit** (the prompt digest): runs `recall-session-start.py --prompt` on every prompt. It runs `recall compile` against the prompt (hard 4 second cap, routed by the session's working directory) and pushes a mini index into context: up to five relevant cells as ids and titles only, each row ending in a `[kind:id]` token. A row whose cell appears in the packet's stale or low-trust section is tagged `[STALE]`; a row whose cell is the superseded side of a conflict is tagged `[SUPERSEDED?]`. The digest ends with exactly one footer: a DIG REQUIRED demand when a shown row is flagged, a tripwire count when conflicts or stale cells exist elsewhere on the topic, or a reminder that the index is awareness, not a substitute for a real read. A short prompt, a missing binary, a timeout, or an empty relevance section pushes nothing beyond the primer. The digest is deliberately incomplete: bodies, the conflict trace, and calibration are withheld so the assistant still runs a real `recall compile`.
+- **Stop**: runs `recall-session-start.py --stop`. Two independent gates, loop-guarded so neither ever blocks more than once per turn:
+  - The **dig gate**. When the prompt digest flags a row, the obligation is recorded as a per-session state file (under `$RECALL_HOME/.dig_pending/`, or `~/.recall/.dig_pending/` when `RECALL_HOME` is unset). At turn end this gate consumes the state file and checks the transcript for a real Recall read since the flag was raised (a `recall compile`, `recall search`, `recall cell show`, a peek script call, or an MCP recall tool). If no read happened and the reply engaged with the flagged cell (it names the id or shares distinctive title tokens), the turn is blocked once with instructions to read the flagged cell and correct anything asserted from it.
+  - The **evidence gate**. If the turn's reply claims something works, passes, or is done, and no test, build, or run command appears in the turn's tool use, the turn is held once with a request to run the verification or soften the claim. Opt out by setting `RECALL_GATE_EVIDENCE=0` in the environment.
+- **UserPromptExpansion**: the script also implements `--expansion`, which pushes the same thin mini index scoped to an expanded slash command and its arguments (index only, no primer, dig obligations recorded the same way). Sync manages the three events above and leaves any existing `UserPromptExpansion` registration in place; to enable this mode, add a `UserPromptExpansion` hook entry pointing at the same script with `--expansion`.
+
+The Python hook is fail-open in every mode: any crash, timeout, or missing dependency falls back to emitting the directive alone (or nothing) rather than blocking your session. The read loop never writes to any Recall database; its only filesystem state is the per-session dig obligation file.
+
+### The skills tree
+
+`recall claude sync --apply` installs a small skills tree at `~/.claude/skills/recall/`, refreshed on every apply with the same `.bak` backup discipline as the settings files:
+
+- `SKILL.md`: task-oriented usage notes for the assistant (compile first, cheap reads via peek, `recall diff` for what changed, `recall health` for pressure, the ten cell kinds, and how to write back).
+- `scripts/recall_peek.py`: token-budget-aware single-cell preview, reading the store directly but strictly read-only. The same script ships under `python/` in the package.
+- `scripts/recall_router.py`: a rule-based router that picks the cheapest tool for a question shape (hex ids go to peek, temporal wording to `recall diff`, health wording to `recall health`, code-symbol shapes to peek `--match`, everything else to `recall compile`).
+
+Every command the tree documents exists on the current CLI; the session hook's remediation text points at these installed paths, so following its instructions always works after a sync.
 
 ### The write gate (opt-in)
 
@@ -83,6 +100,20 @@ Flags:
 
 To remove the integration, delete the `[mcp_servers.recall]` table from `config.toml` and the block between the `recall:begin` / `recall:end` markers in `AGENTS.md`, or restore both files from their `.bak` backups.
 
+## Cutting over from a legacy install
+
+A machine that has been running a pre-0.6 Recall (the old `graph_nodes` schema, often with a routing wrapper script shadowing the real binary on `PATH`) moves to the current line in this order. Do not interleave the steps.
+
+1. **Back up first.** Copy the whole database directory (`~/.recall/db`) aside and record a checksum manifest of every `.sqlite3` file, so any step can be verified and undone.
+2. **Migrate each store.** For every legacy database, run `recall migrate --from <legacy.sqlite3> --db <fresh-target.sqlite3>` as a dry run, check the counts, then re-run with `--apply`. The legacy source is opened read-only and never mutated; verify its checksum is unchanged afterward. Migrating a legacy home store also imports its `projects` table into the central registry, with any reserved-slug renames reported in the output.
+3. **Reindex.** Run `recall reindex --db <target>` on each migrated store so semantic search works over the migrated cells.
+4. **Swap the files and upgrade.** Move each migrated target into place, upgrade the global npm package, and confirm `recall version` reports the new version.
+5. **Re-sync the assistant.** Run `recall claude sync --apply` (and `recall codex sync --apply` if used) so the installed hook, skills tree, and MCP registration match the new CLI.
+6. **Retire the wrapper.** If a routing wrapper shadows `recall` on `PATH`, remove it: the CLI routes by cwd through the project registry natively, and the wrapper's legacy verbs no longer match.
+7. **Verify the loop.** Start a session and confirm the directive and activity summary appear, submit a prompt that touches known memory and confirm the mini index, and confirm the MCP tools respond.
+
+Rollback is the reverse: restore the database directory from the backup, restore the settings files from their `.bak` copies, and reinstall the previous package version.
+
 ## Scheduled maintenance
 
 Recall stores benefit from a periodic maintenance pass so that derived witnesses, evaluation scores, and semantic vectors stay current without you running commands by hand.
@@ -118,12 +149,10 @@ On non-macOS platforms, the same plist file is still written (harmless, and port
 
 ## Python helpers
 
-Two bundled scripts under `python/` give command-line and scripting access to Recall without duplicating its logic; both shell out to the `recall` (or `recall-mal`) CLI rather than touching SQLite directly, so all validation, admission, and routing stay in one place.
+Two bundled scripts under `python/` give command-line and scripting access to Recall without duplicating its logic. Neither one ever writes to the store directly: all writes go through the CLI's validation and admission gate.
 
-- **`recall_helper.py`**: builds a v5 write proposal from flags (`--kind`, `--title`, `--body`, `--confidence`, plus optional edges, topics, entities, and scope fields) and can optionally submit it by shelling out to `recall validate` or `recall admit --json`. It also exposes `resolve_cli()`, used by the other helper, which finds the CLI via the `--cli` flag, the `RECALL_CLI` environment variable, a local `dist/cli.js` build, or the `recall-mal` binary on `PATH`, in that order.
-- **`recall_peek.py`**: a compact preview over `recall cell show <target>`, printing a trimmed summary (title, kind, status, scope, scores, tags, a body preview, and connected edges) in human-readable or JSON form. Useful for a quick look at a cell without paging through its full body.
-
-Both scripts are thin by design: they never read the SQLite store directly, and they perform only light client-side checks before deferring to the CLI's own validation.
+- **`recall_helper.py`**: builds a v5 write proposal from flags (`--kind`, `--title`, `--body`, `--confidence`, plus optional edges, topics, entities, and scope fields) and can optionally submit it by shelling out to `recall validate` or `recall admit --json`. It also exposes `resolve_cli()`, which finds the CLI via the `--cli` flag, the `RECALL_CLI` environment variable, a local `dist/cli.js` build, or the `recall` binary on `PATH`, in that order.
+- **`recall_peek.py`**: a token-budget-aware preview of one cell (envelope, body excerpt, relation counts by relation name, hyperedge membership count) or a `--match` listing, in JSON or human-readable form. It reads the store's SQLite file directly but strictly read-only (`mode=ro`), for column-level control over how much of a large body gets loaded. Keys, handles, and 8-plus character key prefixes all resolve. The database resolves from `--db`, else `RECALL_DB`, else the home store under `RECALL_HOME` or `~/.recall`; routing beyond that belongs to the CLI. The same script is installed into the Claude skills tree by `recall claude sync --apply`.
 
 ## Troubleshooting
 

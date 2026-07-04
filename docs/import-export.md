@@ -193,13 +193,30 @@ recall migrate --from old.sqlite3 --apply --db ~/.recall/db/home.sqlite3
 ```
 
 Run it first without `--apply` to see counts (`cells`, `edges`,
-`hyperedges`, `semanticVectors`, `dagOverlays`) before writing anything. The
-old database is opened read-only, so a dry run and a real run are both safe
-to run against it repeatedly. Legacy node kinds are remapped onto current
-kinds (for example, `observation` becomes `obs`, `decision` becomes `dec`,
-`risk` becomes `rsk`); anything unrecognized becomes `obs`. Legacy relation
-kinds outside Recall's current relation set are dropped rather than
-imported.
+`hyperedges`, `semanticVectors`, `dagOverlays`, `projects`) before writing
+anything. The old database is opened read-only, so a dry run and a real run
+are both safe to run against it repeatedly. Legacy node kinds are remapped
+onto current kinds (for example, `observation` becomes `obs`, `decision`
+becomes `dec`, `risk` becomes `rsk`); anything unrecognized becomes `obs`.
+Legacy relation kinds outside Recall's current relation set are dropped
+rather than imported.
+
+### The projects registry
+
+A legacy home store also carried the project registry as a `projects` table
+(slug, root path, database path, description, creation time). When the
+source database has project rows, `recall migrate` imports each one into the
+current central registry (`registry.sqlite3` under the Recall home
+directory), and the summary reports the count as `projects`.
+
+The registry import is idempotent: a slug, root path, or database path that
+is already registered skips the row, so a second `--apply` changes nothing.
+A legacy slug that collides with the reserved `home` slug (or with a slug
+already registered to a different root) is renamed through the same
+collision rule `recall project init` uses, and every rename is reported in
+the summary's `projectRenames` list as a `{ from, to }` pair, never applied
+silently. A dry run reports the same `projects` count without touching the
+registry.
 
 ## Idempotence and re-imports
 

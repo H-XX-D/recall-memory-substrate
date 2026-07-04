@@ -89,6 +89,37 @@ query plus a list of hits. `--limit 10` caps the number of hits (default 10).
 recall search "routing" --project my-project
 ```
 
+**`recall diff --since <when>`** reports what changed in the resolved store
+since a timestamp: new cells (created inside the window), updated cells
+(created before the window but updated inside it), supersede events (a cell
+admitted inside the window whose `supersedes` edge demoted an older cell),
+and new hyperedges. `--since` accepts an ISO timestamp or a relative window
+with an `m`, `h`, `d`, or `w` suffix: `30m`, `2h`, `7d`, `4w`. Output is JSON
+by default; `--summary` renders the markdown summary that the Claude Code
+session hook injects at session start (see `docs/integrations.md`). Flags:
+
+- `--kinds a,b`: only count cells of the listed kinds.
+- `--summary`: render markdown instead of JSON.
+- `--max-items 12`: cap each section of the result (default 12).
+
+```sh
+recall diff --since 7d --summary --project my-project
+recall diff --since 2026-07-01T00:00:00Z --kinds dec,rsk --max-items 5
+```
+
+An empty window renders `_No activity in this window._` under the summary
+header. A populated summary looks like:
+
+```
+# Recall diff in project `my-project` since 2026-06-27T00:00:00.000Z
+
+**Summary:** 2 new cells · 1 updated · 0 new edges · 0 supersede events
+
+## New cells (2)
+- `1750a919` [dec] Adopted the v5 routing layer
+- `4ae7579e` [obs] Peek reads the cells schema
+```
+
 **`recall cell show <key-or-handle>`** inspects a single cell: full content,
 footprint (word and byte counts, tag counts, edge counts), incoming and
 outgoing edges, derivation lineage, and any expansion handles it exposes. The
@@ -362,8 +393,14 @@ idempotent no-op re-import, exits 0.
 
 **`recall migrate --from old.sqlite3 [--apply]`** migrates cells from a
 pre-Recall database schema into the resolved store (defaults to the home
-store), mapping legacy node kinds onto current cell kinds. Dry-run by
-default; pass `--apply` to write.
+store), mapping legacy node kinds onto current cell kinds. When the legacy
+database carries a `projects` table (a legacy home store), each project row
+is also imported into the central project registry, idempotently: a slug,
+root, or database path that is already registered skips, and a reserved slug
+(such as `home`) is renamed through the standard collision rule with the
+rename reported in the output, never applied silently. The migrate summary
+reports the registry work as `projects` and `projectRenames` alongside the
+cell counts. Dry-run by default; pass `--apply` to write.
 
 ```sh
 recall migrate --from old.sqlite3 --apply
@@ -423,8 +460,10 @@ recall service uninstall
 ## Assistant integrations
 
 **`recall claude sync [--apply]`** wires Recall into Claude Code: merges MCP
-server registration and hook settings into Claude's settings file, and (by
-default) imports and disables the built-in auto-memory files in favor of
+server registration and hook settings into Claude's settings file, installs
+the bundled session hook script and the Recall skills tree (`SKILL.md` plus
+the peek and router helper scripts under `~/.claude/skills/recall/`), and
+(by default) imports and disables the built-in auto-memory files in favor of
 Recall. Flags:
 
 - `--keep-automemory`: leave Claude's built-in auto-memory enabled and skip
