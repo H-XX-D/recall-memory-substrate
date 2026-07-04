@@ -19,6 +19,7 @@ import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js
 import { dagAnalysisToKeyedProposals, deriveAdmit } from "./derivation.js";
 import { runAndRecordEval, runEvalAndDerive, type RecallEvalSuite } from "./evals.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
+import { importGlobalToLocal } from "./local-import.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { FederatedReadStore } from "./federated-store.js";
@@ -65,10 +66,14 @@ interface ParsedArgs {
   file?: string;
   mode?: string;
   out?: string;
+  globalDb?: string;
+  topics?: string[];
+  limitExplicit?: number;
   derive: boolean;
   apply: boolean;
   reindex: boolean;
   missingOnly: boolean;
+  noHyperedges: boolean;
   words: number;
   limit: number;
   noHealth: boolean;
@@ -178,6 +183,30 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
         return 0;
       } finally {
         store.close();
+      }
+    }
+
+    if (command === "import" && subcommand === "local") {
+      const globalDbPathArg = args.globalDb ?? homeDbPath(env);
+      const source = new SqliteStore(globalDbPathArg);
+      try {
+        const local = openWriteStore(route.dbPath);
+        try {
+          const summary = importGlobalToLocal(source, local, {
+            project: route.slug ?? args.project,
+            topics: args.topics,
+            includeHyperedges: !args.noHyperedges,
+            apply: args.apply,
+            limit: args.limitExplicit,
+            now: options.now,
+          });
+          outJson(out, summary);
+          return 0;
+        } finally {
+          local.close();
+        }
+      } finally {
+        source.close();
       }
     }
 
@@ -577,6 +606,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     apply: false,
     reindex: false,
     missingOnly: false,
+    noHyperedges: false,
     words: 900,
     limit: 10,
     noHealth: false,
@@ -595,18 +625,31 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--file") parsed.file = requireValue(argv, ++i, arg);
     else if (arg === "--mode") parsed.mode = requireValue(argv, ++i, arg);
     else if (arg === "--out") parsed.out = requireValue(argv, ++i, arg);
+    else if (arg === "--global-db") parsed.globalDb = requireValue(argv, ++i, arg);
+    else if (arg === "--topics") parsed.topics = splitTopics(requireValue(argv, ++i, arg));
     else if (arg === "--derive") parsed.derive = true;
     else if (arg === "--apply") parsed.apply = true;
     else if (arg === "--reindex") parsed.reindex = true;
     else if (arg === "--missing-only") parsed.missingOnly = true;
+    else if (arg === "--no-hyperedges") parsed.noHyperedges = true;
     else if (arg === "--no-health") parsed.noHealth = true;
     else if (arg === "--inline-refs") parsed.inlineRefs = true;
     else if (arg === "--ref-params") parsed.refParams = true;
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
-    else if (arg === "--limit") parsed.limit = positiveInt(requireValue(argv, ++i, arg), arg);
-    else command.push(arg);
+    else if (arg === "--limit") {
+      parsed.limit = positiveInt(requireValue(argv, i + 1, arg), arg);
+      parsed.limitExplicit = parsed.limit;
+      i += 1;
+    } else command.push(arg);
   }
   return parsed;
+}
+
+function splitTopics(value: string): string[] {
+  return value
+    .split(",")
+    .map((topic) => topic.trim())
+    .filter((topic) => topic !== "");
 }
 
 function resolveRoute(args: ParsedArgs, cwd: string, env: NodeJS.ProcessEnv): Route {
@@ -776,6 +819,7 @@ Commands:
   recall import mem0 --json mem0.json [--apply] [--db path] [--project slug]
   recall import zep --json zep.json [--apply] [--db path] [--project slug]
   recall import auto-memory --root path [--apply] [--db path] [--project slug]
+  recall import local [--global-db path] [--project slug] [--topics a,b] [--limit N] [--no-hyperedges] [--apply] [--db path]
   recall reindex [--missing-only] [--db path] [--project slug]
   recall migrate --from old.sqlite3 [--apply] [--db path]
   recall validate --json proposal.json

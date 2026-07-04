@@ -275,6 +275,67 @@ test("import archive --reindex runs a full semantic reindex after an applied imp
   }
 });
 
+test("import local --project X --apply round-trips against two temp dbs", () => {
+  const tmp = tempDir();
+  try {
+    const globalDb = join(tmp, "global.sqlite3");
+    const localDb = join(tmp, "local.sqlite3");
+    const proposalPath = join(tmp, "proposal.json");
+    writeFileSync(
+      proposalPath,
+      JSON.stringify({
+        kind: "obs",
+        title: "global memory to bring local",
+        body: "A cell that lives in the global store and should land locally.",
+        confidence: 0.75,
+        project: "demo",
+        topics: ["release"],
+      }),
+    );
+    const admitted = capture(["admit", "--json", proposalPath, "--db", globalDb], { now: "2026-06-26T12:00:00.000Z" });
+    assert.equal(admitted.code, 0, admitted.stderr);
+
+    const dry = capture(
+      ["import", "local", "--global-db", globalDb, "--project", "demo", "--db", localDb],
+      { now: "2026-06-26T12:01:00.000Z" },
+    );
+    assert.equal(dry.code, 0, dry.stderr);
+    const dryJson = JSON.parse(dry.stdout);
+    assert.equal(dryJson.dryRun, true);
+    assert.equal(dryJson.created, 1);
+
+    const statusBefore = capture(["status", "--db", localDb]);
+    assert.equal(JSON.parse(statusBefore.stdout).stats.cells, 0);
+
+    const applied = capture(
+      ["import", "local", "--global-db", globalDb, "--project", "demo", "--apply", "--db", localDb],
+      { now: "2026-06-26T12:02:00.000Z" },
+    );
+    assert.equal(applied.code, 0, applied.stderr);
+    const appliedJson = JSON.parse(applied.stdout);
+    assert.equal(appliedJson.created, 1);
+    assert.equal(appliedJson.dryRun, false);
+
+    const statusAfter = capture(["status", "--db", localDb]);
+    assert.equal(JSON.parse(statusAfter.stdout).stats.cells, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("import local without --project or --topics exits nonzero with a clear error", () => {
+  const tmp = tempDir();
+  try {
+    const globalDb = join(tmp, "global.sqlite3");
+    const localDb = join(tmp, "local.sqlite3");
+    const result = capture(["import", "local", "--global-db", globalDb, "--db", localDb]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /import local needs a scope/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("recall reindex indexes all cells, and --missing-only only indexes cells missing a semantic vector", () => {
   const tmp = tempDir();
   try {
