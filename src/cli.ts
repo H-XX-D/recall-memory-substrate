@@ -21,6 +21,7 @@ import { migrate } from "./migrate.js";
 import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { addDagOverlay, analyzeDagOverlay, type DagOverlayInput } from "./dag.js";
 import { dagAnalysisToKeyedProposals, deriveAdmit, memoryHealthDerivationKey } from "./derivation.js";
+import { diffStore, parseKinds, parseSince, renderDiffSummary } from "./diff.js";
 import { runAndRecordEval, runEvalAndDerive, type RecallEvalSuite } from "./evals.js";
 import { addHyperedge, type HyperedgeInput } from "./hyperedges.js";
 import { importGlobalToLocal } from "./local-import.js";
@@ -100,6 +101,10 @@ interface ParsedArgs {
   suggestPrograms: boolean;
   noGuidance: boolean;
   intervalMin?: number;
+  since?: string;
+  kinds?: string;
+  summary: boolean;
+  maxItems?: number;
 }
 
 interface Route {
@@ -315,6 +320,26 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const query = queryFrom(args, 1, "search requires a query");
       return withReadStore(args, route, env, (store) => {
         outJson(out, { query, hits: store.search(query, { limit: args.limit }) });
+        return 0;
+      });
+    }
+
+    if (command === "diff") {
+      if (!args.since) throw new Error("diff requires --since <ISO|30m|2h|7d|4w>");
+      const since = parseSince(args.since, options.now ?? new Date().toISOString());
+      const kinds = args.kinds === undefined ? undefined : parseKinds(args.kinds);
+      return withReadStore(args, route, env, (store) => {
+        const result = diffStore(store, {
+          since,
+          project: route.slug,
+          kinds,
+          maxItems: args.maxItems,
+        });
+        if (args.summary) {
+          out(`${renderDiffSummary(result, route.slug ?? "")}\n`);
+        } else {
+          outJson(out, result);
+        }
         return 0;
       });
     }
@@ -746,6 +771,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     allGraphs: false,
     suggestPrograms: false,
     noGuidance: false,
+    summary: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -775,6 +801,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === "--suggest-programs") parsed.suggestPrograms = true;
     else if (arg === "--no-guidance") parsed.noGuidance = true;
     else if (arg === "--interval-min") parsed.intervalMin = positiveInt(requireValue(argv, ++i, arg), arg);
+    else if (arg === "--since") parsed.since = requireValue(argv, ++i, arg);
+    else if (arg === "--kinds") parsed.kinds = requireValue(argv, ++i, arg);
+    else if (arg === "--summary") parsed.summary = true;
+    else if (arg === "--max-items") parsed.maxItems = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--words") parsed.words = positiveInt(requireValue(argv, ++i, arg), arg);
     else if (arg === "--limit") {
       parsed.limit = positiveInt(requireValue(argv, i + 1, arg), arg);
@@ -991,6 +1021,7 @@ Commands:
   recall compile "task" [--words 900] [--limit 10] [--no-health] [--inline-refs] [--ref-params] [--db path] [--project slug]
   recall search "query" [--limit 10] [--db path] [--project slug]
   recall cell show <key-or-handle> [--db path] [--project slug]
+  recall diff --since <ISO|30m|2h|7d|4w> [--kinds a,b] [--summary] [--max-items 12] [--db path] [--project slug]
   recall hyperedge add --json edge.json [--db path] [--project slug]
   recall hyperedge show <id> [--db path] [--project slug]
   recall hyperedge list [--limit 10] [--db path] [--project slug]
