@@ -1538,7 +1538,12 @@ test("service install/status/uninstall round-trip against a temp LaunchAgents di
     const installJson = JSON.parse(install.stdout);
     assert.equal(installJson.label, "io.recall.maintain");
     assert.ok(existsSync(installJson.path));
-    assert.match(install.stdout + install.stderr, /launchctl load/);
+    if (process.platform === "darwin") {
+      assert.match(install.stdout + install.stderr, /launchctl load/);
+    } else {
+      assert.match(install.stdout + install.stderr, /Crontab equivalent/);
+      assert.doesNotMatch(install.stdout + install.stderr, /\*\/\d{2,} \* \* \* \*/);
+    }
 
     const after = capture(["service", "status"], { env });
     assert.equal(JSON.parse(after.stdout).installed, true);

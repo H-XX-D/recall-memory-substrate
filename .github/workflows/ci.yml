@@ -16,13 +16,13 @@ concurrency:
 
 jobs:
   build-test:
-    name: Build, test & e2e (Node ${{ matrix.node }} · ${{ matrix.os }})
+    name: Build and test (Node ${{ matrix.node }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: ['24']
+        node: ['22.5', '24']
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -42,14 +42,11 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: End-to-end checks
-        run: npm run e2e
-
-      - name: Smoke check
-        run: npm run smoke
+      - name: Typecheck
+        run: npm run typecheck
 
   readiness:
-    name: Readiness checks (Python, MCP, benchmarks, installer)
+    name: Readiness (Python helpers, installed-artifact acceptance)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -69,17 +66,8 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install
 
-      - name: MCP smoke
-        run: npm run smoke:mcp
-
-      - name: Python toolkit and hook tests
+      - name: Python toolkit tests
         run: npm run test:python
 
-      - name: Public benchmark
-        run: npm run bench:public
-
-      - name: Sentinel benchmark
-        run: npm run bench:sentinel
-
-      - name: Installer smoke
-        run: npm run smoke:install
+      - name: Installed-artifact acceptance
+        run: npm run test:acceptance

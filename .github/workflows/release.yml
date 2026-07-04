@@ -55,8 +55,8 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: End-to-end checks
-        run: npm run e2e
+      - name: Typecheck
+        run: npm run typecheck
 
   release:
     name: Publish GitHub Release
@@ -70,22 +70,26 @@ jobs:
 
       - name: Resolve tag
         id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
+            TAG="$INPUT_TAG"
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Extract release notes from CHANGELOG
         id: notes
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          VERSION="${{ steps.tag.outputs.version }}"
-          # Pull the section under "## [<version>]" up to the next "## " heading
-          # (CHANGELOG follows Keep a Changelog, so headings are bracketed).
-          awk -v ver="$VERSION" '
-            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+          # Pull the section under "## <version> - <date>" up to the next
+          # "## " heading (this CHANGELOG uses plain unbracketed headings).
+          VER_RE=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
+          awk -v ver="$VER_RE" '
+            $0 ~ "^## " ver "( |$)" {flag=1; next}
             /^## / && flag {flag=0}
             flag {print}
           ' CHANGELOG.md > RELEASE_NOTES.md

@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  crontabEquivalent,
   installService,
   renderMaintainPlist,
   serviceStatus,
@@ -128,3 +129,35 @@ test("installService honors a custom label and interval", () => {
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "recall-v5-service-"));
 }
+
+test("plist paths are POSIX regardless of host separator conventions", () => {
+  const plist = renderMaintainPlist({
+    label: "io.recall.maintain",
+    intervalMinutes: 60,
+    nodeBin: "C:\\node\\node.exe",
+    cliPath: "C:\\recall\\dist\\cli.js",
+    launchAgentsDir: "C:\\tmp\\LaunchAgents",
+    logDir: "C:\\tmp\\recall-logs",
+  });
+  assert.doesNotMatch(plist, /\\/);
+  assert.match(plist, /<key>StandardOutPath<\/key>\s*<string>C:\/tmp\/recall-logs\/io\.recall\.maintain\.out\.log<\/string>/);
+});
+
+test("crontabEquivalent always emits a valid cron schedule", () => {
+  const base = {
+    label: "io.recall.maintain",
+    nodeBin: "/usr/local/bin/node",
+    cliPath: "/opt/recall/dist/cli.js",
+    launchAgentsDir: "/tmp/LaunchAgents",
+    logDir: "/tmp/recall-logs",
+  };
+  assert.match(crontabEquivalent({ ...base, intervalMinutes: 60 }), /^0 \* \* \* \* /);
+  assert.match(crontabEquivalent({ ...base, intervalMinutes: 30 }), /^\*\/30 \* \* \* \* /);
+  assert.match(crontabEquivalent({ ...base, intervalMinutes: 90 }), /^0 \*\/2 \* \* \* /);
+  assert.match(crontabEquivalent({ ...base, intervalMinutes: 7 }), /^\*\/6 \* \* \* \* /);
+  assert.match(crontabEquivalent({ ...base, intervalMinutes: 1440 }), /^0 0 \* \* \* /);
+  // the minutes field never exceeds 59
+  for (const m of [60, 90, 120, 480, 1440]) {
+    assert.doesNotMatch(crontabEquivalent({ ...base, intervalMinutes: m }), /^\*\/\d{2,} /);
+  }
+});
