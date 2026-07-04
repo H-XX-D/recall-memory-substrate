@@ -42,9 +42,10 @@ active memory rather than passive notes.
 12. Expand lazily. Use `recall_cell` for one cell or field handle when exact
     content is needed; do not request inline reference values or full parameter
     metadata by default.
-13. Use ACP when the task should be handed to an inside graph-manager agent.
-    `recall_acp_*` tools are the protocol surface for bounded agent-to-agent
-    requests, not a second memory system.
+13. Use the MCP tools directly for agent-to-agent requests; there is no
+    separate delegation protocol. For a durable handoff between sessions or
+    agents, write a cell and read it back with `recall_page` using
+    `name: "handoffs"`.
 
 ## MCP Configuration
 
@@ -87,21 +88,12 @@ The generated block uses the `recall-mcp` stdio server:
   `handoffs`, `objectives`, and `team-metrics`.
 - `recall_cell`: expand one addressable cell or field handle and its connected
   data on demand.
-- `recall_tick`: run the integrated cognitive tick loop and optionally admit
-  the tick as a maintenance witness.
-- `recall_acp_status`, `recall_acp_send`, `recall_acp_list`,
-  `recall_acp_show`, `recall_acp_process`, and `recall_acp_exchange`: queue,
-  process, and one-shot exchange bounded internal agent communication requests.
-- `recall_operate_once`: run the full leased mechanical cycle and persist an
-  operator ledger report.
-- `recall_operate_list` and `recall_operate_show`: inspect operator ledger
-  reports without writing them into normal memory.
-- `recall_workflow_allocate`: score work candidates and optionally write an
-  allocation plan.
-- `recall_blind_lock`: pre-register a prediction as a typed cell.
-- `recall_daemon_run_once`: run one outside-LLM maintenance pass.
-- advanced graph operation tools, `recall_dag_*`, and `recall_eval_*`: operate
-  graph derivation and evaluation features.
+
+Scheduled upkeep (the operator run, eval suite, memory health check, and
+semantic reindex) runs through the Stop hook during normal use, or on demand
+via `recall maintain`; install it as a recurring job with
+`recall service install`. Use the MCP tools directly for agent-to-agent
+requests.
 
 ## Minimal Write Proposal
 
@@ -302,7 +294,6 @@ not merely terminal output:
 
 ```text
 recall_maintenance({ derive: true })
-recall_tick({ derive: true })
 recall_workflow_allocate({ derive: true })
 recall_program_run({ programId, derive: true })
 recall_dag_analyze({ overlayId, derive: true })
@@ -345,5 +336,5 @@ user task
   -> recall_compile final packet if the next turn needs continuity
 ```
 
-Use CLI/TUI for inspection, correction, rollback, and explicit human actions.
+Use the CLI for inspection, correction, rollback, and explicit human actions.
 Use MCP for the routine agent path.

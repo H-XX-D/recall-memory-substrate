@@ -655,42 +655,13 @@ relevance at ~39× byte reduction over naive. (Historical: 2026-05-24
 router run scored 6/7 vs compile's 4/7; see
 `reference/benchmark-2026-05-24-router.md`.)
 
-## ACP delegation: subagent worker pattern (validated 2026-06-09)
+## Agent-to-agent handoffs and scheduled upkeep
 
-Recall's ACP layer (`recall acp ...` verbs, `acp_requests` table) is
-substrate-mediated RPC between agents: a durable queue whose actions are
-recall operations (`compile`, `search`, `semantic`, `subgraph`, `write`,
-`maintenance`, `tick`, `operate_once`), NOT an arbitrary task runner.
-The working division of labor: **ACP carries coordination + memory I/O;
-a spawned subagent carries the labor.**
-
-The loop (live-validated; pattern cell tagged `acp-workflow` in global):
-
-```bash
-# 1. Orchestrator enqueues the worker's context packet as a queued request:
-cat > /tmp/req.json << 'JSON'
-{"fromAgent": "claude-main", "toAgent": "<worker-id>", "action": "compile",
- "payload": {"task": "<what the worker needs context about>", "words": 700}}
-JSON
-recall acp send --json /tmp/req.json
-
-# 2. Spawn a subagent with identity <worker-id>. Its FIRST act:
-recall acp process --acp-manager <worker-id> --acp-to-agent <worker-id> --limit 20
-#    -> executes the queued compile; the response JSON is its context packet.
-
-# 3. Worker does the labor with normal tools (edit/run/test).
-
-# 4. Worker reports back THROUGH the queue: helper-generated proposal,
-#    wrapped as {"action": "write", "payload": {"proposal": <object>}},
-#    then acp send + acp process. Findings land as a cell; the admission
-#    receipt is the ACP response.
-
-# 5. Orchestrator verifies: recall acp list / acp show <id> / peek the cell.
-```
-
-What this buys over plain subagent prompting: the whole collaboration is
-durable and auditable in `acp_requests` (who asked what of whom, full
-responses); a dead worker's queue survives for another to drain; requests
-can be enqueued now and processed later by a cron'd `recall acp run`
-(cross-session asynchrony). What it does not buy: arbitrary task execution
-inside the queue; the labor always needs an agent with tools.
+For request/response between agents, use the MCP tools directly
+(`recall_compile`, `recall_write`, and the rest of the tool list in
+`reference/llm-integration.md`). For a durable handoff between sessions or
+agents, write it as a cell tagged for the handoff lifecycle and read it
+back with `recall_page` using `name: "handoffs"`. For scheduled upkeep
+(the operator tick, eval suite, memory health check, and semantic
+reindex), run `recall maintain` on demand, or install it as a recurring
+job with `recall service install`.
