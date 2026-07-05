@@ -184,3 +184,44 @@ test("runOperatorCycle against a bare Store double still cycles, with ledger lef
   assert.equal(result.ticked, 1);
   assert.equal(result.ledger, undefined);
 });
+
+test("tick leaks salience from lastSalientAt toward the floor", () => {
+  const store = new SqliteStore(":memory:");
+  const c = buildCell(
+    { kind: "obs", title: "T", body: "b", confidence: 0.6 },
+    { key: "salc", now: "2026-01-01T00:00:00.000Z" },
+  );
+  store.put(c);
+  // 30 days idle from updatedAt (no lastSalientAt): salience decays below seed 0.5
+  tick(store, "2026-01-31T00:00:00.000Z");
+  const after = store.get("salc")!;
+  assert.ok(after.scores.salience < 0.5);
+  assert.ok(after.scores.salience >= 0.05); // stays above the floor
+  assert.equal(after.scores.salienceSeed, 0.5); // seed is the anchor, unchanged
+  store.close();
+});
+
+test("tick leaves salience at the seed when there is no idle time", () => {
+  const store = new SqliteStore(":memory:");
+  const c = buildCell(
+    { kind: "obs", title: "T", body: "b", confidence: 0.6 },
+    { key: "sal0", now: "2026-01-01T00:00:00.000Z" },
+  );
+  store.put(c);
+  tick(store, "2026-01-01T00:00:00.000Z"); // dt=0
+  assert.equal(store.get("sal0")?.scores.salience, 0.5);
+  store.close();
+});
+
+test("a pinned cell's salience does not leak", () => {
+  const store = new SqliteStore(":memory:");
+  const c = buildCell(
+    { kind: "obs", title: "T", body: "b", confidence: 0.6 },
+    { key: "salp", now: "2026-01-01T00:00:00.000Z" },
+  );
+  c.flags.pinned = true;
+  store.put(c);
+  tick(store, "2027-01-01T00:00:00.000Z"); // a year later
+  assert.equal(store.get("salp")?.scores.salience, 0.5);
+  store.close();
+});

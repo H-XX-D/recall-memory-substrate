@@ -6,6 +6,7 @@ import { platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { admit } from "./admission.js";
+import { actorCalibrationFactor } from "./actors.js";
 import {
   exportCellArchive,
   importAutoMemory,
@@ -198,7 +199,11 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const proposal = readProposal(args);
       const store = openWriteStore(route.dbPath);
       try {
-        const result = admit(proposal, { store, now: options.now });
+        // Derive the actor's standing calibration factor from this store's
+        // history (buildCell keys producedBy on owner, default "claude-code")
+        // and feed it into R1. Neutral (1) until the actor has >= 3 outcomes.
+        const calibrationFactor = actorCalibrationFactor(store, proposal.owner ?? "claude-code");
+        const result = admit(proposal, { store, now: options.now, calibrationFactor });
         if (result.accepted && result.cell && !args.noGuidance) {
           const suggest = args.noSuggestPrograms
             ? false
@@ -371,6 +376,11 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
       const target = args.command[subcommand === "show" ? 2 : 1];
       if (!target) throw new Error("cell show requires a key or handle");
       return withReadStore(args, route, env, (store) => {
+        // Deliberately does NOT bump salience: `cell show` is developer
+        // inspection and must stay a pure read (it runs between archive
+        // export and re-import, where a mutation would break round-trip
+        // idempotence). Retrieval reinforcement is the agent-facing recall_cell
+        // MCP tool's job, where a read genuinely is the agent's attention.
         outJson(out, inspectCell(store, target));
         return 0;
       });

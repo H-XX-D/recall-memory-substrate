@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { effectiveConfidence, currency } from "./scores.js";
+import {
+  effectiveConfidence,
+  currency,
+  salienceDecay,
+  salienceBump,
+  SALIENCE_FLOOR,
+  SALIENCE_TAU_DAYS,
+} from "./scores.js";
 
 test("effectiveConfidence with zero masses equals clamp01(stated*calibration)", () => {
   const stated = 0.8;
@@ -68,4 +75,24 @@ test("currency stays at c0 when dt=0 for any tau and floor", () => {
   for (const tau of [3650, 30, 7]) {
     assert.equal(currency({ c0: 0.7, dt: 0, tau, cFloor: 0.2 }), 0.7);
   }
+});
+
+test("salienceDecay returns the seed at dt=0 (no idle time, no leak)", () => {
+  assert.equal(salienceDecay({ seed: 0.5, dt: 0 }), 0.5);
+  assert.equal(salienceDecay({ seed: 0.9, dt: 0 }), 0.9);
+});
+
+test("salienceDecay leaks toward the floor over idle time", () => {
+  const one = salienceDecay({ seed: 0.5, dt: SALIENCE_TAU_DAYS }); // dt/tau = 1
+  assert.ok(Math.abs(one - (SALIENCE_FLOOR + (0.5 - SALIENCE_FLOOR) * Math.exp(-1))) < 1e-9);
+  const far = salienceDecay({ seed: 0.5, dt: SALIENCE_TAU_DAYS * 100 });
+  assert.ok(far >= SALIENCE_FLOOR && far - SALIENCE_FLOOR < 1e-3); // asymptotes to floor
+});
+
+test("salienceBump accumulates toward 1 with diminishing returns, clamped", () => {
+  const once = salienceBump(0.5); // 0.5 + 0.5*0.2 = 0.6
+  assert.ok(Math.abs(once - 0.6) < 1e-9);
+  const twice = salienceBump(once); // 0.6 + 0.4*0.2 = 0.68
+  assert.ok(Math.abs(twice - 0.68) < 1e-9);
+  assert.ok(salienceBump(1) <= 1 && salienceBump(0.999) <= 1); // never exceeds 1
 });

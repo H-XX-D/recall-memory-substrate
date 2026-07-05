@@ -154,6 +154,11 @@ export interface Cell {
   props: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  // The salience anchor: when this cell was last reinforced by a retrieval. The
+  // operator decays salience from this timestamp, distinct from updatedAt (the
+  // currency anchor), so a read reinforces attention without refreshing freshness.
+  // Absent until the cell is first retrieved; decay then falls back to updatedAt.
+  lastSalientAt?: string;
   status: "active" | "superseded" | "annexed";
 }
 

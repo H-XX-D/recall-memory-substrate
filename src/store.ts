@@ -18,6 +18,7 @@ import type {
 } from "./types.js";
 import { openDb, type Db } from "./db.js";
 import { buildFtsMatchQuery } from "./retrieval.js";
+import { salienceBump } from "./scores.js";
 import { normalizeHyperedgeMembers } from "./hyperedges.js";
 import type { ProgramRun } from "./programs.js";
 import type { StoredEvalRun } from "./evals.js";
@@ -142,6 +143,25 @@ export class SqliteStore implements Store {
     }
 
     this.indexCell(cell);
+  }
+
+  // Retrieval bump: the one place salience accumulates. A genuine single-cell
+  // read (cell show / recall_cell) reinforces attention. Preserves updatedAt so
+  // currency (freshness) is untouched; salience is anchored to lastSalientAt
+  // instead. Feature-detected by callers with "touchSalience" in store, and a
+  // no-op on an unknown key. Not part of the Store interface: a SqliteStore-only
+  // extension, so read-only surfaces (the federated store) never bump.
+  touchSalience(key: string, now: string, gain?: number): Cell | undefined {
+    const cell = this.get(key);
+    if (!cell) return undefined;
+    const seed = salienceBump(cell.scores.salienceSeed, gain);
+    const updated: Cell = {
+      ...cell,
+      scores: { ...cell.scores, salienceSeed: seed, salience: seed },
+      lastSalientAt: now,
+    };
+    this.put(updated);
+    return updated;
   }
 
   get(key: string): Cell | undefined {
