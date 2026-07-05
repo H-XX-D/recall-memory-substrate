@@ -104,6 +104,54 @@ test("watch programs use lastRun as baseline and derive witnesses only after a t
   }
 });
 
+test("a watch program trips even when the caller reuses a stale in-memory program cell across runs (baseline is store-authoritative)", () => {
+  const store = new SqliteStore(":memory:");
+  try {
+    const watched = buildCell(
+      { kind: "obs", title: "Watched", body: "watched", confidence: 0.9, topics: ["gate"] },
+      { key: "aaaaaaaa-9999-9999-9999-999999999999" },
+    );
+    const program = buildCell(
+      {
+        kind: "prg",
+        title: "Stale-object watch",
+        body: "watch gate members",
+        confidence: 0.9,
+        topics: ["gate"],
+        props: {
+          program: {
+            schemaVersion: "recall.program.v1",
+            operation: "watch",
+            target: { keys: [watched.key] },
+            params: { delta: 0.1 },
+          },
+        },
+      },
+      { key: "cccccccc-9999-9999-9999-999999999999" },
+    );
+    store.put(watched);
+    store.put(program);
+
+    // Pass the SAME in-memory `program` object to both runs. Its props.lastRun is
+    // never updated locally (persistProgramRun writes to the store), so before the
+    // fix run 2 read a null baseline and never tripped. Now the baseline is read
+    // from the store, so the drop is detected.
+    const baseline = runProgramCell(store, program, "2026-06-26T12:00:00.000Z");
+    assert.equal(baseline.run.output.tripped, false);
+    assert.equal(baseline.run.output.previous, null);
+
+    store.put({ ...watched, scores: { ...watched.scores, effective: 0.4 } });
+    const tripped = runProgramCell(store, program, "2026-06-26T12:01:00.000Z");
+    assert.equal(tripped.run.output.previous, 0.9);
+    assert.equal(tripped.run.output.tripped, true);
+
+    // runCount is store-authoritative too: two runs, not stuck at 1.
+    assert.equal(store.get(program.key)!.props.runCount, 2);
+  } finally {
+    store.close();
+  }
+});
+
 test("re-tripping a watch program on the same before/after swing derives one cell, not two (deriveAdmit short-circuit)", () => {
   const store = new SqliteStore(":memory:");
   try {

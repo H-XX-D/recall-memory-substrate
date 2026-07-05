@@ -125,8 +125,14 @@ export function runProgramCell(
   now: string,
   opts: { derive?: boolean } = {},
 ): { run: ProgramRun; derived?: AdmissionResult } {
-  const program = typeof programKeyOrCell === "string" ? store.get(programKeyOrCell) : programKeyOrCell;
-  if (!program) throw new Error(`unknown program: ${programKeyOrCell}`);
+  const key = typeof programKeyOrCell === "string" ? programKeyOrCell : programKeyOrCell.key;
+  // The store is the source of truth for a program's own state: its props.lastRun
+  // baseline and runCount. Re-read it here so a caller that reuses a stale
+  // in-memory program object across runs still sees its own prior run; otherwise
+  // watch/drift/trend read a null baseline every time and silently never trip.
+  // Falls back to the passed cell only when the program is not yet persisted.
+  const program = store.get(key) ?? (typeof programKeyOrCell === "string" ? undefined : programKeyOrCell);
+  if (!program) throw new Error(`unknown program: ${key}`);
   const spec = programSpecFromCell(program);
   if (!spec) throw new Error(`cell is not a program: ${program.key}`);
 
