@@ -9,6 +9,7 @@
 import { analyzeMemory, memoryHealthToProposal } from "./analysis.js";
 import { compileContext, formatContextPacket } from "./compile.js";
 import { inspectCell, resolveCell } from "./cell-context.js";
+import { actorCalibrationFactor } from "./actors.js";
 import { admit } from "./admission.js";
 import { buildWriteGuidance } from "./guidance.js";
 import { semanticSearch } from "./semantic.js";
@@ -120,6 +121,11 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
     case "recall_cell": {
       const ref = String(args.idOrAddress ?? args.id ?? "");
       const c = inspectCell(store, ref).cell;
+      // Retrieval bump: an agent pulling a cell into context is attention.
+      // SqliteStore-only, so it is a no-op on any read-only store.
+      if ("touchSalience" in store) {
+        (store as SqliteStore).touchSalience(c.key, new Date().toISOString());
+      }
       return JSON.stringify({
         id: c.key,
         handle: c.handle,
@@ -132,7 +138,11 @@ function callTool(name: string, args: Record<string, unknown>, store: Store): st
       });
     }
     case "recall_write": {
-      const r = admit(toProposal(args), { store });
+      const proposal = toProposal(args);
+      // Derive the actor's standing calibration factor from this store's history
+      // before R1 folds it into effective. Neutral until >= 3 resolved outcomes.
+      const calibrationFactor = actorCalibrationFactor(store, proposal.owner ?? "claude-code");
+      const r = admit(proposal, { store, calibrationFactor });
       const suggest = args.suggestPrograms === false ? false : args.suggestPrograms === true ? true : process.env.RECALL_SUGGEST_PROGRAMS !== "0";
       const guidance = r.accepted && r.cell ? buildWriteGuidance(store, r.cell, r, { suggestPrograms: suggest }) : undefined;
       return JSON.stringify({

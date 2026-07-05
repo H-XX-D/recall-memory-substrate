@@ -889,3 +889,39 @@ test("storageStats maximumCell.bytes counts true UTF-8 bytes, not characters, fo
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("touchSalience bumps salience and sets the anchor without refreshing updatedAt", () => {
+  const store = new SqliteStore(":memory:");
+  const cell = buildCell(
+    { kind: "obs", title: "attention", body: "b", confidence: 0.7 },
+    { key: "touch1", now: "2026-01-01T00:00:00.000Z" },
+  );
+  store.put(cell);
+
+  const bumped = store.touchSalience("touch1", "2026-02-01T00:00:00.000Z");
+  assert.ok(bumped);
+  assert.ok(Math.abs(bumped!.scores.salienceSeed - 0.6) < 1e-9); // 0.5 + 0.5*0.2
+  assert.equal(bumped!.scores.salience, bumped!.scores.salienceSeed);
+  assert.equal(bumped!.lastSalientAt, "2026-02-01T00:00:00.000Z");
+  assert.equal(bumped!.updatedAt, "2026-01-01T00:00:00.000Z"); // freshness untouched
+
+  const reread = store.get("touch1")!;
+  assert.ok(Math.abs(reread.scores.salienceSeed - 0.6) < 1e-9);
+  assert.equal(reread.lastSalientAt, "2026-02-01T00:00:00.000Z");
+  store.close();
+});
+
+test("touchSalience is a no-op on an unknown key", () => {
+  const store = new SqliteStore(":memory:");
+  assert.equal(store.touchSalience("nope", "2026-01-01T00:00:00.000Z"), undefined);
+  store.close();
+});
+
+test("repeated touchSalience accumulates with diminishing returns", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "obs", title: "a", body: "b", confidence: 0.7 }, { key: "touch2" }));
+  store.touchSalience("touch2", "2026-01-01T00:00:00.000Z"); // -> 0.6
+  const twice = store.touchSalience("touch2", "2026-01-02T00:00:00.000Z"); // -> 0.68
+  assert.ok(Math.abs(twice!.scores.salienceSeed - 0.68) < 1e-9);
+  store.close();
+});

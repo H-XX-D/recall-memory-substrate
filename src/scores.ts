@@ -40,3 +40,35 @@ export function currency({
 }): number {
   return cFloor + (c0 - cFloor) * Math.exp(-dt / tau);
 }
+
+// Salience is attention, not freshness: it accrues on retrieval and leaks on
+// idle. SALIENCE_TAU_DAYS is the idle leak time-constant; SALIENCE_FLOOR is the
+// resting attention a never-retrieved cell settles toward; SALIENCE_GAIN is the
+// per-retrieval accumulator step in salienceBump.
+export const SALIENCE_TAU_DAYS = 30;
+export const SALIENCE_FLOOR = 0.05;
+export const SALIENCE_GAIN = 0.2;
+
+// Idle leak: salience = floor + (seed - floor) * exp(-dt/tau). At dt=0 returns
+// the seed (so a just-retrieved or brand-new cell holds its salience); as idle
+// time grows it decays toward the floor. Anchored to lastSalientAt so, like the
+// currency tick, it is idempotent and never compounds.
+export function salienceDecay({
+  seed,
+  dt,
+  tau = SALIENCE_TAU_DAYS,
+  floor = SALIENCE_FLOOR,
+}: {
+  seed: number;
+  dt: number;
+  tau?: number;
+  floor?: number;
+}): number {
+  return floor + (seed - floor) * Math.exp(-dt / tau);
+}
+
+// Retrieval bump: a leaky-accumulator step toward 1. seed' = seed + (1-seed)*gain,
+// clamped to [0, 1]. Diminishing returns as a cell is retrieved repeatedly.
+export function salienceBump(seed: number, gain = SALIENCE_GAIN): number {
+  return clamp01(seed + (1 - seed) * gain);
+}

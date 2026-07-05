@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Two score producers that the effective and salience formulas already consumed but nothing fed are now wired, so both scores move from real signal instead of sitting at their neutral seed.
+
+- Actor calibration: `actors.ts` derives a writer's `ActorOutcome[]` from the store (a past write is contradicted if it was superseded or carries an incoming active `contradicts` edge, else survived), and `actorCalibrationFactor(store, actorId)` runs the existing Brier math over it. The CLI `admit`/`write-propose` path and the MCP `recall_write` tool derive the factor for the write's actor (keyed on `owner`, default `claude-code`) and pass it as `calibrationFactor`, so a proven-miscalibrated actor's new writes deflate at intake; the factor stays neutral (1) until the actor has at least 3 resolved outcomes. `admit()` itself is unchanged: it still consumes an injected factor, so the store-free library contract and its tests keep their neutral default.
+- Salience: a leaky accumulator, at last. `salienceDecay`/`salienceBump` in `scores.ts` (tau 30d, floor 0.05, gain 0.2); the operator tick leaks salience from a new `lastSalientAt` anchor toward the floor, distinct from the currency anchor (`updatedAt`) so a read reinforces attention without refreshing freshness, and pinned cells are exempt like currency. `SqliteStore.touchSalience(key, now)` is the one accumulation point (seed' = seed + (1-seed)*gain, updatedAt preserved); the MCP `recall_cell` tool bumps on agent retrieval. CLI `cell show` stays a pure read by design, so archive export/re-import round-trips remain idempotent.
+
 ## 0.12.0 - 2026-07-04
 
 Phase 6 of the subsystem port: the daily-driver loop. The hooks, python tooling, and skills that ran the live machine's session loop now speak the v5 schema and CLI, and the four 0.11 defects on that path are fixed, so a legacy install can cut over to this line with its memory migrated.

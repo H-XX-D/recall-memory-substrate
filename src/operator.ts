@@ -5,7 +5,7 @@
 // neighbor effectives, then written, so a tick is order-independent.
 import { randomUUID } from "node:crypto";
 import type { AdmissionResult, Cell, Stability, Store, StoreStats } from "./types.js";
-import { currency, effectiveConfidence } from "./scores.js";
+import { currency, effectiveConfidence, salienceDecay } from "./scores.js";
 import { neighborMass } from "./mass.js";
 import { runStandingPrograms, type ProgramRun } from "./programs.js";
 import type { SqliteStore } from "./store.js";
@@ -61,6 +61,10 @@ function recompute(store: Store, cell: Cell, now: string): Cell {
       tau: TAU_DAYS[cell.stability],
       cFloor: 0.1,
     });
+    // Salience leaks from its own anchor (last retrieval, else updatedAt), so
+    // attention fades on idle without touching the currency/freshness anchor.
+    const dtSal = Math.max(0, (Date.parse(now) - Date.parse(cell.lastSalientAt ?? cell.updatedAt)) / DAY_MS);
+    scores.salience = salienceDecay({ seed: cell.scores.salienceSeed, dt: dtSal });
   }
   const m = neighborMass(store, cell.key);
   scores.effective = effectiveConfidence({
