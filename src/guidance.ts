@@ -17,7 +17,7 @@ export interface CandidateEdge {
 }
 
 export interface ProgramSuggestion {
-  operation: "watch" | "quorum" | "allocate";
+  operation: "watch" | "quorum" | "allocate" | "trend";
   reason: string;
   proposal: WriteProposal;
 }
@@ -46,6 +46,7 @@ const ATTENUATION_WARNING = "unsupported high confidence was attenuated";
 const MAX_CANDIDATES = 3;
 const RECURRING_TOPIC_MIN = 5;
 const TASK_POOL_MIN = 4;
+const VALUE_SERIES_MIN = 3;
 const MAX_SUGGESTIONS = 2;
 
 const KIND_HINTS: { kinds: Kind[]; re: RegExp; hint: string }[] = [
@@ -165,8 +166,18 @@ function programSuggestions(store: Store, cell: Cell): ProgramSuggestion[] {
     if (out.length >= MAX_SUGGESTIONS) break;
     const sharing = active.filter((c) => c.kind !== "prg" && (c.tags.topics ?? []).includes(topic));
     const openTasks = sharing.filter((c) => c.kind === "tsk");
+    const valued = sharing.filter((c) => typeof c.value === "number" && Number.isFinite(c.value));
     if (openTasks.length >= TASK_POOL_MIN && !covered(existing, "allocate", topic)) {
       out.push(suggestion("allocate", topic, `${openTasks.length} open tasks share topic "${topic}"; an allocate program ranks them by pressure on every operator pass`, { topics: [topic], kinds: ["tsk"] }));
+    } else if (
+      typeof cell.value === "number" && Number.isFinite(cell.value) &&
+      valued.length >= VALUE_SERIES_MIN && !covered(existing, "trend", topic)
+    ) {
+      // The writer is recording a numeric reading onto a topic that already
+      // accumulates them: a trend program flags a sustained rise or fall in the
+      // measured value over operator passes (distinct from watch's single-step
+      // move on effective confidence).
+      out.push(suggestion("trend", topic, `${valued.length} cells on topic "${topic}" carry a numeric value; a trend program flags a sustained rise or fall in that value across operator passes`, { topics: [topic] }, { measure: "value" }));
     } else if (sharing.length >= RECURRING_TOPIC_MIN && !covered(existing, "watch", topic)) {
       out.push(suggestion("watch", topic, `${sharing.length} active cells share topic "${topic}"; a watch program trips when their average effective confidence moves`, { topics: [topic] }));
     }
@@ -203,6 +214,7 @@ function suggestion(
   label: string,
   reason: string,
   target: Record<string, unknown>,
+  params?: Record<string, unknown>,
 ): ProgramSuggestion {
   return {
     operation,
@@ -213,7 +225,14 @@ function suggestion(
       body: reason,
       confidence: 0.6,
       topics: ["recall-programs"],
-      props: { program: { schemaVersion: "recall.program.v1", operation, target } },
+      props: {
+        program: {
+          schemaVersion: "recall.program.v1",
+          operation,
+          target,
+          ...(params ? { params } : {}),
+        },
+      },
     },
   };
 }
