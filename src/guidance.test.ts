@@ -144,6 +144,33 @@ test("a task pool suggests allocate ahead of watch", () => {
   store.close();
 });
 
+test("recording a numeric value onto a topic that already accumulates readings suggests a trend program measuring value", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "obs", title: "p99 reading 1", body: "b", confidence: 0.7, topics: ["p99"], value: 10 }, { store });
+  admit({ kind: "obs", title: "p99 reading 2", body: "b", confidence: 0.7, topics: ["p99"], value: 12 }, { store });
+  const r = admit({ kind: "obs", title: "p99 reading 3", body: "b", confidence: 0.7, topics: ["p99"], value: 15 }, { store });
+  const g = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  const trend = g.programSuggestions.find((s) => s.operation === "trend");
+  assert.ok(trend, "expected a trend suggestion");
+  const spec = (trend!.proposal.props as { program: { target: { topics: string[] }; params: { measure: string } } }).program;
+  assert.deepEqual(spec.target.topics, ["p99"]);
+  assert.equal(spec.params.measure, "value");
+  assert.doesNotThrow(() => validateProgramSpec(trend!.proposal.props!.program));
+  assert.equal(admit(trend!.proposal, { store }).accepted, true);
+  store.close();
+});
+
+test("no trend suggestion when the new cell carries no numeric value, even with a value series present", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ kind: "obs", title: "v1", body: "b", confidence: 0.7, topics: ["p99"], value: 10 }, { store });
+  admit({ kind: "obs", title: "v2", body: "b", confidence: 0.7, topics: ["p99"], value: 12 }, { store });
+  admit({ kind: "obs", title: "v3", body: "b", confidence: 0.7, topics: ["p99"], value: 14 }, { store });
+  const r = admit({ kind: "obs", title: "a non-numeric note", body: "b", confidence: 0.7, topics: ["p99"] }, { store });
+  const g = buildWriteGuidance(store, r.cell!, r, { suggestPrograms: true });
+  assert.equal(g.programSuggestions.filter((s) => s.operation === "trend").length, 0);
+  store.close();
+});
+
 test("a contradicts edge onto a belief suggests a quorum program targeted at it", () => {
   const store = new SqliteStore(":memory:");
   const bel = admit({ kind: "bel", title: "The cache layer is safe to remove", body: "claim", confidence: 0.6 }, { store }).cell!;
