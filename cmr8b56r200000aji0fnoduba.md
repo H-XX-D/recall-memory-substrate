@@ -1,5 +1,5 @@
 ---
-title: "Free 3D fly-to Celestial Chart"
+title: "JWST Data Driven 3D fly-by wire Exoplanet Chart Plotter"
 datePublished: 2026-07-05T21:33:00.423Z
 cuid: cmr8b56r200000aji0fnoduba
 slug: free-3d-fly-to-celestial-chart
@@ -38,12 +38,18 @@ Once you make that split explicit, the app becomes honest by construction. A ren
 
 The relations are standard and cited at the point of use. A few of them:
 
-- **Interior composition** is read from the mass-radius point against the reference curves of Zeng, Sasselov & Stewart (2016), `R/Re = C (M/Me)^(1/3.7)`, with C set by composition (iron 0.86, Earth-like 1.00, rock 1.07, water-rich above).
-- **Habitable zone** follows the stellar-flux limits of Kopparapu et al. (2013), with the boundary distance `d = sqrt((L/Lsun) / S_eff)`.
-- **Earth Similarity Index** uses Schulze-Makuch et al. (2011) over radius, density, escape velocity, and equilibrium temperature.
-- **Atmospheric escape** is screened with the Jeans parameter evaluated at the exobase, not the surface, because for a puffy hot atmosphere the large scale height lifts the exobase well above the surface and changes the answer.
-- **Transmission spectra** are inverted with scale-height physics, `H = kT/(mu g)`, on real reduced JWST spectra to estimate the mean molecular weight and separate a light hydrogen envelope from a heavy or cloudy one.
-- **White dwarfs** use the degenerate mass-radius relation of Nauenberg (1972) shown against the real Tremblay et al. (2019) Gaia sample.
+*   **Interior composition** is read from the mass-radius point against the reference curves of Zeng, Sasselov & Stewart (2016), `R/Re = C (M/Me)^(1/3.7)`, with C set by composition (iron 0.86, Earth-like 1.00, rock 1.07, water-rich above).
+    
+*   **Habitable zone** follows the stellar-flux limits of Kopparapu et al. (2013), with the boundary distance `d = sqrt((L/Lsun) / S_eff)`.
+    
+*   **Earth Similarity Index** uses Schulze-Makuch et al. (2011) over radius, density, escape velocity, and equilibrium temperature.
+    
+*   **Atmospheric escape** is screened with the Jeans parameter evaluated at the exobase, not the surface, because for a puffy hot atmosphere the large scale height lifts the exobase well above the surface and changes the answer.
+    
+*   **Transmission spectra** are inverted with scale-height physics, `H = kT/(mu g)`, on real reduced JWST spectra to estimate the mean molecular weight and separate a light hydrogen envelope from a heavy or cloudy one.
+    
+*   **White dwarfs** use the degenerate mass-radius relation of Nauenberg (1972) shown against the real Tremblay et al. (2019) Gaia sample.
+    
 
 Rather than reporting single derived values, the app draws each input from its survey error bars with a per-planet seeded sampler, recomputes the full derived chain thousands of times, and reports the 16th, 50th, and 84th percentiles. You get an interval, not false precision.
 
