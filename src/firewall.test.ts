@@ -63,6 +63,58 @@ test("screenSecrets blocks public writes with personal data", () => {
   assert.ok(got.issues.some((i) => /public write/i.test(i.message)));
 });
 
+test("screenSecrets catches a format-evaded SSN (letter-O for zero, spaces for dashes)", () => {
+  const got = screenSecrets(
+    proposal({ sensitivity: "public", body: "my SSN is 0O0 O0 O0O0, please file it" })
+  );
+  assert.equal(got.allowed, false);
+  assert.ok(got.issues.some((i) => /social security/i.test(i.message)));
+});
+
+test("screenSecrets catches a spelled-out email address", () => {
+  const got = screenSecrets(
+    proposal({
+      sensitivity: "public",
+      body: "contact test dot attacker plus tag at example dot com for details",
+    }),
+  );
+  assert.equal(got.allowed, false);
+  assert.ok(got.issues.some((i) => /spelled-out email/i.test(i.message)));
+});
+
+test("screenSecrets catches a Luhn-valid payment card number", () => {
+  const got = screenSecrets(
+    proposal({
+      sensitivity: "public",
+      body: "primary account number 4111 1111 1111 1111 on file",
+    }),
+  );
+  assert.equal(got.allowed, false);
+  assert.ok(got.issues.some((i) => /payment card/i.test(i.message)));
+});
+
+test("screenSecrets does NOT flag a 16-digit run that fails the Luhn check", () => {
+  const got = screenSecrets(
+    proposal({
+      sensitivity: "public",
+      body: "tracking number 1234 5678 9012 3456 for the shipment",
+    }),
+  );
+  assert.equal(got.allowed, true);
+  assert.deepEqual(got.issues, []);
+});
+
+test("screenSecrets does not false-positive on ordinary prose with o/l near digits", () => {
+  const got = screenSecrets(
+    proposal({
+      sensitivity: "public",
+      body: "I ordered 5 of the o-ring parts, item 10203, at 5 o'clock, and photo102 is the file",
+    }),
+  );
+  assert.equal(got.allowed, true);
+  assert.deepEqual(got.issues, []);
+});
+
 test("screenSecrets does NOT trip on a bare UUID", () => {
   const got = screenSecrets(
     proposal({ body: "see cell a3ee1234-9b20-4c1a-8f3e-1234567890ab now" })

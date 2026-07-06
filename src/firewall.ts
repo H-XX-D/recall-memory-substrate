@@ -46,10 +46,14 @@ export function screenFindings(
   }
   if (proposal.sensitivity === "public") {
     for (const field of fields) {
+      const normalized = normalizeDigitLookalikes(field.text);
       for (const { name, re } of PUBLIC_DATA_PATTERNS) {
-        if (re.test(field.text)) {
+        if (re.test(field.text) || (normalized !== field.text && re.test(normalized))) {
           publicData.push({ path: field.path, message: `public write may expose ${name}` });
         }
+      }
+      if (findPaymentCardCandidates(field.text).some(luhnValid)) {
+        publicData.push({ path: field.path, message: "public write may expose payment card number" });
       }
     }
   }
@@ -82,9 +86,53 @@ export function attenuateConfidence(
 
 const PUBLIC_DATA_PATTERNS: { name: string; re: RegExp }[] = [
   { name: "email address", re: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i },
-  { name: "US social security number", re: /\b\d{3}-\d{2}-\d{4}\b/ },
+  { name: "US social security number", re: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/ },
   { name: "phone number", re: /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/ },
+  {
+    name: "spelled-out email address",
+    re: /\b\w[\w-]*(?:\s+(?:dot|plus)\s+\w[\w-]*){0,4}\s+at\s+\w[\w-]*(?:\s+dot\s+\w[\w-]*){1,3}\b/i,
+  },
 ];
+
+// Catches the specific evasion that beat the plain digit regexes above: a
+// letter standing in for a digit inside what is otherwise a run of digits and
+// separators (e.g. "0O0 O0 O0O0" for an SSN with O substituted for 0, spaces
+// substituted for dashes). Only touches an O/o or l/I that is directly
+// adjacent to a digit or a digit-group separator, so ordinary words are left
+// untouched: this is a scanning-only copy, never stored or displayed.
+function normalizeDigitLookalikes(text: string): string {
+  return text.replace(
+    /(?<=[\d])[oOlI](?=[\d\s.-]|$)|(?<=[\d\s.-]|^)[oOlI](?=[\d])/g,
+    (m) => (m === "o" || m === "O" ? "0" : "1")
+  );
+}
+
+// Payment card numbers aren't a fixed-format regex match the way an SSN is:
+// length varies 13-19 digits across issuers and grouping varies (spaces,
+// dashes, none). Rather than a broad digit-run regex that would also flag
+// arbitrary long reference numbers, candidates are Luhn-checked so only
+// strings that are actually valid card numbers are flagged.
+function findPaymentCardCandidates(text: string): string[] {
+  const re = /\b(?:\d[ -]?){12,18}\d\b/g;
+  return [...text.matchAll(re)].map((m) => m[0]);
+}
+
+function luhnValid(candidate: string): boolean {
+  const digits = candidate.replace(/[ -]/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = digits.charCodeAt(i) - 48;
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
 
 function hasSupportEvidence(proposal: WriteProposal): boolean {
   if ((proposal.sourceRefs?.length ?? 0) > 0) return true;
