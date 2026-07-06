@@ -98,15 +98,6 @@ recall compile "how should the event store handle concurrent reads?"
 
 ## How it works
 
-```mermaid
-flowchart LR
-    P[prompt arrives] --> H[hook compiles the graph<br/>against the prompt]
-    H --> I[primer injected<br/>into the turn]
-    I --> T[agent works<br/>reads and writes through the gate]
-    T --> S[stop gate checks<br/>obligations before release]
-    S --> O[operator tick between turns:<br/>decay, programs, evals, health]
-    O --> P
-```
 
 Memory is a graph of ten typed cell kinds (decisions, observations, beliefs, tasks, objectives, risks, references, verifications, hypotheses, standing programs) connected by six signed relations. Support raises a belief's effective confidence, contradiction lowers it, supersession preserves history. Scores are derived by walking edges, never stored redundantly, so the graph cannot silently disagree with itself. Between turns the operator recomputes what changed, runs the standing programs, and emits witness cells only when something actually moved, with deterministic keys so nothing is ever recorded twice.
 
