@@ -111,9 +111,13 @@ function httpEmbedding(url: string, text: string): EmbeddingRecord | null {
 }
 
 function tokenize(text: string): string[] {
+  // Keep Unicode letters/digits so non-ASCII content contributes real tokens to
+  // the hash:v1 fallback embedding instead of a degenerate vector. ASCII-only
+  // text tokenizes identically to the prior [^a-z0-9_:-] split, so existing
+  // embeddings are unchanged; only non-ASCII-bearing text gains coverage.
   return text
     .toLowerCase()
-    .split(/[^a-z0-9_:-]+/g)
+    .split(/[^\p{L}\p{N}_:-]+/gu)
     .filter((t) => t.length > 1);
 }
 
