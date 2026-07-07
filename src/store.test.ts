@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SqliteStore, contentKey } from "./store.js";
+import { SqliteStore, contentKey, searchTerms } from "./store.js";
 import { buildCell } from "./build.js";
 
 function tempDbDir(): string {
@@ -120,6 +120,33 @@ test("golden: store.search returns same hits before and after buildFtsMatchQuery
   const hitsC = store.search("tripwire sentinel");
   assert.ok(hitsC.some((h) => h.cell.key === "cell-b"), "cell-b must be in results for tripwire sentinel");
 
+  store.close();
+});
+
+test("searchTerms keeps Unicode letters and digits so non-ASCII queries survive", () => {
+  // Cyrillic, accented Latin, and CJK all survive tokenization; an ASCII-only
+  // split used to drop them, leaving the term list empty or truncated.
+  assert.deepEqual(searchTerms("привет мир"), ["привет", "мир"]);
+  assert.deepEqual(searchTerms("café"), ["café"]);
+  assert.ok(searchTerms("东京 tower").includes("东京"));
+  // symbol tokens with the kept _:- class stay intact
+  assert.ok(searchTerms("py-sym:foo_bar").includes("py-sym:foo_bar"));
+  // ASCII-only input tokenizes exactly as before
+  assert.deepEqual(searchTerms("watchdog tripwire"), ["watchdog", "tripwire"]);
+});
+
+test("store.search retrieves non-ASCII content by its own term", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "obs", title: "заметка привет sentinel", body: "тело привет", confidence: 0.7 }, { key: "cyr" }));
+  store.put(buildCell({ kind: "obs", title: "carte café menu", body: "boisson chaude", confidence: 0.7 }, { key: "acc" }));
+  store.put(buildCell({ kind: "obs", title: "banana orange", body: "fruit salad", confidence: 0.7 }, { key: "ascii" }));
+
+  // Cyrillic term retrieves the Cyrillic cell (previously returned nothing).
+  assert.ok(store.search("привет").some((h) => h.cell.key === "cyr"), "Cyrillic term must retrieve its cell");
+  // Accented Latin retrieves through the diacritic-folded index.
+  assert.ok(store.search("café").some((h) => h.cell.key === "acc"), "accented term must retrieve its cell");
+  // ASCII retrieval is unaffected.
+  assert.ok(store.search("banana").some((h) => h.cell.key === "ascii"), "ASCII term still retrieves its cell");
   store.close();
 });
 

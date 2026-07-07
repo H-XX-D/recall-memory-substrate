@@ -31,9 +31,15 @@ export function contentKey(kind: string, title: string): string {
 }
 
 export function searchTerms(query: string): string[] {
+  // Split on any non-word char while keeping Unicode letters/digits (\p{L}\p{N})
+  // so non-ASCII queries (Cyrillic, Greek, CJK, accented Latin) survive to the
+  // FTS MATCH. The porter unicode61 index already tokenizes this content; an
+  // ASCII-only split here (the prior [^a-z0-9_:-]) silently dropped every
+  // non-ASCII character and made that content unretrievable by its own term.
+  // The _:- class is kept so symbol tokens like py-sym:foo_bar stay intact.
   return query
     .toLowerCase()
-    .split(/[^a-z0-9_:-]+/g)
+    .split(/[^\p{L}\p{N}_:-]+/gu)
     .filter((term) => term.length > 1)
     .slice(0, 8);
 }
