@@ -23,7 +23,7 @@ test("initialize returns protocol version and server info", () => {
   store.close();
 });
 
-test("tools/list returns exactly the nineteen-tool surface", () => {
+test("tools/list returns exactly the twenty-tool surface", () => {
   const store = new SqliteStore(":memory:");
   const res = handleMcpRequest(req("tools/list"), store)?.result as any;
   assert.deepEqual(res.tools.map((t: any) => t.name), [
@@ -31,6 +31,7 @@ test("tools/list returns exactly the nineteen-tool surface", () => {
     "recall_search",
     "recall_compile",
     "recall_cell",
+    "recall_write_template",
     "recall_write",
     "recall_semantic",
     "recall_ref",
@@ -43,7 +44,7 @@ test("tools/list returns exactly the nineteen-tool surface", () => {
     "recall_program_runs",
     "recall_eval_run",
     "recall_subgraph",
-      "recall_deltas",
+    "recall_deltas",
     "recall_health",
     "recall_storage",
   ]);
@@ -97,8 +98,8 @@ test("a notification (no id) yields no response", () => {
   store.close();
 });
 
-test("TOOLS is the nineteen-tool surface", () => {
-  assert.equal(TOOLS.length, 19);
+test("TOOLS is the twenty-tool surface", () => {
+  assert.equal(TOOLS.length, 20);
 });
 
 test("recall_semantic returns JSON hits with key/handle/title/score/backend", () => {
@@ -709,6 +710,20 @@ test("recall_write schema declares the evidence fields", () => {
   assert.deepEqual(props.verification?.enum, ["unverified", "checked", "tested", "external"]);
   assert.equal(props.suggestPrograms?.type, "boolean");
   assert.equal(props.props?.type, "object");
+  store.close();
+});
+
+test("recall_write_template exposes the complete admission firewall contract", () => {
+  const store = new SqliteStore(":memory:");
+  const result = callText(handleMcpRequest(req("tools/call", {
+    name: "recall_write_template",
+    arguments: {},
+  }), store));
+  assert.equal(result.schemaVersion, "recall.write.v5");
+  assert.match(result.template.edges, /supports\|contradicts/);
+  assert.match(result.template.flags, /requiresReview/);
+  assert.match(result.template.props, /standing-program/);
+  assert.match(result.template.hyperedges, /bundle memberships/);
   store.close();
 });
 

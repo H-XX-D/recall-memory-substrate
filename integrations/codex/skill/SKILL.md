@@ -41,6 +41,9 @@ uncertain scope.
 4. Call `recall_write` for lasting outcomes: decisions, verified observations,
    beliefs that need later confirmation, open tasks, objectives, risks,
    references, verification results, hypotheses, and standing procedures.
+   Before a structurally rich write, call `recall_write_template` and use its
+   complete admission-firewall contract; do not reduce a cell to the few fields
+   remembered from ordinary writes.
 5. Read the write response. Report memory as saved only when `accepted` is true
    and an `id` is returned. Address rejection issues instead of claiming success.
 6. Before ending substantial work, audit whether the outcome needs durable

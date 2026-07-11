@@ -408,6 +408,20 @@ test("compileContext: depends_on + contradicts edges render in relation order an
   store.close();
 });
 
+test("compileContext walks authored edges beyond the lexical entry node", () => {
+  const store = new SqliteStore(":memory:");
+  store.put(buildCell({ kind: "ver", title: "deep graph evidence", body: "e", confidence: 0.8 }, { key: "deep" }));
+  store.put(buildCell({ kind: "obs", title: "mapped intermediate", body: "m", confidence: 0.8, edges: [{ relation: "derived_from", target: "deep" }] }, { key: "middle" }));
+  store.put(buildCell({ kind: "dec", title: "watchdog graph doorway", body: "d", confidence: 0.8, edges: [{ relation: "depends_on", target: "middle" }] }, { key: "door" }));
+
+  const packet = compileContext(store, "watchdog doorway", { limit: 1, graphDepth: 2 });
+  assert.ok(packet.expansionHandles.includes("middle"));
+  assert.ok(packet.expansionHandles.includes("deep"));
+  assert.ok(packet.translatedReferences.some((line) => /graph_path:2/.test(line) && /ver_/.test(line)));
+  assert.ok(packet.compilerState.some((line) => /graph_walk=seeded:1, discovered:2, depth:2/.test(line)));
+  store.close();
+});
+
 test("compileContext: 8 edges on one cell yield 6 translated lines plus an overflow line", () => {
   const store = new SqliteStore(":memory:");
   const edges: { relation: string; target: string }[] = [];
