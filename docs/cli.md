@@ -619,16 +619,25 @@ hooks installed, whether built-in auto-memory is disabled, and whether the
 `recall` MCP server is registered (`mcpPath`, `mcpInstalled`).
 
 **`recall codex sync [--apply]`** (bare `recall codex` is the same) wires
-Recall into Codex: merges MCP server
-registration into Codex's config and merges a Recall block into `AGENTS.md`.
-Same dry-run-by-default and backup behavior as `claude sync`.
+Recall into Codex: installs the packaged Recall skill at
+`$CODEX_HOME/skills/recall/SKILL.md`, generates the `/recall` prompt at
+`$CODEX_HOME/prompts/recall.md`, merges MCP server registration into Codex's
+config, merges a Recall block into `AGENTS.md`, and installs the portable
+`SessionStart`, `UserPromptSubmit`, `PostToolUse`, and `Stop` hooks. Same
+dry-run-by-default and backup behavior as `claude sync`.
 
-**`recall codex status`** reports whether the MCP server is registered and
-whether the `AGENTS.md` Recall block is present.
+**`recall codex status`** reports whether the MCP server is registered, whether
+the `AGENTS.md` Recall block is present, whether the skill and prompt are
+installed and current, and whether the hook asset and all four registrations
+are installed.
 
 Both sync verbs operate on settings files under your home directory and do
 not route by project; a `--project` flag is accepted by the parser but has
-no effect on them.
+no effect on the sync command itself. The `recall-mcp` process registered by
+Codex does route at runtime: after explicit flags and `RECALL_DB`, it selects
+the deepest registered project containing its working directory, then falls
+back to home. Passing `--db` to `recall codex sync` pins that MCP registration
+to the selected database instead.
 
 ```sh
 recall claude sync --apply

@@ -30,16 +30,34 @@ test("mergeRecallDirective replaces stale or dangling managed blocks", () => {
   assert.match(next, /Corrections supersede/);
 });
 
+test("mergeRecallDirective removes the retired codex-sync marker block", () => {
+  const legacy = [
+    "# Rules",
+    "<!-- recall:begin (managed by `recall codex sync`) -->",
+    "legacy nested-schema instructions",
+    "<!-- recall:end -->",
+    recallDirectiveBlock(),
+  ].join("\n");
+  const { next } = mergeRecallDirective(legacy);
+  assert.equal(next.split(RECALL_BLOCK_BEGIN).length - 1, 1);
+  assert.doesNotMatch(next, /legacy nested-schema instructions|recall codex sync/);
+  assert.match(next, /# Rules/);
+});
+
 test("recallDirectiveBlock and slash prompt teach read-first write-back discipline", () => {
   const block = recallDirectiveBlock();
   assert.match(block, /recall compile/);
-  assert.match(block, /evidence\.contradicts/);
+  assert.match(block, /relation is `supersedes`/);
+  assert.doesNotMatch(block, /evidence\.contradicts/);
   assert.match(block, /encrypted secret side store/);
 
   const prompt = recallSlashPrompt();
   assert.match(prompt, /^---\ndescription:/);
   assert.match(prompt, /\$ARGUMENTS/);
-  assert.match(prompt, /recall cell show/);
+  assert.match(prompt, /recall_compile/);
+  assert.match(prompt, /recall_cell.*idOrAddress/);
+  assert.match(prompt, /relation: "supersedes"/);
+  assert.doesNotMatch(prompt, /evidence\.contradicts/);
 });
 
 test("buildPromptContextPush compiles store-backed context for an agent prompt", () => {
@@ -74,6 +92,7 @@ test("buildPromptContextPush compiles store-backed context for an agent prompt",
 test("buildStopReminder prompts durable write-back without secrets", () => {
   const reminder = buildStopReminder();
   assert.match(reminder, /write durable/);
-  assert.match(reminder, /evidence\.contradicts/);
+  assert.match(reminder, /relation `supersedes`/);
+  assert.doesNotMatch(reminder, /evidence\.contradicts/);
   assert.match(reminder, /Do not put secrets/);
 });

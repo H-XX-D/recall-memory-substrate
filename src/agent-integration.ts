@@ -6,6 +6,9 @@ import type { Store } from "./types.js";
 
 export const RECALL_BLOCK_BEGIN = "<!-- recall:begin (managed by Recall v5) -->";
 export const RECALL_BLOCK_END = "<!-- recall:end -->";
+const LEGACY_RECALL_BLOCK_BEGINS = [
+  "<!-- recall:begin (managed by `recall codex sync`) -->",
+] as const;
 
 export interface DirectiveOptions {
   includeMcp?: boolean;
@@ -41,11 +44,12 @@ export function recallDirectiveBlock(options: DirectiveOptions = {}): string {
     "and write durable findings back when the work produces lasting evidence.",
     "",
     `- Read first: ${readFirst}.`,
+    "- Treat compiled IDs as a map, not the answer: inspect load-bearing cells and traverse relevant relationships until dependencies, conflicts, corrections, and provenance are resolved.",
     `- Expand lazily: ${expand}.`,
     `- Write back: ${writeBack}.`,
-    "- Corrections supersede: find the prior cell and admit the new one with `evidence.contradicts` pointing at it.",
+    "- Corrections supersede: find the prior cell and write the new one with an `edges` entry whose relation is `supersedes` and target is the prior cell ID.",
     "- Never store secrets in normal memory; use the encrypted secret side store only.",
-    "- Project routing is by registered cwd for CLI; detached MCP calls should pass an explicit project slug.",
+    "- The CLI routes by registered cwd; MCP chooses its database when the server starts, so do not pass undeclared per-tool routing fields.",
     RECALL_BLOCK_END,
     "",
   ].join("\n");
@@ -58,13 +62,15 @@ export function mergeRecallDirective(existing: string | undefined | null, option
   const prior = existing ?? "";
   const block = recallDirectiveBlock(options);
   let stripped = prior;
-  for (;;) {
-    const begin = stripped.indexOf(RECALL_BLOCK_BEGIN);
-    if (begin < 0) break;
-    const end = stripped.indexOf(RECALL_BLOCK_END, begin);
-    stripped = end >= 0
-      ? stripped.slice(0, begin) + stripped.slice(end + RECALL_BLOCK_END.length)
-      : stripped.slice(0, begin);
+  for (const marker of [RECALL_BLOCK_BEGIN, ...LEGACY_RECALL_BLOCK_BEGINS]) {
+    for (;;) {
+      const begin = stripped.indexOf(marker);
+      if (begin < 0) break;
+      const end = stripped.indexOf(RECALL_BLOCK_END, begin);
+      stripped = end >= 0
+        ? stripped.slice(0, begin) + stripped.slice(end + RECALL_BLOCK_END.length)
+        : stripped.slice(0, begin);
+    }
   }
   stripped = stripped.replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "");
   const next = stripped.length > 0 ? `${stripped}\n\n${block}` : block;
@@ -78,18 +84,16 @@ export function recallSlashPrompt(): string {
     "argument-hint: [TASK]",
     "---",
     "",
-    "Use Recall as the durable memory layer for this request before relying on recollection.",
+    "Use the installed `recall` skill and Recall MCP tools as the durable memory layer for this request before relying on recollection.",
     "Treat `$ARGUMENTS` as the task when supplied; otherwise infer the task from the current user request.",
     "",
-    "Start with:",
+    "Start by calling `recall_compile` with the concrete task and `words: 900`.",
     "",
-    "```bash",
-    'recall compile "$ARGUMENTS" --words 900',
-    "```",
-    "",
-    "Use returned cell IDs as evidence handles and expand only what matters with `recall cell show <id>`.",
-    "Write durable outcomes back through `recall_write` or `recall admit`.",
-    "If new information corrects an older cell, admit it with `evidence.contradicts` pointing at that prior cell.",
+    "Use returned cell IDs as evidence handles and expand only what matters with `recall_cell` using `idOrAddress`.",
+    "Treat those IDs as graph entry points: follow relevant supersedes, depends_on, contradicts, concerns, supports, and derived_from relationships before acting on a load-bearing claim.",
+    "Write durable outcomes back through `recall_write`, whose required fields are `kind`, `title`, `body`, and `confidence`.",
+    "If new information corrects an older cell, write it with `edges: [{ relation: \"supersedes\", target: \"<prior-cell-id>\" }]`.",
+    "Use the `recall` CLI only if the MCP tools are unavailable.",
     "",
   ].join("\n");
 }
@@ -119,7 +123,8 @@ export function buildStopReminder(): string {
   return [
     "[Recall write-back reminder]",
     "Before ending, write durable observations, decisions, risks, tasks, or verification results through Recall.",
-    "If this turn corrected prior memory, supersede with `evidence.contradicts`; do not overwrite or duplicate.",
+    "Audit whether the result needs graph edges, and verify that admitted relationships are present; recurring state may warrant a deterministic standing program.",
+    "If this turn corrected prior memory, write an `edges` entry with relation `supersedes` and the prior cell ID as target; do not overwrite or duplicate.",
     "Do not put secrets in normal memory.",
   ].join("\n");
 }

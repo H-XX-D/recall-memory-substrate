@@ -63,7 +63,17 @@ export function mapNodeToCell(row: OldNodeRow): Cell {
     { key: row.id, now: row.created_at },
   );
   cell.updatedAt = row.updated_at || row.created_at;
-  cell.status = row.status === "superseded" ? "superseded" : row.status === "annexed" ? "annexed" : "active";
+  // Pre-0.6 used `archived` for retained, non-active cells. The v5 model
+  // calls that lifecycle state `annexed`; never reactivate archived memory
+  // during a migration.
+  if (row.status === "superseded") {
+    cell.status = "superseded";
+  } else if (row.status === "annexed" || row.status === "archived") {
+    cell.status = "annexed";
+    cell.flags.annexed = true;
+  } else {
+    cell.status = "active";
+  }
   if (typeof conf.uncertainty === "number") cell.scores.uncertainty = conf.uncertainty;
   if (typeof conf.concern === "number") cell.scores.concern = conf.concern;
   cell.provenance.producedBy = (prov.produced_by as string) ?? cell.provenance.producedBy;

@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -55,6 +56,7 @@ try {
   runCliFlow(bin, tempRoot, projectRoot, env);
   runLatticeFlow(bin, tempRoot, env);
   runPythonHelperFlow(packageRoot, tempRoot);
+  runAssistantSyncFlow(bin, tempRoot);
 
   console.log(`installed package acceptance passed for ${packageJson.name}@${packageJson.version}`);
 } finally {
@@ -431,6 +433,34 @@ function runPythonHelperFlow(packageRoot, tempRoot) {
   // v5 peek envelope: the excerpt lives under body, not top-level bodyPreview.
   assert.equal(peeked.body.excerpt, "The installed Python helper admitted this cell through recall-mal.");
   assert.equal(peeked.body.truncated, false);
+}
+
+function runAssistantSyncFlow(bin, tempRoot) {
+  const home = join(tempRoot, "assistant-home");
+  const codexHome = join(tempRoot, "codex-home");
+  mkdirSync(home, { recursive: true });
+  const env = { HOME: home, CODEX_HOME: codexHome };
+
+  const claude = runJson(bin, ["claude", "sync", "--apply", "--keep-automemory"], { env });
+  assert.equal(claude.dryRun, false);
+  const claudeSettings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+  assert.deepEqual(Object.keys(claudeSettings.hooks).sort(), [
+    "PostToolUse", "SessionStart", "Stop", "UserPromptExpansion", "UserPromptSubmit",
+  ]);
+
+  const codex = runJson(bin, ["codex", "sync", "--apply"], { env });
+  assert.equal(codex.dryRun, false);
+  assert.equal(codex.hookAssetInstalled, true);
+  const hooksPath = join(codexHome, "hooks.json");
+  const hookPath = join(codexHome, "hooks", "recall-session-start.py");
+  const hooks = JSON.parse(readFileSync(hooksPath, "utf8"));
+  assert.deepEqual(Object.keys(hooks.hooks).sort(), ["PostToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
+  assert.equal(existsSync(hookPath), true);
+  assert.equal(statSync(hooksPath).mode & 0o777, 0o600);
+  assert.equal(statSync(hookPath).mode & 0o777, 0o700);
+
+  const status = runJson(bin, ["codex", "status"], { env });
+  assert.equal(status.hooksInstalled, true);
 }
 
 function runJson(command, args, options = {}) {

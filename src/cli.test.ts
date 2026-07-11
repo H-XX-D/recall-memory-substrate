@@ -1437,6 +1437,8 @@ test("codex sync/status round-trip through the CLI against a temp HOME", () => {
     assert.equal(dryJson.dryRun, true);
     assert.equal(dryJson.configChanged, true);
     assert.equal(dryJson.agentsChanged, true);
+    assert.equal(dryJson.hooksChanged, true);
+    assert.equal(dryJson.hookAssetChanged, true);
     assert.equal(existsSync(join(home, ".codex", "config.toml")), false);
 
     const statusBefore = capture(["codex", "status"], { env: { HOME: home } as NodeJS.ProcessEnv });
@@ -1444,6 +1446,7 @@ test("codex sync/status round-trip through the CLI against a temp HOME", () => {
     const statusBeforeJson = JSON.parse(statusBefore.stdout);
     assert.equal(statusBeforeJson.mcpInstalled, false);
     assert.equal(statusBeforeJson.agentsBlockPresent, false);
+    assert.equal(statusBeforeJson.hooksInstalled, false);
 
     const apply = capture(["codex", "sync", "--apply", "--db", "/tmp/recall-codex-cli.sqlite3"], {
       env: { HOME: home } as NodeJS.ProcessEnv,
@@ -1453,6 +1456,8 @@ test("codex sync/status round-trip through the CLI against a temp HOME", () => {
     assert.equal(applyJson.dryRun, false);
     assert.equal(applyJson.configChanged, true);
     assert.equal(applyJson.agentsChanged, true);
+    assert.equal(applyJson.hooksChanged, true);
+    assert.equal(applyJson.hookAssetInstalled, true);
 
     const config = readFileSync(join(home, ".codex", "config.toml"), "utf8");
     assert.match(config, /RECALL_DB = "\/tmp\/recall-codex-cli\.sqlite3"/);
@@ -1462,6 +1467,25 @@ test("codex sync/status round-trip through the CLI against a temp HOME", () => {
     const statusAfterJson = JSON.parse(statusAfter.stdout);
     assert.equal(statusAfterJson.mcpInstalled, true);
     assert.equal(statusAfterJson.agentsBlockPresent, true);
+    assert.equal(statusAfterJson.hooksInstalled, true);
+    const hooks = JSON.parse(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
+    assert.deepEqual(Object.keys(hooks.hooks).sort(), ["PostToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("codex sync honors CODEX_HOME through the CLI", () => {
+  const home = mkdtempSync(join(tmpdir(), "recall-v5-cli-codex-home-"));
+  const codexHome = join(home, "custom-codex");
+  try {
+    const result = capture(["codex", "sync", "--apply"], {
+      env: { HOME: home, CODEX_HOME: codexHome } as NodeJS.ProcessEnv,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(join(codexHome, "hooks.json")), true);
+    assert.equal(existsSync(join(codexHome, "hooks", "recall-session-start.py")), true);
+    assert.equal(existsSync(join(home, ".codex")), false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

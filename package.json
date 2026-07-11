@@ -1,6 +1,6 @@
 {
   "name": "recall-memory-substrate",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Recall v5 / MAL durable-memory substrate for agent context",
   "type": "module",
   "license": "Apache-2.0",
@@ -55,6 +55,7 @@
     "!integrations/claude/hooks/test_*.py",
     "integrations/claude/skill/",
     "!integrations/claude/skill/scripts/__pycache__",
+    "integrations/codex/skill/",
     "README.md",
     "CHANGELOG.md",
     "CITATION.cff",
@@ -70,7 +71,8 @@
     "docs/import-export.md"
   ],
   "scripts": {
-    "test": "node --disable-warning=ExperimentalWarning --import tsx --test \"src/**/*.test.ts\"",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test \"src/**/*.test.ts\" && npm run test:hooks",
+    "test:hooks": "python3 integrations/claude/hooks/test_dig_backstop.py",
     "test:python": "npm run build && python3 -m unittest discover -s python/tests",
     "test:acceptance": "node scripts/release-acceptance.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

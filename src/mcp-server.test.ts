@@ -601,10 +601,11 @@ test("recall_eval_run with derive:true reports a derived admission", () => {
   const out = callText(handleMcpRequest(req("tools/call", {
     name: "recall_eval_run",
     arguments: { derive: true },
-  }), store));
+  }), store, { project: "cwd-project" }));
   assert.equal(out.name, "recall-default");
   assert.ok(out.derived);
   assert.equal(out.derived.accepted, true);
+  assert.equal(store.active().find((cell) => cell.owner === "eval:recall")?.scope.project, "cwd-project");
   store.close();
 });
 
@@ -645,16 +646,20 @@ test("recall_health with derive:true admits a memory_health witness cell and mir
   const first = callText(handleMcpRequest(req("tools/call", {
     name: "recall_health",
     arguments: { derive: true },
-  }), store));
+  }), store, { project: "cwd-project" }));
   assert.equal(typeof first.createdAt, "string");
   assert.ok(first.derived);
   assert.equal(first.derived.accepted, true);
   assert.equal(first.derived.duplicateOf, undefined);
+  assert.equal(
+    store.active().find((cell) => cell.owner === "recall-maintenance")?.scope.project,
+    "cwd-project",
+  );
 
   const second = callText(handleMcpRequest(req("tools/call", {
     name: "recall_health",
     arguments: { derive: true },
-  }), store));
+  }), store, { project: "cwd-project" }));
   assert.ok(second.derived);
   assert.equal(second.derived.accepted, true);
   assert.match(second.derived.duplicateOf, /^drv_memory_health_[0-9a-f]{24}$/);
@@ -695,6 +700,10 @@ test("recall_write schema declares the evidence fields", () => {
   const writeTool = res.tools.find((t: any) => t.name === "recall_write");
   const props = writeTool.inputSchema.properties as Record<string, any>;
   assert.equal(props.entities?.type, "array");
+  assert.equal(props.edges?.items?.type, "object");
+  assert.deepEqual(props.edges?.items?.required, ["relation", "target"]);
+  assert.ok(props.edges?.items?.properties?.relation?.enum.includes("supersedes"));
+  assert.equal(props.edges?.items?.properties?.target?.type, "string");
   assert.equal(props.sourceRefs?.type, "array");
   assert.equal(props.verification?.type, "string");
   assert.deepEqual(props.verification?.enum, ["unverified", "checked", "tested", "external"]);

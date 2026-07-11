@@ -14,7 +14,7 @@ recall claude sync --apply
 
 This updates two settings files under your home directory and installs the bundled assets:
 
-- `~/.claude/settings.json`: adds `SessionStart`, `UserPromptSubmit`, and `Stop` hook entries and sets `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` to `"1"`.
+- `~/.claude/settings.json`: adds `SessionStart`, `UserPromptSubmit`, `UserPromptExpansion`, `PostToolUse`, and `Stop` hook entries and sets `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` to `"1"`.
 - `~/.claude.json`: registers the `recall` MCP server (`type: stdio`, `command: recall-mcp`) so Claude Code can call all nineteen Recall tools (see `docs/mcp.md`).
 - `~/.claude/hooks/recall-session-start.py`: the bundled hook script that serves all the hook events.
 - `~/.claude/skills/recall/`: the Recall skills tree (see below).
@@ -37,20 +37,21 @@ By default (without `--keep-automemory`), sync also imports any existing Claude 
 recall claude status
 ```
 
-Reports whether the three hooks are installed, whether auto-memory is disabled, and whether the MCP server is registered, without changing anything.
+Reports whether all five hooks are installed, whether auto-memory is disabled, and whether the MCP server is registered, without changing anything.
 
 ### What each hook does
 
 One script serves every event; the argument selects the mode.
 
-- **SessionStart**: runs `recall-session-start.py` with no arguments. It prints a standing directive telling the assistant to consult Recall before trusting its own recollection, plus a 7-day recent-activity summary produced by `recall diff --since 7d --summary` and labelled with the scope `recall where` reports (a registered project, or the graph-wide home store). If the installed CLI predates the `diff` verb, the summary degrades silently and only the directive is emitted. Timeouts: 12 seconds for the diff, 6 for the scope label.
+- **SessionStart**: runs `recall-session-start.py` with no arguments. It prints a standing directive telling the assistant to consult Recall before trusting its own recollection, plus a 7-day recent-activity summary produced by `recall diff --since 7d --summary` and labelled with the scope `recall where` reports (a registered project, or the graph-wide home store). If the installed CLI predates the `diff` verb, the summary degrades silently and only the directive is emitted. Internal timeouts are 8 seconds for the diff and 3 for the scope label, safely below the outer 15-second hook timeout.
 - **UserPromptSubmit** (the prompt digest): runs `recall-session-start.py --prompt` on every prompt. It runs `recall compile` against the prompt (hard 4 second cap, routed by the session's working directory) and pushes a mini index into context: up to five relevant cells as ids and titles only, each row ending in a `[kind:id]` token. A row whose cell appears in the packet's stale or low-trust section is tagged `[STALE]`; a row whose cell is the superseded side of a conflict is tagged `[SUPERSEDED?]`. The digest ends with exactly one footer: a DIG REQUIRED demand when a shown row is flagged, a tripwire count when conflicts or stale cells exist elsewhere on the topic, or a reminder that the index is awareness, not a substitute for a real read. A short prompt, a missing binary, a timeout, or an empty relevance section pushes nothing beyond the primer. The digest is deliberately incomplete: bodies, the conflict trace, and calibration are withheld so the assistant still runs a real `recall compile`.
-- **Stop**: runs `recall-session-start.py --stop`. Two independent gates, loop-guarded so neither ever blocks more than once per turn:
-  - The **dig gate**. When the prompt digest flags a row, the obligation is recorded as a per-session state file (under `$RECALL_HOME/.dig_pending/`, or `~/.recall/.dig_pending/` when `RECALL_HOME` is unset). At turn end this gate consumes the state file and checks the transcript for a real Recall read since the flag was raised (a `recall compile`, `recall search`, `recall cell show`, a peek script call, or an MCP recall tool). If no read happened and the reply engaged with the flagged cell (it names the id or shares distinctive title tokens), the turn is blocked once with instructions to read the flagged cell and correct anything asserted from it.
-  - The **evidence gate**. If the turn's reply claims something works, passes, or is done, and no test, build, or run command appears in the turn's tool use, the turn is held once with a request to run the verification or soften the claim. Opt out by setting `RECALL_GATE_EVIDENCE=0` in the environment.
-- **UserPromptExpansion**: the script also implements `--expansion`, which pushes the same thin mini index scoped to an expanded slash command and its arguments (index only, no primer, dig obligations recorded the same way). Sync manages the three events above and leaves any existing `UserPromptExpansion` registration in place; to enable this mode, add a `UserPromptExpansion` hook entry pointing at the same script with `--expansion`.
+- **UserPromptExpansion**: runs `recall-session-start.py --expansion`. It pushes the same thin mini index scoped to an expanded slash command and its arguments (index only, no duplicate primer) and records dig obligations the same way.
+- **PostToolUse**: runs `recall-session-start.py --tool` after Bash and Recall MCP calls. It records successful Recall reads and successful test/build/check commands as private, turn-scoped markers. Explicit non-zero exit codes never count as verification. This structured event path avoids trusting user prose or unstable transcript substrings.
+- **Stop**: runs `recall-session-start.py --stop`. Two independent gates are loop-guarded so neither blocks more than once per turn:
+  - The **dig gate**. When the prompt digest flags a row, the obligation is recorded under `$RECALL_HOME/.dig_pending/` (or `~/.recall/.dig_pending/`). At turn end the gate consumes that turn's state and checks the structured `PostToolUse` marker for a real Recall read. Older sessions without marker state fall back to structured Claude assistant tool-use records, never raw substring matching. If no read happened and the reply engaged with the flagged cell, the turn is held once with instructions to read it and correct anything asserted from a stale row.
+  - The **evidence gate**. If `last_assistant_message` claims something works, passes, or is done and no successful verification command was recorded for that turn, the turn is held once with a request to run the verification or soften the claim. Opt out with `RECALL_GATE_EVIDENCE=0`.
 
-The Python hook is fail-open in every mode: any crash, timeout, or missing dependency falls back to emitting the directive alone (or nothing) rather than blocking your session. The read loop never writes to any Recall database; its only filesystem state is the per-session dig obligation file.
+The Python hook is fail-open in every mode: any crash, timeout, or missing dependency falls back to emitting the directive alone (or nothing) rather than blocking your session. The read loop never writes to a Recall database. Ephemeral state is private (`0700` directories, `0600` atomic files), partitioned by session and turn, expires after two days by default, and is removed when Stop finishes.
 
 ### The skills tree
 
@@ -69,14 +70,14 @@ Every command the tree documents exists on the current CLI; the session hook's r
 - `recall-prompt-hook` stamps the turn's start time to a marker file (per session under `~/.recall/state/stop/`; the `RECALL_STOP_STATE` environment variable overrides the marker path for both hooks).
 - `recall-stop-hook` checks whether any durable cell was created in Recall since that marker. If nothing was written, it holds the turn open and re-injects the full write template JSON: every field must be replaced with a real value, because admission rejects a field whose submitted value still equals its template description (the fill-or-reject rule). If something was written, it releases the turn and runs a background maintenance tick.
 
-The hold is fail-closed on the marker: a missing turn-start marker holds the turn. A store that fails to open releases the turn instead, since a gate that cannot read the store cannot judge it. Treat the gate as an opt-in enforcement mechanism, not a default: it will interrupt turns that produce no durable memory write. The Python hooks above always run first and are unaffected by this flag; `--write-gate` only appends the stricter Node hooks alongside them.
+The hold is fail-closed on the marker: a missing turn-start marker holds the turn. A store that fails to open releases the turn instead, since a gate that cannot read the store cannot judge it. Treat the gate as an opt-in enforcement mechanism, not a default: it will interrupt turns that produce no durable memory write. Claude launches matching command hooks concurrently, so neither handler can depend on array order. The portable Python hook and optional Node write gate keep independent state; `--write-gate` adds the stricter Node handlers alongside the Python handlers.
 
 ### Uninstalling
 
 There is no dedicated uninstall command. To remove the integration:
 
 - Restore `~/.claude/settings.json` and `~/.claude.json` from the `.bak` files sync created, if you still have them (each sync overwrites the previous `.bak`, so restore before running sync again).
-- Or edit `~/.claude/settings.json` by hand: remove the `SessionStart`, `UserPromptSubmit`, and `Stop` hook entries whose command references `recall-session-start.py` (and `recall-prompt-hook` / `recall-stop-hook` if you used `--write-gate`), and remove `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` if you want auto-memory back.
+- Or edit `~/.claude/settings.json` by hand: remove the five hook entries whose command references `recall-session-start.py` (and `recall-prompt-hook` / `recall-stop-hook` if you used `--write-gate`), and remove `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` if you want auto-memory back.
 - Remove the `recall` entry from `mcpServers` in `~/.claude.json`.
 - Optionally delete `~/.claude/hooks/recall-session-start.py`.
 
@@ -86,19 +87,29 @@ There is no dedicated uninstall command. To remove the integration:
 recall codex sync --apply
 ```
 
-This updates two files under your home directory:
+This updates six surfaces under `$CODEX_HOME` (or `~/.codex` when unset):
 
 - `~/.codex/config.toml`: adds an `[mcp_servers.recall]` table pointing at the `recall-mcp` command (and, if `--db` is given, an `[mcp_servers.recall.env]` table setting `RECALL_DB`).
 - `~/.codex/AGENTS.md`: inserts a managed block (bounded by `<!-- recall:begin -->` / `<!-- recall:end -->` markers) describing Recall as the durable memory layer and how to read from and write back to it.
+- `~/.codex/skills/recall/SKILL.md`: installs the packaged, MCP-first Recall skill with the current cell kinds, write schema, correction edges, and read-inspect-write operating loop.
+- `~/.codex/prompts/recall.md`: installs the generated `/recall` prompt, which activates the skill and starts the concrete task with `recall_compile`.
+- `~/.codex/hooks/recall-session-start.py`: installs the same portable, reviewed hook used by Claude Code.
+- `~/.codex/hooks.json`: registers Codex's supported subset: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, and `Stop`. Codex has no `UserPromptExpansion` event.
 
-Re-running sync replaces only the managed table or block; anything else you have in either file is left untouched. `recall codex status` reports whether the MCP table and the AGENTS.md block are present without changing anything.
+Re-running sync replaces only Recall-owned handlers and managed content. It refreshes the packaged skill and generated prompt, while preserving unrelated hooks and config even when they share a matcher group with an old Recall handler. Existing files that change receive the same `.bak` backup as the MCP and AGENTS files. `recall codex status` reports the MCP table, AGENTS block, skill and prompt presence/currentness, hook asset, and all four hook registrations without changing anything.
+
+Codex requires review for non-managed command hooks. After the first install, or whenever a hook definition changes, open `/hooks`, inspect the Recall handlers, and trust them. Sync never writes Codex's trust store. Codex launches matching hooks concurrently, and its current `PostToolUse` support does not intercept every unified-exec shell call; the Stop gates therefore remain fail-open and single-shot. If `config.toml` already contains inline `[hooks]` tables, sync reports a warning because Codex recommends one hook representation per config layer.
+
+The installed skill is the current v5 generation, not the retired Codex skill that documented old proposal schemas and removed commands. It prefers Recall MCP tools for routine work, falls back to the CLI when necessary, and tells the agent not to invent undeclared per-tool routing fields.
+
+The registered MCP command resolves one database when it starts, in this order: explicit `--db`, explicit `--project`, `RECALL_DB`, the deepest registered project containing the MCP process working directory, then the home store. The default sync registration supplies no override, so starting Codex in a registered project keeps MCP reads and writes on that project graph. `--db` pins the global Codex registration to one database instead.
 
 Flags:
 
 - `--apply`: write the changes.
 - `--db path`: set `RECALL_DB` for the MCP server entry.
 
-To remove the integration, delete the `[mcp_servers.recall]` table from `config.toml` and the block between the `recall:begin` / `recall:end` markers in `AGENTS.md`, or restore both files from their `.bak` backups.
+To remove the integration, delete the `[mcp_servers.recall]` table from `config.toml`, the block between the `recall:begin` / `recall:end` markers in `AGENTS.md`, `skills/recall/SKILL.md`, `prompts/recall.md`, the Recall handlers in `hooks.json`, and the installed hook script, or restore changed files from their `.bak` backups.
 
 ## Cutting over from a legacy install
 

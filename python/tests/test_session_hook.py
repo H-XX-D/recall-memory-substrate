@@ -159,8 +159,9 @@ class SessionHookTests(unittest.TestCase):
         self.assertEqual(hso.get("hookEventName"), event, proc.stdout)
         return hso.get("additionalContext") or ""
 
-    def state_path(self, session_id: str) -> Path:
-        digest = hashlib.sha1(session_id.encode("utf-8")).hexdigest()[:16]
+    def state_path(self, session_id: str, turn_id: str = "") -> Path:
+        key = session_id + ("\0" + turn_id if turn_id else "")
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
         return self.recall_home / ".dig_pending" / f"{digest}.json"
 
     def transcript(self, name: str, lines: list[str]) -> Path:
@@ -267,10 +268,10 @@ class SessionHookTests(unittest.TestCase):
             {"session_id": "sess-c2", "transcript_path": str(tpath)},
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(json.loads(proc.stdout), {}, proc.stdout)
+        self.assertEqual(proc.stdout, "")
 
-    # --- (d) --stop loop guard: stop_hook_active short-circuits to {} ---
-    def test_stop_loop_guard_emits_empty(self) -> None:
+    # --- (d) --stop loop guard: stop_hook_active exits silently ---
+    def test_stop_loop_guard_is_silent(self) -> None:
         tpath = self.transcript("transcript-d.jsonl", [noise_line()])
         proc = self.run_hook(
             ["--stop"],
@@ -281,7 +282,7 @@ class SessionHookTests(unittest.TestCase):
             },
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(json.loads(proc.stdout), {})
+        self.assertEqual(proc.stdout, "")
 
     # --- (e) SessionStart: directive plus the diff-verb activity summary ---
     def test_session_start_emits_directive_with_diff_summary(self) -> None:
@@ -324,6 +325,34 @@ class SessionHookTests(unittest.TestCase):
         )
         self.assertNotIn("[Recall primer: this forward pass]", ctx)
         self.assertRegex(ctx, r"\[obs:(?:[a-z0-9_-]+:)*[0-9a-f]{8}[0-9a-f-]*\]")
+
+    def test_post_tool_success_clears_evidence_gate_for_the_same_turn(self) -> None:
+        tpath = self.transcript("transcript-tool.jsonl", [noise_line()])
+        base = {
+            "session_id": "sess-tool",
+            "turn_id": "turn-tool",
+            "transcript_path": str(tpath),
+            "cwd": str(self.work),
+        }
+        prompt = self.run_hook(["--prompt"], {**base, "prompt": "verify the hook lifecycle"})
+        self.assertEqual(prompt.returncode, 0, prompt.stderr)
+        tool = self.run_hook(
+            ["--tool"],
+            {
+                **base,
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 -m unittest"},
+                "tool_response": {"exit_code": 0},
+            },
+        )
+        self.assertEqual(tool.returncode, 0, tool.stderr)
+        self.assertEqual(tool.stdout, "")
+        stop = self.run_hook(
+            ["--stop"],
+            {**base, "last_assistant_message": "All tests passed."},
+        )
+        self.assertEqual(stop.returncode, 0, stop.stderr)
+        self.assertEqual(stop.stdout, "")
 
 
 if __name__ == "__main__":
