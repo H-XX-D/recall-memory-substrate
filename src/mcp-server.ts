@@ -24,6 +24,7 @@ import { runProgramCell } from "./programs.js";
 import { runAndRecordEval, runEvalAndDerive } from "./evals.js";
 import { subgraphCells, type SubgraphFilter } from "./subgraph.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
+import { WRITE_TEMPLATE } from "./template.js";
 import type { SqliteStore } from "./store.js";
 
 type JsonRpcId = string | number;
@@ -53,6 +54,7 @@ export const TOOLS = [
   { name: "recall_search", description: "Lexical search; returns id, kind, title, score.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
   { name: "recall_compile", description: "Compile a budgeted context packet for a task.", inputSchema: { type: "object", properties: { task: { type: "string" }, words: { type: "number" }, health: { type: "boolean" }, inlineRefs: { type: "boolean" }, refParams: { type: "boolean" } }, required: ["task"] } },
   { name: "recall_cell", description: "Expand one cell by id, prefix, handle, or address.", inputSchema: { type: "object", properties: { idOrAddress: { type: "string" } }, required: ["idOrAddress"] } },
+  { name: "recall_write_template", description: "Return the complete admission-firewall authoring template. Use it before rich writes to inspect every supported WriteProposal field and constraint.", inputSchema: { type: "object", properties: {} } },
   { name: "recall_write", description: "Admit a durable write through the admission gate. kind: dec (decision made), obs (observation), bel (claim to later confirm or refute), tsk (open action), obj (objective), rsk (risk), ref (source reference), ver (verification result), hyp (hypothesis). Prefer bel, tsk, rsk over flat observations when they fit; contradicts and depends_on edges feed the compile packet's conflicts and dependencies sections. Confidence above 0.7 needs verification, sourceRefs, or a weighted supports edge, else it is attenuated. The response includes guidance (candidate edges to similar cells; standing-program suggestions on by default, suggestPrograms false to opt out).", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, value: { type: "number" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, edges: { type: "array", items: { type: "object", properties: { relation: { type: "string", enum: ["supports", "contradicts", "supersedes", "derived_from", "depends_on", "concerns"] }, target: { type: "string" }, weight: { type: "number" } }, required: ["relation", "target"], additionalProperties: false } }, sourceRefs: { type: "array", items: { type: "string" } }, verification: { type: "string", enum: ["unverified", "checked", "tested", "external"] }, props: { type: "object" }, programs: { type: "array", items: { type: "string" } }, hyperedges: { type: "array" }, suggestPrograms: { type: "boolean" } }, required: ["kind", "title", "body", "confidence"] } },
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
   { name: "recall_ref", description: "Resolve a cell reference (handle#field.path) to the addressed value.", inputSchema: { type: "object", properties: { reference: { type: "string" } }, required: ["reference"] } },
@@ -110,6 +112,8 @@ function callTool(
   switch (name) {
     case "recall_status":
       return JSON.stringify(store.stats());
+    case "recall_write_template":
+      return JSON.stringify({ schemaVersion: "recall.write.v5", template: WRITE_TEMPLATE });
     case "recall_search": {
       const query = String(args.query ?? "");
       const limit = typeof args.limit === "number" ? args.limit : 10;

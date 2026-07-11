@@ -32,6 +32,7 @@ export interface ContextCompileOptions {
   includeHealth?: boolean; // default true
   inlineReferenceValues?: boolean; // default false
   includeReferenceParameters?: boolean; // default false
+  graphDepth?: number; // default 2; authored-edge traversal after lexical seeding
 }
 
 export interface ContextPacket {
@@ -91,6 +92,8 @@ export function compileContext(
     now,
     { kindLexicalFactor: TASK_CONTEXT_KIND_FACTOR },
   );
+  const graphDepth = Math.max(0, Math.min(4, opts.graphDepth ?? 2));
+  const walked = walkAuthoredGraph(store, fusedHits.map((hit) => hit.cell), graphDepth, Math.max(limit * 3, 12));
 
   const stats = store.stats();
   const packet: ContextPacket = {
@@ -98,7 +101,8 @@ export function compileContext(
     compilerState: [
       `retrieval=${stats.lexicalBackend}; query="${trimWords(objective, 24)}"; selected_cells=${fusedHits.length}; budget_words=${budget}`,
       `graph=cells:${stats.cells}, active:${stats.activeCells}, edges:${stats.edges}, indexed:${stats.indexedCells}`,
-      "policy=ids-first; use expansion_handles with inspectCell() for exact fields",
+      `graph_walk=seeded:${fusedHits.length}, discovered:${walked.length}, depth:${graphDepth}; authored edges are the compile map`,
+      "policy=ids-first; lexical hits are entry nodes; follow expansion_handles for exact fields",
     ],
     relevantMemory: [],
     activeBeliefs: [],
@@ -138,6 +142,23 @@ export function compileContext(
     if (packet.wordCount >= budget) break;
   }
 
+  // The lexical/fused result is only the doorway. Walk the incident authored
+  // edges from those entry nodes and make every discovered node expandable.
+  // This restores graph continuity without inlining bodies or allowing compile
+  // to become a second answer surface.
+  for (const step of walked) {
+    pushUnique(packet.expansionHandles, step.cell.key);
+    pushUnique(packet.translatedReferences, step.path);
+    pushUnique(packet.cellState, cellStateLine(store, step.cell));
+    surfaceDependencies(packet, store, step.cell);
+    surfaceStandingPrograms(packet, store, step.cell);
+    surfaceTranslatedReferences(packet, store, step.cell, {
+      inlineReferenceValues: opts.inlineReferenceValues === true,
+      includeReferenceParameters: opts.includeReferenceParameters === true,
+    });
+    surfaceLowTrust(packet, step.cell);
+  }
+
   // Health signals run analyzeMemory ONCE per compile (not per hit). It is
   // O(active pool) and acceptable at the current scale.
   if (opts.includeHealth !== false) {
@@ -151,6 +172,46 @@ export function compileContext(
   packet.expansionIndex = buildExpansionIndex(store, packet.expansionHandles);
   trimPacket(packet, budget);
   return packet;
+}
+
+interface GraphWalkStep {
+  cell: Cell;
+  path: string;
+}
+
+const GRAPH_RELATION_ORDER = [
+  "supersedes",
+  "depends_on",
+  "contradicts",
+  "concerns",
+  "supports",
+  "derived_from",
+] as const;
+
+function walkAuthoredGraph(store: Store, seeds: Cell[], maxDepth: number, cap: number): GraphWalkStep[] {
+  if (maxDepth <= 0 || cap <= 0) return [];
+  const seen = new Set(seeds.map((cell) => cell.key));
+  const queue = seeds.map((cell) => ({ cell, depth: 0, trail: cell.handle }));
+  const out: GraphWalkStep[] = [];
+  while (queue.length > 0 && out.length < cap) {
+    const current = queue.shift()!;
+    if (current.depth >= maxDepth) continue;
+    const links = [...store.neighbors(current.cell.key)].sort((a, b) => {
+      const ar = GRAPH_RELATION_ORDER.indexOf(a.edge.relation as (typeof GRAPH_RELATION_ORDER)[number]);
+      const br = GRAPH_RELATION_ORDER.indexOf(b.edge.relation as (typeof GRAPH_RELATION_ORDER)[number]);
+      return (ar < 0 ? 99 : ar) - (br < 0 ? 99 : br) || a.cell.key.localeCompare(b.cell.key);
+    });
+    for (const link of links) {
+      if (link.cell.status !== "active" || seen.has(link.cell.key)) continue;
+      seen.add(link.cell.key);
+      const arrow = link.direction === "out" ? ">" : "<";
+      const trail = `${current.trail} .${arrow}${link.edge.relation} ${link.cell.handle}`;
+      out.push({ cell: link.cell, path: `${trail} [graph_path:${current.depth + 1}]` });
+      queue.push({ cell: link.cell, depth: current.depth + 1, trail });
+      if (out.length >= cap) break;
+    }
+  }
+  return out;
 }
 
 // Categorized, human-scannable view of expansionHandles: the raw key list
