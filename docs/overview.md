@@ -211,7 +211,7 @@ recall service uninstall
 
 ## Projects and routing
 
-Everything above ran against the home graph, the default when no project is registered. Memory lives in graphs: one home graph per machine plus one graph per registered project, with the registry kept in its own file so a damaged graph never hides your project list. Commands route by explicit `--db`, then `--project`, then the deepest registered project containing the current directory, then home; the `RECALL_DB` environment variable overrides all of that. Reads at home scope federate across every local graph; writes always target exactly one.
+Everything above ran against the home graph, the default when no project is registered. Memory lives in graphs: one home graph per machine plus one graph per registered project, with the registry kept in its own file so a damaged graph never hides your project list. The CLI and `recall-mcp` resolve an explicit `--db`, then `--project`, then `RECALL_DB`, then the deepest registered project containing the process working directory, and finally home. CLI reads at home scope federate across every local graph; MCP remains on the one store it selected at startup, and writes always target exactly one store.
 
 ```sh
 cd ~/code/my-project
@@ -245,16 +245,16 @@ recall reindex --missing-only
 
 ## Wiring an assistant
 
-This is where the push loop lands. Once synced, a hook compiles the graph against every prompt and injects a mini-index primer with contradiction and staleness flags; the stop gate holds a turn that ignored a flagged cell or claimed success without running verification; the optional write gate (`--write-gate`, fail-closed) holds turns that produced no durable write; and a background maintenance tick, the same pass as `recall maintain`, fires after released turns.
+This is where the push loop lands. Once synced, a hook compiles the graph against every prompt and injects a mini-index primer with contradiction and staleness flags; the stop gate holds a turn that ignored a flagged cell or claimed success without running verification; the optional write gate (`--write-gate`, fail-closed) holds turns that produced no durable write; and a background maintenance tick, the same pass as `recall maintain`, fires after released turns. Codex also receives an MCP-first Recall skill and a generated `/recall` prompt for explicitly starting the same read-inspect-work-write loop.
 
 ```sh
 recall claude sync             # dry run: reports what would change, writes nothing
 recall claude sync --apply     # hooks, MCP registration, skills tree, auto-memory import
 recall claude status
-recall codex sync --apply      # MCP registration plus an AGENTS.md block
+recall codex sync --apply      # skill, /recall, MCP, AGENTS.md, and native hooks
 recall codex status
 ```
 
-Any other MCP client points at the bundled `recall-mcp` server directly (with `RECALL_DB` naming the store); it exposes the same engine as nineteen tools over stdio.
+Any other MCP client points at the bundled `recall-mcp` server directly. It can pin a store with `--db`, `--project`, or `RECALL_DB`; otherwise it selects the registered project containing its working directory before falling back to home. It exposes the same engine as nineteen tools over stdio.
 
 From here, the reference pages: [cli.md](cli.md) for every verb and flag, [mcp.md](mcp.md) for the tool contracts, [integrations.md](integrations.md) for hook behavior, the write gate, and troubleshooting, and [import-export.md](import-export.md) for archive and adapter detail.

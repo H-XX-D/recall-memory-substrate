@@ -3,6 +3,8 @@
 import { mergeRecallDirective, recallDirectiveBlock, recallSlashPrompt } from "./agent-integration.js";
 
 const MCP_NAME = "recall";
+const HOOK_MARKER = "recall-session-start.py";
+const CODEX_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"] as const;
 
 export function recallAgentsBlock(): string {
   return recallDirectiveBlock();
@@ -13,6 +15,65 @@ export function mergeAgentsMd(existing: string | undefined | null): { next: stri
 }
 
 export { recallSlashPrompt };
+
+/** Native Codex subset of the portable Recall lifecycle hook. */
+export function recallCodexHookGroups(hookCommandPath: string): Record<string, unknown> {
+  const quoted = JSON.stringify(hookCommandPath);
+  return {
+    SessionStart: {
+      hooks: [{
+        type: "command",
+        command: `python3 ${quoted}`,
+        timeout: 15,
+        statusMessage: "Consulting Recall memory...",
+      }],
+    },
+    UserPromptSubmit: {
+      hooks: [{ type: "command", command: `python3 ${quoted} --prompt`, timeout: 10 }],
+    },
+    PostToolUse: {
+      matcher: "Bash|mcp__recall__.*",
+      hooks: [{ type: "command", command: `python3 ${quoted} --tool`, timeout: 10 }],
+    },
+    Stop: {
+      hooks: [{ type: "command", command: `python3 ${quoted} --stop`, timeout: 10 }],
+    },
+  };
+}
+
+/** Merge Recall-owned handlers without deleting unrelated siblings. */
+export function mergeCodexHooks(
+  existing: Record<string, unknown> | undefined | null,
+  hookCommandPath: string,
+): { next: Record<string, unknown>; changed: boolean } {
+  const prior = existing ?? {};
+  const next: Record<string, unknown> = { ...prior };
+  const hooks: Record<string, unknown> = { ...((next.hooks as Record<string, unknown>) ?? {}) };
+  const desired = recallCodexHookGroups(hookCommandPath);
+
+  for (const event of CODEX_HOOK_EVENTS) {
+    const previous = Array.isArray(hooks[event]) ? hooks[event] as unknown[] : [];
+    const kept = previous.map(stripRecallHandlers).filter((group) => group !== null);
+    hooks[event] = [...kept, desired[event]];
+  }
+  next.hooks = hooks;
+  return { next, changed: JSON.stringify(next) !== JSON.stringify(prior) };
+}
+
+/** Codex warns when hooks.json and inline hooks coexist in one config layer. */
+export function hasInlineCodexHooks(tomlText: string | undefined | null): boolean {
+  return /^\s*\[\[?hooks(?:\]\]?|\.(?!state(?:\.|\]\]?)))/m.test(tomlText ?? "");
+}
+
+function stripRecallHandlers(group: unknown): unknown | null {
+  const handlers = (group as { hooks?: unknown })?.hooks;
+  if (!Array.isArray(handlers)) return group;
+  const remaining = handlers.filter((handler) => {
+    const command = (handler as { command?: unknown })?.command;
+    return typeof command !== "string" || !command.includes(HOOK_MARKER);
+  });
+  return remaining.length > 0 ? { ...(group as Record<string, unknown>), hooks: remaining } : null;
+}
 
 export function recallMcpToml(mcpCommand: string, recallDb?: string): string {
   let text = `[mcp_servers.${MCP_NAME}]\ncommand = ${JSON.stringify(mcpCommand)}\n`;

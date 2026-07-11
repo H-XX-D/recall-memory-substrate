@@ -59,7 +59,7 @@ import { SqliteStore } from "./store.js";
 import type { AdmissionResult, Store, WriteProposal } from "./types.js";
 
 export const CLI_NAME = "recall-memory-substrate";
-export const CLI_VERSION = "0.12.0";
+export const CLI_VERSION = "0.12.1";
 
 export interface CliIo {
   stdout?: (text: string) => void;
@@ -706,7 +706,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
     }
 
     if (command === "codex" && subcommand === "status") {
-      outJson(out, codexSyncStatus({ home: env.HOME }));
+      outJson(out, codexSyncStatus({ home: env.HOME, codexHome: env.CODEX_HOME }));
       return 0;
     }
 
@@ -715,6 +715,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
         out,
         runCodexSync({
           home: env.HOME,
+          codexHome: env.CODEX_HOME,
           apply: args.apply,
           recallDb: args.db,
         }),
@@ -1088,9 +1089,9 @@ Commands:
   recall import zep --json zep.json [--apply] [--db path] [--project slug]
   recall import auto-memory [--root path] [--apply] [--db path] [--project slug]
   recall import local [--global-db path] [--project slug] [--topics a,b] [--limit N] [--no-hyperedges] [--apply] [--db path]
-  recall claude sync [--apply] [--keep-automemory] [--write-gate] [--root path] [--db path]
+  recall claude sync [--apply] [--keep-automemory] [--write-gate] [--root path] [--db path]  # five lifecycle events
   recall claude status
-  recall codex sync [--apply] [--db path]
+  recall codex sync [--apply] [--db path]  # skill + /recall + MCP + AGENTS.md + native hooks; respects CODEX_HOME
   recall codex status
   recall reindex [--missing-only] [--db path] [--project slug]
   recall maintain [--all-graphs] [--db path] [--project slug]

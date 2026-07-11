@@ -15,12 +15,13 @@ eval suite, and a memory health report.
 
 `recall-mcp` resolves its database in this order: the `--db <path>` flag,
 then `--project <slug>` (resolved through the project registry; an unknown
-slug is a startup error), then the `RECALL_DB` environment variable, then
-the home local store at `~/.recall/db/home.sqlite3` (relocated by
-`RECALL_HOME`). The server opens that database once at startup
-and keeps it open for the life of the process; it closes the database and
-exits when stdin closes. The server stays single-store: federated reads
-across every local graph exist only on the CLI.
+slug is a startup error), then the `RECALL_DB` environment variable, then the
+deepest registered project whose root contains the server process's current
+working directory, and finally the home local store at
+`~/.recall/db/home.sqlite3` (relocated by `RECALL_HOME`). The server opens that
+database once at startup and keeps it open for the life of the process; it
+closes the database and exits when stdin closes. The server stays
+single-store: federated reads across every local graph exist only on the CLI.
 
 Point an MCP client at the `recall-mcp` binary. Example client configuration:
 
@@ -37,9 +38,11 @@ Point an MCP client at the `recall-mcp` binary. Example client configuration:
 }
 ```
 
-Omit the `env` block to use the home local store instead of a project-specific
-one, or pass the flags through the client's `args` array (for example
-`"args": ["--project", "my-project"]`) to pin a project by slug.
+Omit the `env` block to let the server select the registered project containing
+the MCP process working directory, falling back to home when none matches. Pass
+flags through the client's `args` array (for example
+`"args": ["--project", "my-project"]`) to pin a project by slug, or set
+`RECALL_DB` to pin an exact database path.
 
 The server answers three JSON-RPC methods: `initialize` (protocol version and
 server info), `tools/list` (the tool array below), and `tools/call` (invoke a

@@ -4,15 +4,18 @@ import { mergeClaudeSettings, recallHookGroups, upsertClaudeMcpServer } from "./
 
 const HOOK = "/home/user/.claude/hooks/recall-session-start.py";
 
-test("recallHookGroups wires SessionStart, prompt, and stop modes", () => {
+test("recallHookGroups wires all five portable Claude lifecycle modes", () => {
   const groups = recallHookGroups(HOOK);
   assert.match(JSON.stringify(groups.SessionStart), /recall-session-start\.py/);
-  assert.doesNotMatch(JSON.stringify(groups.SessionStart), /--prompt|--stop/);
+  assert.doesNotMatch(JSON.stringify(groups.SessionStart), /--prompt|--expansion|--tool|--stop/);
   assert.match(JSON.stringify(groups.UserPromptSubmit), /--prompt/);
+  assert.match(JSON.stringify(groups.UserPromptExpansion), /--expansion/);
+  assert.match(JSON.stringify(groups.PostToolUse), /--tool/);
+  assert.match(JSON.stringify(groups.PostToolUse), /Bash\|mcp__recall__/);
   assert.match(JSON.stringify(groups.Stop), /--stop/);
 });
 
-test("recallHookGroups default output (no opts) is byte-identical to the pre-writeGate shape", () => {
+test("recallHookGroups default output has the canonical five-event shape", () => {
   const groups = recallHookGroups(HOOK);
   assert.deepEqual(groups, {
     SessionStart: {
@@ -21,24 +24,17 @@ test("recallHookGroups default output (no opts) is byte-identical to the pre-wri
     UserPromptSubmit: {
       hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --prompt`, timeout: 10 }],
     },
+    UserPromptExpansion: {
+      hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --expansion`, timeout: 10 }],
+    },
+    PostToolUse: {
+      matcher: "Bash|mcp__recall__.*",
+      hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --tool`, timeout: 10 }],
+    },
     Stop: {
       hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --stop`, timeout: 10 }],
     },
   });
-  assert.equal(
-    JSON.stringify(groups),
-    JSON.stringify({
-      SessionStart: {
-        hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)}`, timeout: 15, statusMessage: "Consulting Recall memory..." }],
-      },
-      UserPromptSubmit: {
-        hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --prompt`, timeout: 10 }],
-      },
-      Stop: {
-        hooks: [{ type: "command", command: `python3 ${JSON.stringify(HOOK)} --stop`, timeout: 10 }],
-      },
-    }),
-  );
 });
 
 test("recallHookGroups writeGate appends the node prompt/stop hooks after the python entries", () => {
@@ -47,8 +43,10 @@ test("recallHookGroups writeGate appends the node prompt/stop hooks after the py
   });
   const withoutGate = recallHookGroups(HOOK);
 
-  // SessionStart is untouched by writeGate.
+  // Events unrelated to the optional write gate are untouched.
   assert.deepEqual(withGate.SessionStart, withoutGate.SessionStart);
+  assert.deepEqual(withGate.UserPromptExpansion, withoutGate.UserPromptExpansion);
+  assert.deepEqual(withGate.PostToolUse, withoutGate.PostToolUse);
 
   const promptHooks = (withGate.UserPromptSubmit as { hooks: unknown[] }).hooks;
   assert.equal(promptHooks.length, 2);
@@ -68,7 +66,9 @@ test("mergeClaudeSettings injects Recall hooks and disables native auto-memory",
     [
       "env.CLAUDE_CODE_DISABLE_AUTO_MEMORY",
       "hooks.SessionStart",
+      "hooks.PostToolUse",
       "hooks.Stop",
+      "hooks.UserPromptExpansion",
       "hooks.UserPromptSubmit",
     ].sort(),
   );
@@ -97,6 +97,37 @@ test("mergeClaudeSettings refreshes stale Recall hooks and preserves unrelated h
   assert.match(JSON.stringify(sessionStart[0]!), /unrelated\.js/);
   assert.match(JSON.stringify(sessionStart[1]!), /home\/user/);
   assert.doesNotMatch(JSON.stringify(sessionStart), /\/old\//);
+});
+
+test("mergeClaudeSettings preserves unrelated sibling handlers in a mixed matcher group", () => {
+  const existing = {
+    hooks: {
+      Stop: [{
+        matcher: "anything",
+        hooks: [
+          { type: "command", command: "python3 /old/recall-session-start.py --stop" },
+          { type: "command", command: "python3 /custom/stop-rules.py" },
+        ],
+      }],
+    },
+  };
+  const merged = mergeClaudeSettings(existing, { hookCommandPath: HOOK });
+  const stop = (merged.next.hooks as Record<string, unknown[]>).Stop;
+  assert.ok(stop);
+  assert.equal(stop.length, 2);
+  assert.match(JSON.stringify(stop[0]), /custom\/stop-rules\.py/);
+  assert.doesNotMatch(JSON.stringify(stop[0]), /recall-session-start\.py/);
+  assert.match(JSON.stringify(stop[1]), /home\/user.*--stop/);
+});
+
+test("mergeClaudeSettings toggles optional node write gates without leftovers or duplicates", () => {
+  const gate = { stopHookCommand: "recall-stop-hook", promptHookCommand: "recall-prompt-hook" };
+  const enabled = mergeClaudeSettings({}, { hookCommandPath: HOOK, writeGate: gate });
+  const disabled = mergeClaudeSettings(enabled.next, { hookCommandPath: HOOK });
+  assert.doesNotMatch(JSON.stringify(disabled.next.hooks), /recall-(?:prompt|stop)-hook/);
+  const reenabled = mergeClaudeSettings(disabled.next, { hookCommandPath: HOOK, writeGate: gate });
+  assert.equal((JSON.stringify(reenabled.next.hooks).match(/recall-prompt-hook/g) ?? []).length, 1);
+  assert.equal((JSON.stringify(reenabled.next.hooks).match(/recall-stop-hook/g) ?? []).length, 1);
 });
 
 test("mergeClaudeSettings can remove the auto-memory disable env", () => {

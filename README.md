@@ -61,6 +61,8 @@ recall claude sync --apply          # Codex: recall codex sync --apply
 
 That is the whole setup, and the last memory management a human does. From here the agent runs its own memory: hooks prime every prompt from the graph, the agent writes back what it learns through the gate, and the substrate maintains itself between turns. Sync previews its changes by default and backs up any file it modifies.
 
+Claude sync installs five native events (session, prompt, expansion, tool result, and stop). Codex sync installs the MCP-first Recall skill, the `/recall` prompt, MCP registration, an AGENTS.md directive, and the portable four-event hook subset under `$CODEX_HOME`; Codex has no prompt-expansion event. After the first Codex sync, review and trust the installed command hooks with `/hooks`. With no explicit database override, `recall-mcp` follows the registered project containing the Codex task's working directory before falling back to home.
+
 Everything the agent does you can also do by hand, which is the easiest way to watch the gate work:
 
 ```sh
@@ -121,14 +123,14 @@ Start with [How Recall works](docs/overview.md), a guided walkthrough of the who
 
 - **CLI**: about fifty verbs covering writes, compile, search, graph structures, standing programs, evals, health, import and export, maintenance, and assistant sync. [Reference](docs/cli.md).
 - **MCP**: nineteen tools over stdio for any MCP client: search, semantic retrieval, compile, gated writes with guidance, hyperedges, DAG analysis, programs, health. [Reference](docs/mcp.md).
-- **Hooks**: session start directive, per-prompt primer, stop-gate obligations, optional fail-closed write-back gate. [Integrations](docs/integrations.md).
+- **Hooks**: session start directive, per-prompt primer, structured tool evidence, stop-gate obligations, optional fail-closed write-back gate, and a native Codex port. [Integrations](docs/integrations.md).
 - **Library**: the same engine as TypeScript imports from `src/`.
 - **Moving memory**: archives and importers, dry-run first, exactly idempotent. [Import and export](docs/import-export.md).
 
 ## Development
 
 ```sh
-npm test                 # unit tests
+npm test                 # unit and portable-hook tests
 npm run typecheck
 npm run test:python      # python helper tests
 npm run test:acceptance  # packs, installs into a clean project, exercises the installed artifact

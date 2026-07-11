@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_AUTO_MEMORY_ROOT, claudeSyncStatus, runClaudeSync } from "./claude-sync.js";
@@ -49,11 +49,16 @@ test("runClaudeSync apply writes settings.json with recall hooks and disables au
     assert.equal(existsSync(settingsPath(home)), true);
     const settings = JSON.parse(readFileSync(settingsPath(home), "utf8"));
     assert.match(JSON.stringify(settings.hooks.SessionStart), /recall-session-start\.py/);
+    assert.deepEqual(Object.keys(settings.hooks).sort(), [
+      "PostToolUse", "SessionStart", "Stop", "UserPromptExpansion", "UserPromptSubmit",
+    ]);
     assert.equal(settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, "1");
 
     assert.equal(existsSync(mcpPath(home)), true);
     const mcp = JSON.parse(readFileSync(mcpPath(home), "utf8"));
     assert.deepEqual(mcp.mcpServers.recall, { type: "stdio", command: "recall-mcp", args: [], env: {} });
+    assert.equal(statSync(settingsPath(home)).mode & 0o777, 0o600);
+    assert.equal(statSync(mcpPath(home)).mode & 0o777, 0o600);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -278,6 +283,7 @@ test("runClaudeSync apply installs the recall-session-start.py hook asset and re
     assert.equal(existsSync(hookAssetPath(home)), true);
     assert.ok(result.assetsInstalled.includes(hookAssetPath(home)));
     assert.equal(result.assetsSkipped, undefined);
+    assert.equal(statSync(hookAssetPath(home)).mode & 0o777, 0o700);
     const installed = readFileSync(hookAssetPath(home), "utf8");
     const source = readFileSync(join(process.cwd(), "integrations", "claude", "hooks", "recall-session-start.py"), "utf8");
     assert.equal(installed, source);
@@ -337,25 +343,23 @@ test("runClaudeSync dry-run does not install the hook asset", () => {
 
 test("runClaudeSync degrades with assetsSkipped when an asset cannot be found, and still installs the rest", () => {
   const home = tempHome();
-  const realAsset = join(process.cwd(), "integrations", "claude", "hooks", "recall-session-start.py");
-  const movedAside = `${realAsset}.moved-for-test`;
-  let moved = false;
+  const assetsRoot = mkdtempSync(join(tmpdir(), "recall-v5-claude-assets-"));
   try {
-    // Simulate a packaging state where one source asset is absent (e.g. an
-    // npm install that did not ship the hook): rename the real file aside for
-    // the duration of this test only, then restore it in finally.
-    renameSync(realAsset, movedAside);
-    moved = true;
+    // Use an isolated incomplete package tree; never rename the shared source
+    // while other test files may be reading it concurrently.
+    const skillDir = join(assetsRoot, "claude", "skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# Isolated skill fixture\n");
 
-    const result = runClaudeSync({ home, apply: true, importMemory: false, now: NOW });
+    const result = runClaudeSync({ home, assetsRoot, apply: true, importMemory: false, now: NOW });
     assert.equal(existsSync(hookAssetPath(home)), false);
     assert.equal(result.assetsInstalled.includes(hookAssetPath(home)), false);
     assert.equal(result.assetsSkipped, "asset not found");
     // The miss is per asset: the skills tree still lands.
     assert.equal(existsSync(join(home, ".claude", "skills", "recall", "SKILL.md")), true);
   } finally {
-    if (moved) renameSync(movedAside, realAsset);
     rmSync(home, { recursive: true, force: true });
+    rmSync(assetsRoot, { recursive: true, force: true });
   }
 });
 
@@ -463,8 +467,16 @@ test("SKILL.md documents only recall verbs the CLI help lists", () => {
   }
 });
 
-test("the stale codex skill generation is deleted", () => {
-  assert.equal(existsSync(join(process.cwd(), "integrations", "codex", "skill")), false);
+test("the Codex skill asset is MCP-first and uses the current write contract", () => {
+  const skillPath = join(process.cwd(), "integrations", "codex", "skill", "SKILL.md");
+  assert.equal(existsSync(skillPath), true);
+  const skill = readFileSync(skillPath, "utf8");
+  assert.match(skill, /^---\nname: recall\ndescription:/);
+  assert.match(skill, /Recall 0\.12\.1 write contract/);
+  assert.match(skill, /`recall_compile`/);
+  assert.match(skill, /`recall_write`/);
+  assert.match(skill, /`supersedes`/);
+  assert.doesNotMatch(skill, /evidence\.contradicts|recall\.write\.v1|required tag families|\blemma\b/);
 });
 
 test("runClaudeSync writeGate wires the node prompt/stop hook bin names into written settings.json", () => {

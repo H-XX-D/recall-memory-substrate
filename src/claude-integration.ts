@@ -7,8 +7,18 @@ const MCP_NAME = "recall";
 export interface ClaudeHookGroups {
   SessionStart: unknown;
   UserPromptSubmit: unknown;
+  UserPromptExpansion: unknown;
+  PostToolUse: unknown;
   Stop: unknown;
 }
+
+const CLAUDE_HOOK_EVENTS = [
+  "SessionStart",
+  "UserPromptSubmit",
+  "UserPromptExpansion",
+  "PostToolUse",
+  "Stop",
+] as const;
 
 export interface RecallHookGroupsOpts {
   writeGate?: { stopHookCommand: string; promptHookCommand: string };
@@ -18,12 +28,9 @@ export function recallHookGroups(hookCommandPath: string, opts?: RecallHookGroup
   const quoted = JSON.stringify(hookCommandPath);
   const writeGate = opts?.writeGate;
 
-  // The python UserPromptSubmit/Stop hooks are fail-open: a crash or missing
-  // interpreter just skips the marker stamp or the write gate, never blocking
-  // the turn. The node write-gate hooks below are fail-closed: on the Stop
-  // event, no durable write this turn holds the turn. Both can run side by
-  // side, but only if the python entry runs first (it stamps the turn-start
-  // marker the node Stop hook reads); array order below is load-bearing.
+  // Matching command hooks run concurrently in Claude Code. The portable
+  // Python hook therefore keeps its own turn-scoped state, independent of the
+  // optional Node write-gate hooks below. Every Python mode is fail-open.
   const promptHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --prompt`, timeout: 10 }];
   const stopHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --stop`, timeout: 10 }];
   if (writeGate) {
@@ -37,6 +44,13 @@ export function recallHookGroups(hookCommandPath: string, opts?: RecallHookGroup
     },
     UserPromptSubmit: {
       hooks: promptHooks,
+    },
+    UserPromptExpansion: {
+      hooks: [{ type: "command", command: `python3 ${quoted} --expansion`, timeout: 10 }],
+    },
+    PostToolUse: {
+      matcher: "Bash|mcp__recall__.*",
+      hooks: [{ type: "command", command: `python3 ${quoted} --tool`, timeout: 10 }],
     },
     Stop: {
       hooks: stopHooks,
@@ -53,9 +67,11 @@ export function mergeClaudeSettings(
   const groups = recallHookGroups(opts.hookCommandPath, opts.writeGate ? { writeGate: opts.writeGate } : undefined);
   const hooks: Record<string, unknown> = { ...((next.hooks as Record<string, unknown>) ?? {}) };
 
-  for (const event of ["SessionStart", "UserPromptSubmit", "Stop"] as const) {
+  for (const event of CLAUDE_HOOK_EVENTS) {
     const previous = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
-    const withoutRecall = previous.filter((group) => !isRecallHookGroup(group));
+    const withoutRecall = previous
+      .map(stripRecallHandlers)
+      .filter((group): group is unknown => group !== null);
     const replacement = [...withoutRecall, groups[event]];
     if (JSON.stringify(previous) !== JSON.stringify(replacement)) changed.push(`hooks.${event}`);
     hooks[event] = replacement;
@@ -91,11 +107,16 @@ export function upsertClaudeMcpServer(
   return { next, changed };
 }
 
-function isRecallHookGroup(group: unknown): boolean {
+function stripRecallHandlers(group: unknown): unknown | null {
   const hooks = (group as { hooks?: unknown })?.hooks;
-  if (!Array.isArray(hooks)) return false;
-  return hooks.some((hook) => {
-    const command = (hook as { command?: unknown })?.command;
-    return typeof command === "string" && command.includes(HOOK_MARKER);
-  });
+  if (!Array.isArray(hooks)) return group;
+  const remaining = hooks.filter((hook) => !isRecallOwnedHandler(hook));
+  return remaining.length > 0 ? { ...(group as Record<string, unknown>), hooks: remaining } : null;
+}
+
+function isRecallOwnedHandler(handler: unknown): boolean {
+  const command = (handler as { command?: unknown })?.command;
+  if (typeof command !== "string") return false;
+  return command.includes(HOOK_MARKER)
+    || /(^|\s)recall-(?:prompt|stop)-hook(?:\s|$)/.test(command);
 }

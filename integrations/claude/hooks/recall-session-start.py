@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""SessionStart + UserPromptSubmit + Stop + UserPromptExpansion hook for the
-Recall active-memory substrate.
+"""Portable lifecycle hook for the Recall active-memory substrate.
 
-Four modes:
+Five modes:
 
   default (SessionStart): emit the standing directive plus a cheap 7d
     recent-activity summary from `recall diff --since 7d --summary`, scoped to
@@ -23,8 +22,8 @@ Four modes:
   --stop (Stop): the turn-end backstop, two independent terms. The dig term:
     the push can flag a row DIG REQUIRED, but a UserPromptSubmit hook cannot
     enforce the dig because it returns before the model acts, so the push
-    records the obligation as per-session state and this mode blocks the turn
-    from ending until the transcript shows a real Recall read. The evidence
+    records the obligation as per-session, per-turn state and this mode blocks
+    the turn from ending until structured evidence shows a real Recall read. The evidence
     term: a reply that claims something works or passes without a
     verification command this turn is held once. Single-shot and
     loop-guarded: it nudges once, never hard-traps.
@@ -33,11 +32,15 @@ Four modes:
     expanded; push the same thin mini-index keyed to the structured command
     plus args, index only, no primer.
 
+  --tool (PostToolUse): record successful Recall reads and verification
+    commands as normalized per-turn evidence. This is the primary Stop-hook
+    evidence path on Codex and a transcript-independent fast path on Claude.
+
 Fail-open by design: any error, timeout, or missing dependency falls back to the
 directive alone. A prompt/session hook must never break submission. The
 per-prompt compile is given a hard 4s timeout because it runs on every prompt.
-The read loop never writes to any Recall DB; the only filesystem state is the
-per-session dig obligation file.
+The read loop never writes to any Recall DB; the only filesystem state is
+private, TTL-bounded per-turn hook evidence.
 """
 import hashlib
 import json
@@ -46,13 +49,14 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 DIRECTIVE = (
     "[Recall active memory is available. Consult it before trusting recollection.]\n"
     "Before relying on memory for a task this session, read from Recall first:\n"
     '  - recall compile "<task>"   : compiled context packet for what you are about to do\n'
     '  - recall search "<query>"   : lexical / semantic lookup\n'
-    "  - python3 ~/.claude/skills/recall/scripts/recall_peek.py <id>   : cheap cell preview\n"
+    "  - recall cell show <id>       : expand one exact cell only when needed\n"
     "Asking the user for a fact you could retrieve is the same failure as asserting from "
     "unchecked memory: search Recall before asking.\n"
     "Write durable findings back via the write helper / `recall admit`, and pick the kind that fits so "
@@ -115,7 +119,7 @@ def _scope_label():
     try:
         out = subprocess.run(
             [recall, "where"],
-            capture_output=True, text=True, timeout=6,
+            capture_output=True, text=True, timeout=3,
         )
         if out.returncode != 0:
             return "recent graph activity", False
@@ -139,7 +143,7 @@ def recent_summary() -> str:
     try:
         out = subprocess.run(
             [recall, "diff", "--since", "7d", "--summary"],
-            capture_output=True, text=True, timeout=12,
+            capture_output=True, text=True, timeout=8,
         )
         if out.returncode != 0:
             return ""  # do not inject partial/garbage stdout from a failed diff
@@ -291,6 +295,8 @@ def prompt_digest(prompt: str, cwd: str, flagged_out=None, header: str = None) -
             capture_output=True, text=True, timeout=4,
             cwd=(cwd if cwd and os.path.isdir(cwd) else None),
         )
+        if res.returncode != 0:
+            return ""
         out = res.stdout or ""
     except Exception:
         return ""
@@ -310,7 +316,7 @@ def prompt_digest(prompt: str, cwd: str, flagged_out=None, header: str = None) -
 # ---------------------------------------------------------------------------
 # The per-prompt push can flag a row DIG REQUIRED, but a UserPromptSubmit hook
 # cannot enforce the dig: it has already returned before the model acts. So the
-# push records the obligation as per-session state, and the Stop hook below
+# push records the obligation as per-session, per-turn state, and the Stop hook below
 # refuses to let the turn end until the transcript shows a real Recall read.
 # Single-shot + loop-guarded: it nudges once, never hard-traps.
 
@@ -320,6 +326,11 @@ STATE_DIR = os.path.join(
     os.environ.get("RECALL_HOME") or os.path.expanduser("~/.recall"),
     ".dig_pending",
 )
+TURN_STATE_DIR = os.path.join(
+    os.environ.get("RECALL_HOME") or os.path.expanduser("~/.recall"),
+    ".hook_turn_state",
+)
+STATE_TTL_SECONDS = int(os.environ.get("RECALL_HOOK_STATE_TTL", "172800"))
 
 # A Recall READ inside a transcript tool_use line: CLI verbs or the MCP read tools.
 RECALL_READ_RE = re.compile(
@@ -330,11 +341,120 @@ RECALL_READ_RE = re.compile(
 )
 
 
-def _state_path(session_id: str) -> str:
+def _state_path(session_id: str, turn_id: str = "") -> str:
     if not session_id:
         return ""
-    safe = hashlib.sha1(session_id.encode("utf-8")).hexdigest()[:16]
+    key = session_id + ("\0" + turn_id if turn_id else "")
+    safe = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
     return os.path.join(STATE_DIR, safe + ".json")
+
+
+def _turn_base(data: dict) -> str:
+    session_id = str(data.get("session_id") or data.get("sessionId") or "")
+    if not session_id:
+        return ""
+    turn_id = str(data.get("turn_id") or data.get("turnId") or "")
+    key = session_id + ("\0" + turn_id if turn_id else "")
+    safe = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return os.path.join(TURN_STATE_DIR, safe)
+
+
+def _atomic_json(path: str, payload: dict) -> None:
+    """Best-effort private atomic write. Hook state is ephemeral, never memory."""
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    try:
+        os.chmod(os.path.dirname(path), 0o700)
+    except Exception:
+        pass
+    tmp = f"{path}.tmp-{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+
+
+def _prune_state_dir(path: str) -> None:
+    """Remove abandoned hook-state files after a bounded TTL."""
+    try:
+        cutoff = time.time() - max(60, STATE_TTL_SECONDS)
+        for name in os.listdir(path):
+            target = os.path.join(path, name)
+            if os.path.isfile(target) and os.path.getmtime(target) < cutoff:
+                os.remove(target)
+    except Exception:
+        pass
+
+
+def start_turn_state(data: dict) -> None:
+    """Create one normalized turn record and clear stale evidence markers."""
+    base = _turn_base(data)
+    if not base:
+        return
+    try:
+        _prune_state_dir(TURN_STATE_DIR)
+        for suffix in (".dig", ".verify"):
+            try:
+                os.remove(base + suffix)
+            except FileNotFoundError:
+                pass
+        _atomic_json(base + ".json", {
+            "created_at": int(time.time()),
+            "from_line": _transcript_len(data.get("transcript_path", "")),
+        })
+    except Exception:
+        pass
+
+
+def _mark_turn(base: str, suffix: str) -> None:
+    if not base:
+        return
+    try:
+        os.makedirs(TURN_STATE_DIR, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(TURN_STATE_DIR, 0o700)
+        except Exception:
+            pass
+        fd = os.open(base + suffix, os.O_WRONLY | os.O_CREAT, 0o600)
+        os.close(fd)
+    except Exception:
+        pass
+
+
+def _turn_has(data: dict, suffix: str) -> bool:
+    base = _turn_base(data)
+    return bool(base and os.path.exists(base + suffix))
+
+
+def _turn_started(data: dict) -> bool:
+    base = _turn_base(data)
+    return bool(base and os.path.exists(base + ".json"))
+
+
+def _cleanup_turn_state(data: dict) -> None:
+    base = _turn_base(data)
+    if not base:
+        return
+    for suffix in (".json", ".dig", ".verify"):
+        try:
+            os.remove(base + suffix)
+        except Exception:
+            pass
+    pending = _state_path(
+        data.get("session_id") or data.get("sessionId") or "",
+        data.get("turn_id") or data.get("turnId") or "",
+    )
+    try:
+        if pending:
+            os.remove(pending)
+    except Exception:
+        pass
 
 
 def _transcript_len(transcript_path: str) -> int:
@@ -353,7 +473,10 @@ def write_pending_dig(data: dict, flagged) -> None:
     what the Stop hook needs to tell whether the turn's reply engaged the cell)
     plus the transcript length at submit time so the Stop hook only scans this
     turn. `flagged` items may be ids (str) or {"id", "title"} dicts. Fail-open."""
-    path = _state_path(data.get("session_id") or "")
+    path = _state_path(
+        data.get("session_id") or data.get("sessionId") or "",
+        data.get("turn_id") or data.get("turnId") or "",
+    )
     if not path:
         return
     try:
@@ -367,34 +490,60 @@ def write_pending_dig(data: dict, flagged) -> None:
             if cid and (cid not in by_id or (not by_id[cid] and title)):
                 by_id[cid] = title
         if by_id:
-            os.makedirs(STATE_DIR, exist_ok=True)
+            _prune_state_dir(STATE_DIR)
             ids = sorted(by_id)
             payload = {
                 "ids": ids,
                 "titles": [by_id[i] for i in ids],
                 "from_line": _transcript_len(data.get("transcript_path", "")),
             }
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(payload, f)
+            _atomic_json(path, payload)
         elif os.path.exists(path):
             os.remove(path)  # no obligation this turn: clear any stale one
     except Exception:
         pass
 
 
-def did_dig(transcript_path: str, from_line: int) -> bool:
-    """True if a Recall READ tool call appears in transcript lines [from_line:].
-    Requires the line to be a tool_use so a prose mention does not count.
-    Fail-open: if the transcript cannot be read, return True (allow)."""
+def _transcript_tool_uses(transcript_path: str, from_line: int):
+    """Yield structured Claude tool-use blocks from a transcript fallback.
+
+    Codex hook logic uses PostToolUse markers instead. The transcript format is
+    not a stable cross-runtime interface, so malformed or unfamiliar records are
+    ignored rather than substring-matched.
+    """
     try:
         if not transcript_path or not os.path.exists(transcript_path):
-            return True
+            return
         with open(transcript_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
     except Exception:
-        return True
+        return
     for raw in lines[max(0, from_line):]:
-        if "tool_use" in raw and RECALL_READ_RE.search(raw):
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        if obj.get("type") != "assistant":
+            continue
+        content = (obj.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "tool_use":
+                yield part.get("name") or "", part.get("input") or {}
+
+
+def did_dig(transcript_path: str, from_line: int) -> bool:
+    """True if a real Recall read tool call appears after the turn boundary.
+
+    Fail-open when the transcript is missing; otherwise only structured
+    assistant tool-use blocks count, never prose containing the words.
+    """
+    if not transcript_path or not os.path.exists(transcript_path):
+        return True
+    for name, tool_input in _transcript_tool_uses(transcript_path, from_line):
+        rendered = name + " " + json.dumps(tool_input, sort_keys=True)
+        if RECALL_READ_RE.search(rendered):
             return True
     return False
 
@@ -469,11 +618,58 @@ def response_engages(text: str, ids, titles) -> bool:
     return False
 
 
+VERIFICATION_CMD_RE = re.compile(
+    r"\b(pytest|python(?:3)?\s+-m\s+(?:pytest|unittest)|jest|mocha|vitest|"
+    r"cargo\s+test|go\s+test|"
+    r"npm\s+(?:test|run\s+(?:test(?::[\w-]+)*|lint|build|check|typecheck|verify|e2e|smoke(?::[\w-]+)*|release:check)\b)|"
+    r"pnpm\s+(?:test|run\s+(?:test(?::[\w-]+)*|lint|build|check|typecheck|verify|e2e|smoke(?::[\w-]+)*)\b)|"
+    r"yarn\s+(?:test|run\s+(?:test(?::[\w-]+)*|lint|build|check|typecheck|verify|e2e|smoke(?::[\w-]+)*)\b)|"
+    r"node\s+(?:--check|--test)|tsc\b|make\s+(?:test|check|verify)\b|"
+    r"(?:test|lint|build|check|verify)(?:\.sh|\.py|\.mjs|\.js)\b)",
+    re.IGNORECASE,
+)
+
+
+def _explicit_nonzero_exit(value) -> bool:
+    """Find explicit non-zero process results without assuming one wire shape."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in {"exit_code", "exitCode", "returncode", "return_code"}:
+                try:
+                    if int(item) != 0:
+                        return True
+                except Exception:
+                    pass
+            if _explicit_nonzero_exit(item):
+                return True
+    elif isinstance(value, list):
+        return any(_explicit_nonzero_exit(item) for item in value)
+    return False
+
+
+def record_tool_evidence(data: dict) -> None:
+    """Record successful Recall reads and verification commands for this turn."""
+    if _explicit_nonzero_exit(data.get("tool_response")):
+        return
+    name = str(data.get("tool_name") or "")
+    tool_input = data.get("tool_input") or {}
+    rendered = name + " " + json.dumps(tool_input, sort_keys=True)
+    base = _turn_base(data)
+    if RECALL_READ_RE.search(rendered):
+        _mark_turn(base, ".dig")
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    if name == "Bash" and isinstance(command, str) and VERIFICATION_CMD_RE.search(command):
+        _mark_turn(base, ".verify")
+
+
 def _dig_reason(data: dict) -> str:
     """Term 1 (push-designated): the turn referenced a flagged/superseded cell
     without reading it. Obligation is recorded by the push and consumed here, so
     it fires at most once per flagged turn. Fail-open."""
-    path = _state_path(data.get("session_id") or "")
+    path = _state_path(
+        data.get("session_id") or data.get("sessionId") or "",
+        data.get("turn_id") or data.get("turnId") or "",
+    )
     if not path or not os.path.exists(path):
         return ""
     try:
@@ -490,11 +686,14 @@ def _dig_reason(data: dict) -> str:
         return ""
     transcript = data.get("transcript_path", "")
     from_line = int(state.get("from_line", 0) or 0)
-    if did_dig(transcript, from_line):
+    if (_turn_has(data, ".dig") if _turn_started(data) else did_dig(transcript, from_line)):
         return ""
     # Precision gate: only hold the turn open if the reply actually engaged a
     # flagged cell. Fires on reliance, not merely on a stale row in the index.
-    if not response_engages(_assistant_text(transcript, from_line), ids, state.get("titles") or []):
+    response = data.get("last_assistant_message")
+    if not isinstance(response, str):
+        response = _assistant_text(transcript, from_line)
+    if not response_engages(response, ids, state.get("titles") or []):
         return ""
     shown = ", ".join(ids[:5])
     return (
@@ -537,23 +736,20 @@ def _claimed_done(text: str) -> bool:
         text, re.I))
 
 
-def _ran_verification(transcript_path: str, from_line: int) -> bool:
-    """Lenient clear: any test/build/run command in a tool_use this turn. Fail-open:
-    unreadable transcript returns True (do not block)."""
-    try:
-        if not transcript_path or not os.path.exists(transcript_path):
-            return True
-        with open(transcript_path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-    except Exception:
+def _ran_verification(transcript_path: str, from_line: int, data: dict = None) -> bool:
+    """True when this turn recorded a successful verification command.
+
+    PostToolUse state is authoritative. Structured Claude transcript parsing is
+    retained only as a fail-open compatibility path for sessions started before
+    the PostToolUse hook was installed.
+    """
+    if data and _turn_started(data):
+        return _turn_has(data, ".verify")
+    if not transcript_path or not os.path.exists(transcript_path):
         return True
-    import re
-    cmd = re.compile(
-        r"\b(test|pytest|jest|mocha|vitest|cargo\s+test|go\s+test|make\b|"
-        r"npm\s+(?:test|run\b)|pnpm\s+(?:test|run\b)|yarn\s+(?:test|run\b)|"
-        r"node\s+--check|--check\b|tsc\b|lint|build|verify|/run\b|/verify\b)\b", re.I)
-    for raw in lines[max(0, from_line):]:
-        if "tool_use" in raw and cmd.search(raw):
+    for name, tool_input in _transcript_tool_uses(transcript_path, from_line):
+        command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+        if name == "Bash" and isinstance(command, str) and VERIFICATION_CMD_RE.search(command):
             return True
     return False
 
@@ -563,9 +759,12 @@ def _evidence_reason(data: dict) -> str:
     no verification command ran this turn. Opt out with RECALL_GATE_EVIDENCE=0."""
     transcript = data.get("transcript_path", "")
     start = _turn_start(transcript)
-    if not _claimed_done(_assistant_text(transcript, start)):
+    response = data.get("last_assistant_message")
+    if not isinstance(response, str):
+        response = _assistant_text(transcript, start)
+    if not _claimed_done(response):
         return ""
-    if _ran_verification(transcript, start):
+    if _ran_verification(transcript, start, data):
         return ""
     return (
         "EVIDENCE REQUIRED: this turn claims something works / passes / is done, "
@@ -580,6 +779,7 @@ def stop_backstop(data: dict) -> str:
     transcript signature}; a term blocks only when its action is owed and unmet.
     Loop-guarded (fires at most once per cycle) and fail-open throughout."""
     if data.get("stop_hook_active"):
+        _cleanup_turn_state(data)
         return ""  # already blocked once this cycle; never loop
     reasons = []
     dig = _dig_reason(data)
@@ -589,20 +789,27 @@ def stop_backstop(data: dict) -> str:
         ev = _evidence_reason(data)
         if ev:
             reasons.append(ev)
+    _cleanup_turn_state(data)
     return "\n\n".join(reasons)
 
 
 def main() -> int:
     # --stop:      turn-end backstop (dig + evidence terms).
+    # --tool:      normalized PostToolUse evidence capture.
     # --expansion: command-scoped mini-index push.
     # --prompt:    per-prompt push (mini relevance index + primer).
     # default:     full SessionStart payload (directive + 7d recent-activity diff).
     argv = sys.argv[1:]
     data = read_hook_input()
 
+    if "--tool" in argv:
+        record_tool_evidence(data)
+        return 0
+
     if "--stop" in argv:
         reason = stop_backstop(data)
-        print(json.dumps({"decision": "block", "reason": reason} if reason else {}))
+        if reason:
+            print(json.dumps({"decision": "block", "reason": reason}))
         return 0
 
     # --expansion (UserPromptExpansion): a slash command or MCP prompt just expanded.
@@ -634,6 +841,7 @@ def main() -> int:
 
     ctx = DIRECTIVE
     if prompt_mode:
+        start_turn_state(data)
         flagged: list = []
         digest = prompt_digest(data.get("prompt", ""), data.get("cwd", ""), flagged)
         ctx = digest + "\n\n" + PROMPT_DIRECTIVE if digest else PROMPT_DIRECTIVE

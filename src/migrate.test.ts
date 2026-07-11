@@ -41,6 +41,20 @@ test("mapNodeToCell builds a MAL cell losslessly", () => {
   assert.equal((cell.props._migrated as { cell_address?: string }).cell_address, "recall://cell/n1");
 });
 
+test("mapNodeToCell preserves legacy archived cells as non-active annexed cells", () => {
+  const row: OldNodeRow = {
+    id: "archived-1", cell_address: null, kind: "observation",
+    title: "retired memory", body: "kept for provenance",
+    summary: null, scope_json: null, tags_json: null,
+    data_json: JSON.stringify({ confidence: { value: 0.8 } }),
+    provenance_json: null,
+    status: "archived", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-02T00:00:00Z",
+  };
+  const cell = mapNodeToCell(row);
+  assert.equal(cell.status, "annexed");
+  assert.equal(cell.flags.annexed, true);
+});
+
 test("migrate tolerates legacy DB with only graph_nodes (no hyperedges/semantic_index)", () => {
   const dir = mkdtempSync(join(tmpdir(), "recall-mig-legacy-"));
   const oldPath = join(dir, "legacy.sqlite3");

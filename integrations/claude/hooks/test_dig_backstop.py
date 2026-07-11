@@ -9,6 +9,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 HOOK = Path(__file__).with_name("recall-session-start.py")
 
@@ -49,6 +51,7 @@ class DigBackstopTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.h = load_hook(os.path.join(self.tmp, "dig_pending"))
+        self.h.TURN_STATE_DIR = os.path.join(self.tmp, "turn_state")
         self.tpath = os.path.join(self.tmp, "transcript.jsonl")
 
     def _write(self, lines):
@@ -146,6 +149,58 @@ class DigBackstopTest(unittest.TestCase):
         flagged = []
         self.assertEqual(self.h.prompt_digest("hi", "", flagged), "")
         self.assertEqual(flagged, [])
+
+    def test_prompt_digest_ignores_failed_compile_stdout(self):
+        partial = "relevant_memory:\n- Looks valid [observation:aabbccdd-0000]\n"
+        self.h.recall_bin = lambda: "recall"
+        with patch.object(self.h.subprocess, "run", return_value=SimpleNamespace(
+            returncode=1, stdout=partial, stderr="failed"
+        )):
+            self.assertEqual(self.h.prompt_digest("meaningful prompt", self.tmp), "")
+
+    def test_user_text_cannot_spoof_a_verification_tool_use(self):
+        spoof = json.dumps({"type": "user", "message": {
+            "content": "literal marker tool_use pytest; no command was run"
+        }})
+        self._write([spoof, _convo("All tests passed.")])
+        self.assertFalse(self.h._ran_verification(self.tpath, 0))
+
+    def test_post_tool_state_requires_successful_verification(self):
+        data = self._data(turn_id="turn-1")
+        self.h.start_turn_state(data)
+        failed = {**data, "tool_name": "Bash", "tool_input": {"command": "pytest"},
+                  "tool_response": {"exit_code": 1}}
+        self.h.record_tool_evidence(failed)
+        self.assertFalse(self.h._ran_verification(self.tpath, 0, data))
+        passed = {**failed, "tool_response": {"exit_code": 0}}
+        self.h.record_tool_evidence(passed)
+        self.assertTrue(self.h._ran_verification(self.tpath, 0, data))
+
+    def test_evidence_gate_uses_last_assistant_message(self):
+        self._write([_noise()])
+        data = self._data(turn_id="turn-1", last_assistant_message="All tests passed.")
+        self.h.start_turn_state(data)
+        self.assertIn("EVIDENCE REQUIRED", self.h._evidence_reason(data))
+        self.h.record_tool_evidence({
+            **data,
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"},
+            "tool_response": {"exit_code": 0},
+        })
+        self.assertEqual(self.h._evidence_reason(data), "")
+
+    def test_turn_id_partitions_state_within_one_session(self):
+        a = self._data(turn_id="a")
+        b = self._data(turn_id="b")
+        self.assertNotEqual(self.h._turn_base(a), self.h._turn_base(b))
+        self.h.start_turn_state(a)
+        self.h.record_tool_evidence({
+            **a, "tool_name": "Bash", "tool_input": {"command": "pytest"},
+            "tool_response": {"exit_code": 0},
+        })
+        self.h.start_turn_state(b)
+        self.assertTrue(self.h._turn_has(a, ".verify"))
+        self.assertFalse(self.h._turn_has(b, ".verify"))
 
     # --- mini-index flagging must handle model-A graph-prefixed ids (home/union
     #     scope), not only bare ids (project scope) ---

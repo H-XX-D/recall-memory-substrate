@@ -2,7 +2,7 @@
 // transforms and the auto-memory lift. Dry-run by default like every other
 // adapter surface; writes are gated on apply, with a .bak backup of any prior
 // file content that is actually being changed.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,8 @@ const INSTALL_ASSETS: AssetSpec[] = [
 
 export interface ClaudeSyncOptions {
   home?: string;
+  /** Override packaged integrations root for isolated tests/embedders. */
+  assetsRoot?: string;
   hookCommandPath?: string;
   mcpCommand?: string;
   disableAutoMemory?: boolean;
@@ -83,7 +85,7 @@ export function claudeSyncStatus(
 
   const settings = readJsonSafe(settingsFile);
   const hooks = isRecord(settings?.hooks) ? (settings!.hooks as Record<string, unknown>) : {};
-  const hooksInstalled = ["SessionStart", "UserPromptSubmit", "Stop"].every((event) =>
+  const hooksInstalled = ["SessionStart", "UserPromptSubmit", "UserPromptExpansion", "PostToolUse", "Stop"].every((event) =>
     hasRecallHook(hooks[event]),
   );
   const env = isRecord(settings?.env) ? (settings!.env as Record<string, unknown>) : {};
@@ -124,9 +126,9 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
   if (apply && settingsMerge.changed.length > 0) {
     const backup = backupIfExists(settingsFile);
     if (backup) backups.push(backup);
-    mkdirSync(dirname(settingsFile), { recursive: true });
-    writeFileSync(settingsFile, `${JSON.stringify(settingsMerge.next, null, 2)}\n`);
+    writePrivateAtomic(settingsFile, `${JSON.stringify(settingsMerge.next, null, 2)}\n`);
   }
+  if (apply && existsSync(settingsFile)) chmodSync(settingsFile, 0o600);
 
   const mcpFile = join(home, ".claude.json");
   const existingMcp = readJsonSafe(mcpFile) ?? {};
@@ -134,15 +136,15 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
   if (apply && mcpMerge.changed) {
     const backup = backupIfExists(mcpFile);
     if (backup) backups.push(backup);
-    mkdirSync(dirname(mcpFile), { recursive: true });
-    writeFileSync(mcpFile, `${JSON.stringify(mcpMerge.next, null, 2)}\n`);
+    writePrivateAtomic(mcpFile, `${JSON.stringify(mcpMerge.next, null, 2)}\n`);
   }
+  if (apply && existsSync(mcpFile)) chmodSync(mcpFile, 0o600);
 
   const assetsInstalled: string[] = [];
   let assetsSkipped: string | undefined;
   if (apply && installAssets) {
     for (const asset of INSTALL_ASSETS) {
-      const sourceAsset = findAssetSource(asset.source);
+      const sourceAsset = findAssetSource(asset.source, opts.assetsRoot);
       if (!sourceAsset) {
         // Degrade per asset: a packaging miss of one file must not block the
         // rest of the install (or the sync as a whole).
@@ -155,10 +157,10 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
       if (changed) {
         const backup = backupIfExists(destAsset);
         if (backup) backups.push(backup);
-        mkdirSync(dirname(destAsset), { recursive: true });
-        writeFileSync(destAsset, contents);
+        writePrivateAtomic(destAsset, contents, assetMode(destAsset));
         assetsInstalled.push(destAsset);
       }
+      try { chmodSync(destAsset, assetMode(destAsset)); } catch { /* best effort */ }
     }
   }
 
@@ -216,12 +218,14 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
 // a module nested one directory deeper than expected). Returns null, never
 // throws, if neither location has the file: runClaudeSync degrades to
 // assetsSkipped rather than failing the whole sync.
-function findAssetSource(relative: string[]): string | null {
+function findAssetSource(relative: string[], assetsRoot?: string): string | null {
   const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, "..", "integrations", ...relative),
-    join(here, "..", "..", "integrations", ...relative),
-  ];
+  const candidates = assetsRoot
+    ? [join(assetsRoot, ...relative)]
+    : [
+        join(here, "..", "integrations", ...relative),
+        join(here, "..", "..", "integrations", ...relative),
+      ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
@@ -231,8 +235,24 @@ function findAssetSource(relative: string[]): string | null {
 function backupIfExists(file: string): string | null {
   if (!existsSync(file)) return null;
   const backupPath = `${file}.bak`;
-  writeFileSync(backupPath, readFileSync(file));
+  writePrivateAtomic(backupPath, readFileSync(file));
   return backupPath;
+}
+
+function assetMode(file: string): number {
+  return file.endsWith(".py") ? 0o700 : 0o600;
+}
+
+function writePrivateAtomic(file: string, contents: string | Buffer, mode = 0o600): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(tmp, contents, { mode });
+    renameSync(tmp, file);
+    chmodSync(file, mode);
+  } finally {
+    try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+  }
 }
 
 function readJsonSafe(file: string): Record<string, unknown> | null {
