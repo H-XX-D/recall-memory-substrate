@@ -1,0 +1,7 @@
+# Force LF on checkout everywhere. The packaged integration assets
+# (SKILL.md, hooks, prompts) are installed byte-for-byte and compared
+# against expected content; a CRLF checkout on Windows changes the bytes
+# and breaks both the tests and sync idempotence.
+* text=auto eol=lf
+*.png binary
+*.gif binary
