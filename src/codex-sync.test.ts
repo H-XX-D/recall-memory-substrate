@@ -102,12 +102,15 @@ test("runCodexSync apply writes config.toml with the recall MCP block and AGENTS
     assert.deepEqual(Object.keys(hooks.hooks).sort(), ["PostToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
     assert.match(JSON.stringify(hooks.hooks.PostToolUse), /--tool/);
     assert.doesNotMatch(JSON.stringify(hooks), /UserPromptExpansion|--expansion/);
-    assert.equal(statSync(configPath(home)).mode & 0o777, 0o600);
-    assert.equal(statSync(agentsPath(home)).mode & 0o777, 0o600);
-    assert.equal(statSync(skillPath(home)).mode & 0o777, 0o600);
-    assert.equal(statSync(promptPath(home)).mode & 0o777, 0o600);
-    assert.equal(statSync(hooksPath(home)).mode & 0o777, 0o600);
-    assert.equal(statSync(hookPath(home)).mode & 0o777, 0o700);
+    if (process.platform !== "win32") {
+      // NTFS has no POSIX mode bits; Windows stat reports 0o666 for any writable file.
+      assert.equal(statSync(configPath(home)).mode & 0o777, 0o600);
+      assert.equal(statSync(agentsPath(home)).mode & 0o777, 0o600);
+      assert.equal(statSync(skillPath(home)).mode & 0o777, 0o600);
+      assert.equal(statSync(promptPath(home)).mode & 0o777, 0o600);
+      assert.equal(statSync(hooksPath(home)).mode & 0o777, 0o600);
+      assert.equal(statSync(hookPath(home)).mode & 0o777, 0o700);
+    }
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
