@@ -57,8 +57,11 @@ test("runClaudeSync apply writes settings.json with recall hooks and disables au
     assert.equal(existsSync(mcpPath(home)), true);
     const mcp = JSON.parse(readFileSync(mcpPath(home), "utf8"));
     assert.deepEqual(mcp.mcpServers.recall, { type: "stdio", command: "recall-mcp", args: [], env: {} });
-    assert.equal(statSync(settingsPath(home)).mode & 0o777, 0o600);
-    assert.equal(statSync(mcpPath(home)).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      // NTFS has no POSIX mode bits; Windows stat reports 0o666 for any writable file.
+      assert.equal(statSync(settingsPath(home)).mode & 0o777, 0o600);
+      assert.equal(statSync(mcpPath(home)).mode & 0o777, 0o600);
+    }
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -283,7 +286,10 @@ test("runClaudeSync apply installs the recall-session-start.py hook asset and re
     assert.equal(existsSync(hookAssetPath(home)), true);
     assert.ok(result.assetsInstalled.includes(hookAssetPath(home)));
     assert.equal(result.assetsSkipped, undefined);
-    assert.equal(statSync(hookAssetPath(home)).mode & 0o777, 0o700);
+    if (process.platform !== "win32") {
+      // NTFS has no POSIX mode bits; Windows stat reports 0o666 for any writable file.
+      assert.equal(statSync(hookAssetPath(home)).mode & 0o777, 0o700);
+    }
     const installed = readFileSync(hookAssetPath(home), "utf8");
     const source = readFileSync(join(process.cwd(), "integrations", "claude", "hooks", "recall-session-start.py"), "utf8");
     assert.equal(installed, source);
