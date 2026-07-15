@@ -46,3 +46,18 @@ test("receipt hook attributes only an accepted recall_write to the matching turn
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("receipt hook ignores an accepted write from a different session", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "recall-receipt-hook-"));
+  const state = join(tmp, "state.json");
+  try {
+    writeFileSync(state, JSON.stringify({ sessionId: "s1", turnId: "t1", turnStart: "2026-07-12T00:00:00Z", admittedIds: [] }));
+    runReceipt(state, {
+      session_id: "s2", turn_id: "t1", tool_name: "mcp__recall__recall_write",
+      tool_response: { accepted: true, id: "cross-session" },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(state, "utf8")).admittedIds, []);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

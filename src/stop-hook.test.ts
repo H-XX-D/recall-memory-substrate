@@ -246,6 +246,64 @@ test("exact no-write footer releases and persists a no-write closure", () => {
   }
 });
 
+test("a non-exact no-write footer does not release the turn", () => {
+  const tmp = tempDir();
+  try {
+    const dbPath = join(tmp, "recall.sqlite3");
+    new SqliteStore(dbPath).close();
+    const statePath = join(tmp, "state.json");
+    writeFileSync(statePath, JSON.stringify({ turnStart: new Date().toISOString(), turnId: "turn-fab" }));
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      {
+        input: JSON.stringify({
+          session_id: "sess-fab", turn_id: "turn-fab",
+          last_assistant_message: "Work complete.\n\n[Recall no-write: all done]",
+        }),
+        encoding: "utf8",
+        env: { ...process.env, RECALL_DB: dbPath, RECALL_STOP_STATE: statePath },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).decision, "block");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("a verified write from another turn cannot close this turn", () => {
+  const tmp = tempDir();
+  try {
+    const dbPath = join(tmp, "recall.sqlite3");
+    const store = new SqliteStore(dbPath);
+    const cell = buildCell(
+      { kind: "obs", title: "Turn A write", body: "written during turn-a", confidence: 0.9, topics: ["gate"] },
+      { key: "dddddddd-3333-3333-3333-333333333333" },
+    );
+    store.put(cell);
+    store.close();
+    const statePath = join(tmp, "state.json");
+    writeFileSync(statePath, JSON.stringify({
+      turnStart: "2000-01-01T00:00:00.000Z", turnId: "turn-a",
+      admittedIds: [cell.key],
+    }));
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      {
+        input: JSON.stringify({ session_id: "sess-cross-turn", turn_id: "turn-b" }),
+        encoding: "utf8",
+        env: { ...process.env, RECALL_DB: dbPath, RECALL_STOP_STATE: statePath },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).decision, "block");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("no-write footer cannot bypass a missing turn marker", () => {
   const tmp = tempDir();
   try {
