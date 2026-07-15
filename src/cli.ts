@@ -203,7 +203,12 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
         // history (buildCell keys producedBy on owner, default "claude-code")
         // and feed it into R1. Neutral (1) until the actor has >= 3 outcomes.
         const calibrationFactor = actorCalibrationFactor(store, proposal.owner ?? "claude-code");
-        const result = admit(proposal, { store, now: options.now, calibrationFactor });
+        const result = admit(proposal, {
+          store,
+          now: options.now,
+          calibrationFactor,
+          integrityGate: args.writeGate,
+        });
         if (result.accepted && result.cell && !args.noGuidance) {
           const suggest = args.noSuggestPrograms
             ? false
@@ -718,6 +723,7 @@ export function runCli(argv: string[], options: RunCliOptions = {}): number {
           codexHome: env.CODEX_HOME,
           apply: args.apply,
           recallDb: args.db,
+          writeGate: args.writeGate,
         }),
       );
       return 0;
@@ -1091,7 +1097,7 @@ Commands:
   recall import local [--global-db path] [--project slug] [--topics a,b] [--limit N] [--no-hyperedges] [--apply] [--db path]
   recall claude sync [--apply] [--keep-automemory] [--write-gate] [--root path] [--db path]  # five lifecycle events
   recall claude status
-  recall codex sync [--apply] [--db path]  # skill + /recall + MCP + AGENTS.md + native hooks; respects CODEX_HOME
+  recall codex sync [--apply] [--write-gate] [--db path]  # skill + /recall + MCP + AGENTS.md + native hooks; respects CODEX_HOME
   recall codex status
   recall reindex [--missing-only] [--db path] [--project slug]
   recall maintain [--all-graphs] [--db path] [--project slug]

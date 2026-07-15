@@ -25,12 +25,26 @@ export interface AdmitContext {
   key?: string;
   now?: string;
   store?: Store; // when present, R2 runs dedup, supersede, and real masses
+  /** Opt-in agent-integrity contract for interactive LLM writes. */
+  integrityGate?: boolean;
 }
 
 export function admit(
   proposal: WriteProposal,
   ctx: AdmitContext = {},
 ): AdmissionResult {
+  // In integrity mode, inspect the raw envelope before normalization so an
+  // explicit null is distinguishable from an omitted primitive. Null means
+  // "not applicable" for optional fields and is removed before v5 validation.
+  const filled = templateIssues(proposal, {
+    requireComplete: ctx.integrityGate === true,
+    requireEdge: ctx.integrityGate === true,
+  });
+  if (filled.length > 0) {
+    return { accepted: false, issues: filled, warnings: [], attenuations: [] };
+  }
+  if (ctx.integrityGate) proposal = normalizeExplicitNulls(proposal);
+
   const validation = validateProposal(proposal);
   if (!validation.ok) {
     return { accepted: false, issues: validation.issues, warnings: [], attenuations: [] };
@@ -58,11 +72,6 @@ export function admit(
 
   // Fill-or-reject: any field still equal to its template description was never
   // filled. Reject; the Stop hook holds the turn until the template is complete.
-  const filled = templateIssues(proposal);
-  if (filled.length > 0) {
-    return { accepted: false, issues: filled, warnings: [], attenuations: [] };
-  }
-
   const factor = ctx.calibrationFactor ?? 1;
   if (!Number.isFinite(factor) || factor < 0.5 || factor > 1) {
     return {
@@ -234,4 +243,12 @@ export function admit(
     warnings: [...screenWarnings, ...att.warnings, ...relWarnings],
     attenuations,
   };
+}
+
+function normalizeExplicitNulls(proposal: WriteProposal): WriteProposal {
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(proposal as unknown as Record<string, unknown>)) {
+    if (value !== null) normalized[key] = value;
+  }
+  return normalized as unknown as WriteProposal;
 }

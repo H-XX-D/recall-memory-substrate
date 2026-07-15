@@ -17,8 +17,23 @@ export function mergeAgentsMd(existing: string | undefined | null): { next: stri
 export { recallSlashPrompt };
 
 /** Native Codex subset of the portable Recall lifecycle hook. */
-export function recallCodexHookGroups(hookCommandPath: string): Record<string, unknown> {
+export interface CodexHookGroupsOptions {
+  writeGate?: { stopHookCommand: string; promptHookCommand: string; receiptHookCommand: string };
+}
+
+export function recallCodexHookGroups(
+  hookCommandPath: string,
+  opts: CodexHookGroupsOptions = {},
+): Record<string, unknown> {
   const quoted = JSON.stringify(hookCommandPath);
+  const promptHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --prompt`, timeout: 10 }];
+  const stopHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --stop`, timeout: 10 }];
+  const toolHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --tool`, timeout: 10 }];
+  if (opts.writeGate) {
+    promptHooks.push({ type: "command", command: opts.writeGate.promptHookCommand });
+    stopHooks.push({ type: "command", command: opts.writeGate.stopHookCommand });
+    toolHooks.push({ type: "command", command: opts.writeGate.receiptHookCommand });
+  }
   return {
     SessionStart: {
       hooks: [{
@@ -29,14 +44,14 @@ export function recallCodexHookGroups(hookCommandPath: string): Record<string, u
       }],
     },
     UserPromptSubmit: {
-      hooks: [{ type: "command", command: `python3 ${quoted} --prompt`, timeout: 10 }],
+      hooks: promptHooks,
     },
     PostToolUse: {
       matcher: "Bash|mcp__recall__.*",
-      hooks: [{ type: "command", command: `python3 ${quoted} --tool`, timeout: 10 }],
+      hooks: toolHooks,
     },
     Stop: {
-      hooks: [{ type: "command", command: `python3 ${quoted} --stop`, timeout: 10 }],
+      hooks: stopHooks,
     },
   };
 }
@@ -45,11 +60,12 @@ export function recallCodexHookGroups(hookCommandPath: string): Record<string, u
 export function mergeCodexHooks(
   existing: Record<string, unknown> | undefined | null,
   hookCommandPath: string,
+  opts: CodexHookGroupsOptions = {},
 ): { next: Record<string, unknown>; changed: boolean } {
   const prior = existing ?? {};
   const next: Record<string, unknown> = { ...prior };
   const hooks: Record<string, unknown> = { ...((next.hooks as Record<string, unknown>) ?? {}) };
-  const desired = recallCodexHookGroups(hookCommandPath);
+  const desired = recallCodexHookGroups(hookCommandPath, opts);
 
   for (const event of CODEX_HOOK_EVENTS) {
     const previous = Array.isArray(hooks[event]) ? hooks[event] as unknown[] : [];
@@ -70,22 +86,25 @@ function stripRecallHandlers(group: unknown): unknown | null {
   if (!Array.isArray(handlers)) return group;
   const remaining = handlers.filter((handler) => {
     const command = (handler as { command?: unknown })?.command;
-    return typeof command !== "string" || !command.includes(HOOK_MARKER);
+    return typeof command !== "string" || !(command.includes(HOOK_MARKER)
+      || /(^|\s)recall-(?:prompt|stop|receipt)-hook(?:\s|$)/.test(command));
   });
   return remaining.length > 0 ? { ...(group as Record<string, unknown>), hooks: remaining } : null;
 }
 
-export function recallMcpToml(mcpCommand: string, recallDb?: string): string {
+export function recallMcpToml(mcpCommand: string, recallDb?: string, integrityGate = false): string {
   let text = `[mcp_servers.${MCP_NAME}]\ncommand = ${JSON.stringify(mcpCommand)}\n`;
-  if (recallDb) {
-    text += `\n[mcp_servers.${MCP_NAME}.env]\nRECALL_DB = ${JSON.stringify(recallDb)}\n`;
+  if (recallDb || integrityGate) {
+    text += `\n[mcp_servers.${MCP_NAME}.env]\n`;
+    if (recallDb) text += `RECALL_DB = ${JSON.stringify(recallDb)}\n`;
+    if (integrityGate) text += `RECALL_INTEGRITY_GATE = "1"\n`;
   }
   return text;
 }
 
 export function upsertCodexMcpServer(
   tomlText: string | undefined | null,
-  opts: { mcpCommand: string; recallDb?: string },
+  opts: { mcpCommand: string; recallDb?: string; integrityGate?: boolean },
 ): { next: string; changed: boolean } {
   const prior = tomlText ?? "";
   const lines = prior.split("\n");
@@ -114,7 +133,7 @@ export function upsertCodexMcpServer(
   }
 
   const body = kept.join("\n").replace(/\s+$/, "");
-  const block = recallMcpToml(opts.mcpCommand, opts.recallDb);
+  const block = recallMcpToml(opts.mcpCommand, opts.recallDb, opts.integrityGate);
   const next = body ? `${body}\n\n${block}` : block;
   return { next, changed: next !== prior };
 }

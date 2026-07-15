@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { SqliteStore } from "./store.js";
 import { buildCell } from "./build.js";
+import { registerProject, registryDbPath } from "./routing.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -57,7 +58,10 @@ function runStopHook(opts: { dbPath: string; stateDir: string; sessionId?: strin
   const sessionId = opts.sessionId ?? "sess-1";
   const statePath = join(opts.stateDir, `${sessionId}.json`);
   mkdirSync(opts.stateDir, { recursive: true });
-  writeFileSync(statePath, JSON.stringify({ turnStart: "2000-01-01T00:00:00.000Z" }));
+  writeFileSync(statePath, JSON.stringify({
+    turnStart: "2000-01-01T00:00:00.000Z",
+    admittedIds: ["aaaaaaaa-3333-3333-3333-333333333333"],
+  }));
 
   const result = spawnSync(
     process.execPath,
@@ -142,7 +146,10 @@ test("with RECALL_HOME set and no RECALL_DB the stop hook resolves the store und
     const stateDir = join(tmp, "state");
     mkdirSync(stateDir, { recursive: true });
     const statePath = join(stateDir, "sess-rhome.json");
-    writeFileSync(statePath, JSON.stringify({ turnStart: "2000-01-01T00:00:00.000Z" }));
+    writeFileSync(statePath, JSON.stringify({
+      turnStart: "2000-01-01T00:00:00.000Z",
+      admittedIds: ["aaaaaaaa-3333-3333-3333-333333333333"],
+    }));
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -166,6 +173,157 @@ test("with RECALL_HOME set and no RECALL_DB the stop hook resolves the store und
       after.close();
     }
     assert.equal(existsSync(join(fakeHome, ".recall")), false); // nothing written under $HOME
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("stop hook routes from the turn cwd to a registered project and records cell ids", () => {
+  const tmp = tempDir();
+  try {
+    const recallHome = join(tmp, "rhome");
+    const projectRoot = join(tmp, "project");
+    mkdirSync(projectRoot, { recursive: true });
+    const env = { ...process.env, RECALL_HOME: recallHome };
+    const project = registerProject(
+      { root: projectRoot, slug: "gate-project" },
+      "2026-07-11T00:00:00.000Z",
+      registryDbPath(env),
+    );
+    seedEmitWitnessProgram(project.dbPath);
+    const statePath = join(tmp, "state.json");
+    writeFileSync(statePath, JSON.stringify({
+      turnStart: "2000-01-01T00:00:00.000Z", turnId: "turn-1", cwd: projectRoot,
+      admittedIds: ["aaaaaaaa-3333-3333-3333-333333333333"],
+    }));
+    const childEnv: NodeJS.ProcessEnv = { ...env, RECALL_STOP_STATE: statePath };
+    delete childEnv.RECALL_DB;
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      {
+        input: JSON.stringify({ session_id: "sess-project", turn_id: "turn-1", cwd: projectRoot }),
+        encoding: "utf8",
+        env: childEnv,
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {});
+    const receipt = JSON.parse(readFileSync(statePath, "utf8"));
+    assert.equal(receipt.closure.kind, "write");
+    assert.ok(receipt.closure.cellIds.includes("aaaaaaaa-3333-3333-3333-333333333333"));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("exact no-write footer releases and persists a no-write closure", () => {
+  const tmp = tempDir();
+  try {
+    const dbPath = join(tmp, "recall.sqlite3");
+    new SqliteStore(dbPath).close();
+    const statePath = join(tmp, "state.json");
+    writeFileSync(statePath, JSON.stringify({ turnStart: new Date().toISOString(), turnId: "turn-empty" }));
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      {
+        input: JSON.stringify({
+          session_id: "sess-empty", turn_id: "turn-empty",
+          last_assistant_message: `Acknowledged.\n\n[Recall no-write: no durable outcome]`,
+        }),
+        encoding: "utf8",
+        env: { ...process.env, RECALL_DB: dbPath, RECALL_STOP_STATE: statePath },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {});
+    const receipt = JSON.parse(readFileSync(statePath, "utf8"));
+    assert.equal(receipt.closure.kind, "no-write");
+    assert.deepEqual(receipt.closure.cellIds, []);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("a non-exact no-write footer does not release the turn", () => {
+  const tmp = tempDir();
+  try {
+    const dbPath = join(tmp, "recall.sqlite3");
+    new SqliteStore(dbPath).close();
+    const statePath = join(tmp, "state.json");
+    writeFileSync(statePath, JSON.stringify({ turnStart: new Date().toISOString(), turnId: "turn-fab" }));
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      {
+        input: JSON.stringify({
+          session_id: "sess-fab", turn_id: "turn-fab",
+          last_assistant_message: "Work complete.\n\n[Recall no-write: all done]",
+        }),
+        encoding: "utf8",
+        env: { ...process.env, RECALL_DB: dbPath, RECALL_STOP_STATE: statePath },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).decision, "block");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("a verified write from another turn cannot close this turn", () => {
+  const tmp = tempDir();
+  try {
+    const dbPath = join(tmp, "recall.sqlite3");
+    const store = new SqliteStore(dbPath);
+    const cell = buildCell(
+      { kind: "obs", title: "Turn A write", body: "written during turn-a", confidence: 0.9, topics: ["gate"] },
+      { key: "dddddddd-3333-3333-3333-333333333333" },
+    );
+    store.put(cell);
+    store.close();
+    const statePath = join(tmp, "state.json");
+    writeFileSync(statePath, JSON.stringify({
+      turnStart: "2000-01-01T00:00:00.000Z", turnId: "turn-a",
+      admittedIds: [cell.key],
+    }));
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      {
+        input: JSON.stringify({ session_id: "sess-cross-turn", turn_id: "turn-b" }),
+        encoding: "utf8",
+        env: { ...process.env, RECALL_DB: dbPath, RECALL_STOP_STATE: statePath },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).decision, "block");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("no-write footer cannot bypass a missing turn marker", () => {
+  const tmp = tempDir();
+  try {
+    const dbPath = join(tmp, "recall.sqlite3");
+    new SqliteStore(dbPath).close();
+    const statePath = join(tmp, "missing-state.json");
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", "--import", "tsx", join(__dirname, "stop-hook.ts")],
+      {
+        input: JSON.stringify({
+          session_id: "sess-no-marker", turn_id: "turn-no-marker",
+          last_assistant_message: "[Recall no-write: no durable outcome]",
+        }),
+        encoding: "utf8",
+        env: { ...process.env, RECALL_DB: dbPath, RECALL_STOP_STATE: statePath },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).decision, "block");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -206,7 +364,10 @@ test("stop endcap still swallows store errors and releases the turn", () => {
     const stateDir = join(tmp, "state");
     mkdirSync(stateDir, { recursive: true });
     const statePath = join(stateDir, "sess-err.json");
-    writeFileSync(statePath, JSON.stringify({ turnStart: "2000-01-01T00:00:00.000Z" }));
+    writeFileSync(statePath, JSON.stringify({
+      turnStart: "2000-01-01T00:00:00.000Z",
+      admittedIds: ["aaaaaaaa-3333-3333-3333-333333333333"],
+    }));
 
     const result = spawnSync(
       process.execPath,

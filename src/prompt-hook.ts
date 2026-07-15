@@ -25,8 +25,13 @@ function main(): void {
     raw = "";
   }
   let sessionId: string | undefined;
+  let turnId: string | undefined;
+  let cwd: string | undefined;
   try {
-    sessionId = (JSON.parse(raw) as { session_id?: string }).session_id;
+    const input = JSON.parse(raw) as { session_id?: string; turn_id?: string; cwd?: string };
+    sessionId = input.session_id;
+    turnId = input.turn_id;
+    cwd = input.cwd;
   } catch {
     // malformed stdin
   }
@@ -34,7 +39,13 @@ function main(): void {
   if (path) {
     try {
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, JSON.stringify({ turnStart: new Date().toISOString() }));
+      writeFileSync(path, JSON.stringify({
+        turnStart: new Date().toISOString(),
+        sessionId,
+        turnId,
+        cwd,
+        admittedIds: [],
+      }));
     } catch {
       // best effort; if we cannot stamp, the Stop gate fails closed (holds)
     }

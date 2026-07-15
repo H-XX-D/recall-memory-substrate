@@ -23,6 +23,8 @@ export interface CodexSyncOptions {
   recallDb?: string;
   apply?: boolean;
   installHook?: boolean;
+  /** Install the opt-in turn closure gate and strict MCP admission contract. */
+  writeGate?: boolean;
 }
 
 export interface CodexSyncResult {
@@ -64,6 +66,7 @@ export function codexSyncStatus(
   hooksPath: string;
   hookPath: string;
   hooksInstalled: boolean;
+  writeGateInstalled: boolean;
   inlineHooksConflict: boolean;
 } {
   const codexHome = resolveCodexHome(opts);
@@ -91,7 +94,17 @@ export function codexSyncStatus(
   const hooksFile = join(codexHome, "hooks.json");
   const hookPath = join(codexHome, "hooks", "recall-session-start.py");
   const hookConfig = readJsonSafe(hooksFile);
-  const hooksInstalled = hookConfig !== null && !mergeCodexHooks(hookConfig, hookPath).changed;
+  const hookText = JSON.stringify(hookConfig ?? {});
+  const writeGateInstalled = hookText.includes("recall-prompt-hook")
+    && hookText.includes("recall-stop-hook")
+    && hookText.includes("recall-receipt-hook");
+  const hooksInstalled = hookConfig !== null && !mergeCodexHooks(hookConfig, hookPath, writeGateInstalled ? {
+    writeGate: {
+      promptHookCommand: "recall-prompt-hook",
+      stopHookCommand: "recall-stop-hook",
+      receiptHookCommand: "recall-receipt-hook",
+    },
+  } : {}).changed;
 
   return {
     codexHome,
@@ -108,6 +121,7 @@ export function codexSyncStatus(
     hooksPath: hooksFile,
     hookPath,
     hooksInstalled: hooksInstalled && existsSync(hookPath),
+    writeGateInstalled,
     inlineHooksConflict: hasInlineCodexHooks(configText),
   };
 }
@@ -121,7 +135,11 @@ export function runCodexSync(opts: CodexSyncOptions = {}): CodexSyncResult {
 
   const configFile = join(codexHome, "config.toml");
   const existingConfig = readTextSafe(configFile);
-  const configMerge = upsertCodexMcpServer(existingConfig, { mcpCommand, recallDb: opts.recallDb });
+  const configMerge = upsertCodexMcpServer(existingConfig, {
+    mcpCommand,
+    recallDb: opts.recallDb,
+    integrityGate: opts.writeGate,
+  });
   if (apply && configMerge.changed) {
     const backup = backupIfExists(configFile);
     if (backup) backups.push(backup);
@@ -183,7 +201,13 @@ export function runCodexSync(opts: CodexSyncOptions = {}): CodexSyncResult {
   const hookIsAvailable = !installHook || hookSource !== null || existsSync(hookPath);
   const existingHooks = readJsonSafe(hooksFile) ?? {};
   const hooksMerge = hookIsAvailable
-    ? mergeCodexHooks(existingHooks, hookCommandPath)
+    ? mergeCodexHooks(existingHooks, hookCommandPath, opts.writeGate ? {
+      writeGate: {
+        promptHookCommand: "recall-prompt-hook",
+        stopHookCommand: "recall-stop-hook",
+        receiptHookCommand: "recall-receipt-hook",
+      },
+    } : {})
     : { next: existingHooks, changed: false };
   if (apply && hooksMerge.changed) {
     const backup = backupIfExists(hooksFile);

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Agent-integrity write gate trial: Codex now has `recall codex sync --write-gate` parity. The opt-in MCP registration activates the existing admission gate's complete-envelope mode: every authorable primitive must be present and differ from its instructional template, and every durable write must carry at least one honest resolvable edge. Explicit nulls represent genuinely inapplicable optional primitives and are normalized before ordinary v5 validation.
+- Turn closure: prompt markers now carry session, turn, cwd, and start time. A new PostToolUse receipt hook attributes only accepted `recall_write` IDs to the matching turn; rejected, stale, Bash-spoofed, daemon, and ambient writes cannot satisfy the agent's obligation. Stop verifies those IDs in the registered project graph instead of silently checking home, records them in its closure receipt, and accepts the exact auditable no-write footer `[Recall no-write: no durable outcome]` so enforcement never rewards fabricated memory or relationships.
+
 ## 0.12.1 - 2026-07-11
 
 Two score producers that the effective and salience formulas already consumed but nothing fed are now wired, so both scores move from real signal instead of sitting at their neutral seed.

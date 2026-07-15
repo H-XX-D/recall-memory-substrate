@@ -65,7 +65,10 @@ rl.on("line", (line) => {
   } catch {
     return; // ignore non-JSON lines
   }
-  const response = handleMcpRequest(request, store, { project: route.project });
+  const response = handleMcpRequest(request, store, {
+    project: route.project,
+    integrityGate: env.RECALL_INTEGRITY_GATE === "1",
+  });
   if (response) stdout.write(JSON.stringify(response) + "\n");
 });
 

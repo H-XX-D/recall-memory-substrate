@@ -203,6 +203,27 @@ test("runCodexSync honors mcpCommand and recallDb options", () => {
   }
 });
 
+test("runCodexSync writeGate wires strict MCP admission and the owned closure set", () => {
+  const home = tempHome();
+  try {
+    runCodexSync({ home, apply: true, writeGate: true });
+    assert.match(readFileSync(configPath(home), "utf8"), /RECALL_INTEGRITY_GATE = "1"/);
+    const hooks = readFileSync(hooksPath(home), "utf8");
+    assert.equal((hooks.match(/recall-prompt-hook/g) ?? []).length, 1);
+    assert.equal((hooks.match(/recall-stop-hook/g) ?? []).length, 1);
+    assert.equal((hooks.match(/recall-receipt-hook/g) ?? []).length, 1);
+    const status = codexSyncStatus({ home });
+    assert.equal(status.hooksInstalled, true);
+    assert.equal(status.writeGateInstalled, true);
+
+    runCodexSync({ home, apply: true, writeGate: false });
+    assert.doesNotMatch(readFileSync(configPath(home), "utf8"), /RECALL_INTEGRITY_GATE/);
+    assert.doesNotMatch(readFileSync(hooksPath(home), "utf8"), /recall-(?:prompt|stop|receipt)-hook/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("codexSyncStatus reports false for missing files and flips to installed after apply", () => {
   const home = tempHome();
   try {

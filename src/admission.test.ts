@@ -7,6 +7,15 @@ import { WRITE_TEMPLATE } from "./template.js";
 
 const base: WriteProposal = { kind: "dec", title: "t", body: "b", confidence: 0.6 };
 
+function completeProposal(target: string): WriteProposal {
+  const proposal = Object.fromEntries(Object.keys(WRITE_TEMPLATE).map((key) => [key, null])) as Record<string, unknown>;
+  Object.assign(proposal, {
+    kind: "dec", title: "integrity-gated write", body: "verified durable outcome", confidence: 0.8,
+    edges: [{ relation: "depends_on", target }], verification: "tested",
+  });
+  return proposal as unknown as WriteProposal;
+}
+
 test("admit accepts a clean proposal and builds a cell with effective = confidence", () => {
   const r = admit({ ...base }, { key: "c1", now: "2026-06-23T00:00:00Z" });
   assert.equal(r.accepted, true);
@@ -14,6 +23,22 @@ test("admit accepts a clean proposal and builds a cell with effective = confiden
   assert.equal(r.cell?.scores.conf, 0.6);
   assert.equal(r.cell?.scores.effective, 0.6); // calibration 1, no edges
   assert.deepEqual(r.issues, []);
+});
+
+test("integrity mode rejects omitted primitives and empty edges", () => {
+  const r = admit({ ...base, edges: [] }, { integrityGate: true });
+  assert.equal(r.accepted, false);
+  assert.ok(r.issues.some((i) => i.path === "owner" && /missing/.test(i.message)));
+  assert.ok(r.issues.some((i) => i.path === "edges" && /honest/.test(i.message)));
+});
+
+test("integrity mode accepts a complete envelope with null optional values and a resolvable edge", () => {
+  const store = new SqliteStore(":memory:");
+  admit({ ...base }, { key: "anchor", store });
+  const r = admit(completeProposal("anchor"), { key: "strict", store, integrityGate: true });
+  assert.equal(r.accepted, true);
+  assert.equal(r.cell?.edgesOut[0]?.target, "anchor");
+  store.close();
 });
 
 test("admit rejects a schema-invalid proposal and builds no cell", () => {

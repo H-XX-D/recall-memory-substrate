@@ -121,7 +121,11 @@ export function runClaudeSync(opts: ClaudeSyncOptions = {}): ClaudeSyncResult {
     // The node hooks resolve by bin name (not an absolute path) so PATH
     // resolution matches how npm installs expose them, same as mcpCommand
     // above defaulting to the "recall-mcp" bin name rather than a path.
-    writeGate: opts.writeGate ? { promptHookCommand: "recall-prompt-hook", stopHookCommand: "recall-stop-hook" } : undefined,
+    writeGate: opts.writeGate ? {
+      promptHookCommand: "recall-prompt-hook",
+      stopHookCommand: "recall-stop-hook",
+      receiptHookCommand: "recall-receipt-hook",
+    } : undefined,
   });
   if (apply && settingsMerge.changed.length > 0) {
     const backup = backupIfExists(settingsFile);

@@ -54,10 +54,27 @@ void _templateCoversProposal;
 // A field whose submitted value still equals its template description was never
 // filled. Returns one issue per such field; admission rejects on any, and the
 // Stop hook holds the turn until none remain.
-export function templateIssues(proposal: WriteProposal): ValidationIssue[] {
+export interface TemplateIssueOptions {
+  /** Require an explicit submitted value for every authorable primitive. */
+  requireComplete?: boolean;
+  /** Require at least one honest graph connection. */
+  requireEdge?: boolean;
+}
+
+export function templateIssues(
+  proposal: WriteProposal,
+  opts: TemplateIssueOptions = {},
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const p = proposal as unknown as Record<string, unknown>;
   for (const field of Object.keys(WRITE_TEMPLATE) as WriteTemplateField[]) {
+    if (opts.requireComplete && !Object.prototype.hasOwnProperty.call(p, field)) {
+      issues.push({
+        path: field,
+        message: `${field} is missing; submit an explicit value or null when it is not applicable`,
+      });
+      continue;
+    }
     const value = p[field];
     if (typeof value === "string" && value.trim() === WRITE_TEMPLATE[field].trim()) {
       issues.push({
@@ -65,6 +82,12 @@ export function templateIssues(proposal: WriteProposal): ValidationIssue[] {
         message: `${field} still holds its template instruction; replace it with a real value`,
       });
     }
+  }
+  if (opts.requireEdge && (!Array.isArray(p.edges) || p.edges.length === 0)) {
+    issues.push({
+      path: "edges",
+      message: "at least one honest, resolvable edge is required; use a no-write receipt instead of fabricating one",
+    });
   }
   return issues;
 }
