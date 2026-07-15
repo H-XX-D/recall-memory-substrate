@@ -51,6 +51,14 @@ test("tools/list returns exactly the twenty-tool surface", () => {
   store.close();
 });
 
+test("integrity mode advertises every write primitive as required", () => {
+  const store = new SqliteStore(":memory:");
+  const res = handleMcpRequest(req("tools/list"), store, { integrityGate: true })?.result as any;
+  const write = res.tools.find((tool: any) => tool.name === "recall_write");
+  assert.deepEqual(new Set(write.inputSchema.required), new Set(Object.keys(WRITE_TEMPLATE)));
+  store.close();
+});
+
 test("recall_status returns store stats", () => {
   const store = new SqliteStore(":memory:");
   const stats = callText(handleMcpRequest(req("tools/call", { name: "recall_status", arguments: {} }), store));

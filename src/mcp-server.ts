@@ -43,11 +43,36 @@ export interface JsonRpcResponse {
 
 export interface McpRequestContext {
   project?: string;
+  integrityGate?: boolean;
 }
 
 const SERVER_NAME = "recall";
 const SERVER_VERSION = "0.12.1";
 const PROTOCOL_VERSION = "2024-11-05";
+
+const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: "null" }] });
+const stringArray = { type: "array", items: { type: "string" } };
+const WRITE_TOOL_PROPERTIES = {
+  kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" },
+  owner: { type: "string" }, summary: { type: "string" },
+  topics: stringArray, entities: stringArray, lifecycle: stringArray,
+  quality: stringArray, subject: stringArray,
+  edges: { type: "array", items: { type: "object", properties: {
+    relation: { type: "string", enum: ["supports", "contradicts", "supersedes", "derived_from", "depends_on", "concerns"] },
+    target: { type: "string" }, weight: { type: "number" },
+  }, required: ["relation", "target"], additionalProperties: false } },
+  sourceRefs: stringArray, uncertainty: { type: "number" }, concern: { type: "number" },
+  operation: { type: "string", enum: ["create", "update", "supersede", "link", "annex"] },
+  origin: { type: "string", enum: ["human", "llm", "daemon", "connector", "program", "external"] },
+  verification: { type: "string", enum: ["unverified", "checked", "tested", "external"] },
+  sensitivity: { type: "string", enum: ["public", "private", "secret"] },
+  stability: { type: "string", enum: ["ephemeral", "volatile", "stable"] },
+  expiresAt: nullable({ type: "string" }), reverifyAfter: nullable({ type: "string" }),
+  flags: { type: "object" }, props: { type: "object" }, value: nullable({ type: "number" }),
+  programs: stringArray, hyperedges: { type: "array" },
+  project: { type: "string" }, tenant: { type: "string" },
+  suggestPrograms: { type: "boolean" },
+} as const;
 
 export const TOOLS = [
   { name: "recall_status", description: "Graph counts and lexical backend.", inputSchema: { type: "object", properties: {} } },
@@ -55,7 +80,7 @@ export const TOOLS = [
   { name: "recall_compile", description: "Compile a budgeted context packet for a task.", inputSchema: { type: "object", properties: { task: { type: "string" }, words: { type: "number" }, health: { type: "boolean" }, inlineRefs: { type: "boolean" }, refParams: { type: "boolean" } }, required: ["task"] } },
   { name: "recall_cell", description: "Expand one cell by id, prefix, handle, or address.", inputSchema: { type: "object", properties: { idOrAddress: { type: "string" } }, required: ["idOrAddress"] } },
   { name: "recall_write_template", description: "Return the complete admission-firewall authoring template. Use it before rich writes to inspect every supported WriteProposal field and constraint.", inputSchema: { type: "object", properties: {} } },
-  { name: "recall_write", description: "Admit a durable write through the admission gate. kind: dec (decision made), obs (observation), bel (claim to later confirm or refute), tsk (open action), obj (objective), rsk (risk), ref (source reference), ver (verification result), hyp (hypothesis). Prefer bel, tsk, rsk over flat observations when they fit; contradicts and depends_on edges feed the compile packet's conflicts and dependencies sections. Confidence above 0.7 needs verification, sourceRefs, or a weighted supports edge, else it is attenuated. The response includes guidance (candidate edges to similar cells; standing-program suggestions on by default, suggestPrograms false to opt out).", inputSchema: { type: "object", properties: { kind: { type: "string" }, title: { type: "string" }, body: { type: "string" }, confidence: { type: "number" }, value: { type: "number" }, topics: { type: "array", items: { type: "string" } }, entities: { type: "array", items: { type: "string" } }, edges: { type: "array", items: { type: "object", properties: { relation: { type: "string", enum: ["supports", "contradicts", "supersedes", "derived_from", "depends_on", "concerns"] }, target: { type: "string" }, weight: { type: "number" } }, required: ["relation", "target"], additionalProperties: false } }, sourceRefs: { type: "array", items: { type: "string" } }, verification: { type: "string", enum: ["unverified", "checked", "tested", "external"] }, props: { type: "object" }, programs: { type: "array", items: { type: "string" } }, hyperedges: { type: "array" }, suggestPrograms: { type: "boolean" } }, required: ["kind", "title", "body", "confidence"] } },
+  { name: "recall_write", description: "Admit a durable write through the one admission gate. In integrity mode every authorable primitive is required (use null only when genuinely not applicable), and edges must contain at least one honest resolvable connection. Never fabricate a write or edge; use the explicit no-write turn receipt when no durable outcome exists.", inputSchema: { type: "object", properties: WRITE_TOOL_PROPERTIES, required: ["kind", "title", "body", "confidence"] } },
   { name: "recall_semantic", description: "Semantic (vector) search; returns key, handle, title, score, backend.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, minScore: { type: "number" } }, required: ["query"] } },
   { name: "recall_ref", description: "Resolve a cell reference (handle#field.path) to the addressed value.", inputSchema: { type: "object", properties: { reference: { type: "string" } }, required: ["reference"] } },
   { name: "recall_page", description: "Return a curated kind-filtered page view (reflections, objectives, workbench, witnesses, handoffs, team-metrics, agent-profile, user-profile, index).", inputSchema: { type: "object", properties: { name: { type: "string" }, project: { type: "string" }, topics: { type: "array", items: { type: "string" } }, since: { type: "string" }, limit: { type: "number" } }, required: ["name"] } },
@@ -89,7 +114,7 @@ export function handleMcpRequest(
           capabilities: { tools: {} },
         });
       case "tools/list":
-        return ok(id, { tools: TOOLS });
+        return ok(id, { tools: toolsForContext(context) });
       case "tools/call": {
         const name = stringParam(request.params, "name");
         const args = recordParam(request.params, "arguments");
@@ -159,7 +184,7 @@ function callTool(
       // Derive the actor's standing calibration factor from this store's history
       // before R1 folds it into effective. Neutral until >= 3 resolved outcomes.
       const calibrationFactor = actorCalibrationFactor(store, proposal.owner ?? "claude-code");
-      const r = admit(proposal, { store, calibrationFactor });
+      const r = admit(proposal, { store, calibrationFactor, integrityGate: context.integrityGate });
       const suggest = args.suggestPrograms === false ? false : args.suggestPrograms === true ? true : process.env.RECALL_SUGGEST_PROGRAMS !== "0";
       const guidance = r.accepted && r.cell ? buildWriteGuidance(store, r.cell, r, { suggestPrograms: suggest }) : undefined;
       return JSON.stringify({
@@ -354,24 +379,24 @@ function callTool(
 }
 
 function toProposal(args: Record<string, unknown>, project?: string): WriteProposal {
-  return {
-    kind: String(args.kind ?? ""),
-    title: String(args.title ?? ""),
-    body: typeof args.body === "string" ? args.body : "",
-    confidence: typeof args.confidence === "number" ? args.confidence : Number.NaN,
-    topics: Array.isArray(args.topics) ? (args.topics as string[]) : undefined,
-    entities: Array.isArray(args.entities) ? (args.entities as string[]) : undefined,
-    edges: Array.isArray(args.edges) ? (args.edges as WriteProposal["edges"]) : undefined,
-    sourceRefs: Array.isArray(args.sourceRefs) ? (args.sourceRefs as string[]) : undefined,
-    verification: typeof args.verification === "string" ? (args.verification as WriteProposal["verification"]) : undefined,
-    // Passed through unvalidated: schema rejects a present non-object props,
-    // so a malformed value surfaces as a fill-or-reject issue, not a drop.
-    props: args.props === undefined ? undefined : (args.props as WriteProposal["props"]),
-    value: typeof args.value === "number" ? args.value : undefined,
-    programs: Array.isArray(args.programs) ? (args.programs as string[]) : undefined,
-    hyperedges: Array.isArray(args.hyperedges) ? (args.hyperedges as WriteProposal["hyperedges"]) : undefined,
-    project,
-  };
+  const proposal: Record<string, unknown> = {};
+  for (const field of Object.keys(WRITE_TEMPLATE)) {
+    if (Object.prototype.hasOwnProperty.call(args, field)) proposal[field] = args[field];
+  }
+  if (!("kind" in proposal)) proposal.kind = "";
+  if (!("title" in proposal)) proposal.title = "";
+  if (!("body" in proposal)) proposal.body = "";
+  if (!("confidence" in proposal)) proposal.confidence = Number.NaN;
+  if (project !== undefined) proposal.project = project;
+  return proposal as unknown as WriteProposal;
+}
+
+function toolsForContext(context: McpRequestContext): readonly unknown[] {
+  if (!context.integrityGate) return TOOLS;
+  const required = Object.keys(WRITE_TEMPLATE);
+  return TOOLS.map((tool) => tool.name === "recall_write"
+    ? { ...tool, inputSchema: { ...tool.inputSchema, required } }
+    : tool);
 }
 
 function ok(id: JsonRpcId, result: unknown): JsonRpcResponse {

@@ -37,16 +37,18 @@ test("recallHookGroups default output has the canonical five-event shape", () =>
   });
 });
 
-test("recallHookGroups writeGate appends the node prompt/stop hooks after the python entries", () => {
+test("recallHookGroups writeGate appends prompt, receipt, and stop handlers", () => {
   const withGate = recallHookGroups(HOOK, {
-    writeGate: { stopHookCommand: "recall-stop-hook", promptHookCommand: "recall-prompt-hook" },
+    writeGate: { stopHookCommand: "recall-stop-hook", promptHookCommand: "recall-prompt-hook", receiptHookCommand: "recall-receipt-hook" },
   });
   const withoutGate = recallHookGroups(HOOK);
 
   // Events unrelated to the optional write gate are untouched.
   assert.deepEqual(withGate.SessionStart, withoutGate.SessionStart);
   assert.deepEqual(withGate.UserPromptExpansion, withoutGate.UserPromptExpansion);
-  assert.deepEqual(withGate.PostToolUse, withoutGate.PostToolUse);
+  const toolHooks = (withGate.PostToolUse as { hooks: unknown[] }).hooks;
+  assert.equal(toolHooks.length, 2);
+  assert.deepEqual(toolHooks[1], { type: "command", command: "recall-receipt-hook" });
 
   const promptHooks = (withGate.UserPromptSubmit as { hooks: unknown[] }).hooks;
   assert.equal(promptHooks.length, 2);
@@ -121,13 +123,14 @@ test("mergeClaudeSettings preserves unrelated sibling handlers in a mixed matche
 });
 
 test("mergeClaudeSettings toggles optional node write gates without leftovers or duplicates", () => {
-  const gate = { stopHookCommand: "recall-stop-hook", promptHookCommand: "recall-prompt-hook" };
+  const gate = { stopHookCommand: "recall-stop-hook", promptHookCommand: "recall-prompt-hook", receiptHookCommand: "recall-receipt-hook" };
   const enabled = mergeClaudeSettings({}, { hookCommandPath: HOOK, writeGate: gate });
   const disabled = mergeClaudeSettings(enabled.next, { hookCommandPath: HOOK });
-  assert.doesNotMatch(JSON.stringify(disabled.next.hooks), /recall-(?:prompt|stop)-hook/);
+  assert.doesNotMatch(JSON.stringify(disabled.next.hooks), /recall-(?:prompt|stop|receipt)-hook/);
   const reenabled = mergeClaudeSettings(disabled.next, { hookCommandPath: HOOK, writeGate: gate });
   assert.equal((JSON.stringify(reenabled.next.hooks).match(/recall-prompt-hook/g) ?? []).length, 1);
   assert.equal((JSON.stringify(reenabled.next.hooks).match(/recall-stop-hook/g) ?? []).length, 1);
+  assert.equal((JSON.stringify(reenabled.next.hooks).match(/recall-receipt-hook/g) ?? []).length, 1);
 });
 
 test("mergeClaudeSettings can remove the auto-memory disable env", () => {

@@ -32,7 +32,8 @@
     "recall": "dist/cli.js",
     "recall-mcp": "dist/mcp-cli.js",
     "recall-stop-hook": "dist/stop-hook.js",
-    "recall-prompt-hook": "dist/prompt-hook.js"
+    "recall-prompt-hook": "dist/prompt-hook.js",
+    "recall-receipt-hook": "dist/receipt-hook.js"
   },
   "exports": {
     ".": {
@@ -76,7 +77,7 @@
     "test:python": "npm run build && python3 -m unittest discover -s python/tests",
     "test:acceptance": "node scripts/release-acceptance.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/cli.js dist/mcp-cli.js dist/stop-hook.js dist/prompt-hook.js",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/cli.js dist/mcp-cli.js dist/stop-hook.js dist/prompt-hook.js dist/receipt-hook.js",
     "prepare": "npm run build",
     "release:check": "npm test && npm run typecheck && npm run build && npm run test:python && npm run test:acceptance && npm pack --dry-run",
     "prepack": "npm run build",

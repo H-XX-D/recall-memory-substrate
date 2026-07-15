@@ -37,6 +37,17 @@ test("recallCodexHookGroups installs only Codex-supported portable events", () =
   assert.match(JSON.stringify(groups.PostToolUse), /--tool/);
 });
 
+test("Codex write-gate mode installs one owned prompt/receipt/stop set", () => {
+  const groups = recallCodexHookGroups("/tmp/recall.py", {
+    writeGate: { promptHookCommand: "recall-prompt-hook", stopHookCommand: "recall-stop-hook", receiptHookCommand: "recall-receipt-hook" },
+  });
+  assert.match(JSON.stringify(groups.UserPromptSubmit), /recall-prompt-hook/);
+  assert.match(JSON.stringify(groups.Stop), /recall-stop-hook/);
+  assert.match(JSON.stringify(groups.PostToolUse), /recall-receipt-hook/);
+  const merged = mergeCodexHooks({ hooks: { Stop: [{ hooks: [{ type: "command", command: "recall-stop-hook" }] }] } }, "/tmp/recall.py");
+  assert.equal((JSON.stringify(merged.next).match(/recall-stop-hook/g) ?? []).length, 0);
+});
+
 test("mergeCodexHooks is idempotent and preserves mixed sibling handlers", () => {
   const hook = "/home/user/.codex/hooks/recall-session-start.py";
   const existing = {
@@ -80,6 +91,12 @@ test("recallMcpToml includes optional RECALL_DB env", () => {
   assert.match(toml, /command = "recall-mcp"/);
   assert.match(toml, /\[mcp_servers\.recall\.env\]/);
   assert.match(toml, /RECALL_DB = "\/tmp\/project\.sqlite3"/);
+});
+
+test("recallMcpToml enables strict admission only for write-gate installs", () => {
+  const toml = recallMcpToml("recall-mcp", undefined, true);
+  assert.match(toml, /RECALL_INTEGRITY_GATE = "1"/);
+  assert.doesNotMatch(toml, /RECALL_DB/);
 });
 
 test("upsertCodexMcpServer preserves other TOML and is idempotent", () => {

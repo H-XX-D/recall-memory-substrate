@@ -113,6 +113,24 @@ Confidence above `0.7` needs grounding through `checked`, `tested`, or
 `external` verification, `sourceRefs`, a positive `supports` edge, or a
 `derived_from` edge; otherwise Recall attenuates it. Never invent grounding.
 
+### Integrity-gate mode
+
+When Codex was installed with `recall codex sync --apply --write-gate`, the
+same admission gate runs in strict envelope mode. Call `recall_write_template`
+and submit every primitive it returns. Replace every instructional default;
+use typed empty collections or `null` only when a primitive is genuinely not
+applicable. Include at least one honest, resolvable edge so the write joins the
+concept graph. Do not invent a cell or relationship merely to close the turn.
+
+Treat the returned accepted cell `id` as the write receipt. The PostToolUse
+receipt hook binds that accepted ID to the current session and turn; a cell
+created by a daemon or other ambient writer does not satisfy your obligation.
+If the turn produced
+no durable decision, evidence, correction, task, risk, or verified outcome, do
+not write noise: end the final response with exactly
+`[Recall no-write: no durable outcome]`. The Stop hook records that explicit
+no-write closure separately from an admitted-write closure.
+
 ## Corrections
 
 Never silently edit or duplicate an obsolete fact. Search for the prior cell,

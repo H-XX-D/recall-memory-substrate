@@ -7,33 +7,46 @@
 //
 // Marker: $RECALL_STOP_STATE, else $HOME/.recall/state/stop/<session_id>.json,
 // shaped { "turnStart": ISO }. No marker means fail-closed (hold).
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { stdin, stdout, env } from "node:process";
-import { stopHookResponse } from "./stop.js";
+import { NO_WRITE_RECEIPT, stopHookResponse } from "./stop.js";
 import { SqliteStore } from "./store.js";
 import { runOperatorCycle } from "./operator.js";
-import { homeDbPath } from "./routing.js";
+import { resolveDbForCwd } from "./routing.js";
+
+interface TurnMarker {
+  turnStart?: string;
+  sessionId?: string;
+  turnId?: string;
+  cwd?: string;
+  admittedIds?: string[];
+  closure?: { kind: "write" | "no-write"; cellIds: string[]; closedAt: string };
+}
 
 function markerPath(sessionId: string | undefined): string {
   return env.RECALL_STOP_STATE || (sessionId && env.HOME ? `${env.HOME}/.recall/state/stop/${sessionId}.json` : "");
 }
-function turnStart(sessionId: string | undefined): string | undefined {
+function readMarker(sessionId: string | undefined): TurnMarker {
   const path = markerPath(sessionId);
-  if (!path) return undefined;
+  if (!path) return {};
   try {
-    return (JSON.parse(readFileSync(path, "utf8")) as { turnStart?: string }).turnStart;
+    return JSON.parse(readFileSync(path, "utf8")) as TurnMarker;
   } catch {
-    return undefined;
+    return {};
   }
 }
-function dbPath(): string {
-  // RECALL_DB overrides; otherwise the RECALL_HOME-derived home store, which
-  // itself falls back to the HOME-derived ~/.recall/db/home.sqlite3.
-  return env.RECALL_DB ?? homeDbPath(env);
+function dbPath(cwd: string | undefined): string {
+  return resolveDbForCwd(cwd || process.cwd(), env);
 }
-function wroteSince(store: SqliteStore, since: string | undefined): boolean {
-  if (!since) return false; // no turn-start marker => fail closed (hold)
-  return store.active().some((c) => c.createdAt >= since);
+function verifiedTurnWrites(store: SqliteStore, marker: TurnMarker): string[] {
+  const since = marker.turnStart;
+  if (!since) return [];
+  return [...new Set(marker.admittedIds ?? [])]
+    .filter((id) => {
+      const cell = store.get(id);
+      return cell !== undefined && cell.createdAt >= since;
+    })
+    .sort();
 }
 
 function main(): void {
@@ -52,13 +65,21 @@ function main(): void {
     return;
   }
   let sessionId: string | undefined;
+  let turnId: string | undefined;
+  let cwd: string | undefined;
+  let lastAssistantMessage = "";
   try {
-    sessionId = (JSON.parse(raw) as { session_id?: string }).session_id;
+    const input = JSON.parse(raw) as { session_id?: string; turn_id?: string; cwd?: string; last_assistant_message?: string };
+    sessionId = input.session_id;
+    turnId = input.turn_id;
+    cwd = input.cwd;
+    lastAssistantMessage = input.last_assistant_message ?? "";
   } catch {
     // malformed stdin
   }
 
-  const path = dbPath();
+  const marker = readMarker(sessionId);
+  const path = dbPath(cwd ?? marker.cwd);
   if (!path) {
     stdout.write("{}\n"); // no db: cannot gate, do not block
     return;
@@ -72,8 +93,28 @@ function main(): void {
     return;
   }
   try {
-    const response = stopHookResponse({ wroteThisTurn: wroteSince(store, turnStart(sessionId)) });
+    const markerMatchesTurn = !marker.turnId || !turnId || marker.turnId === turnId;
+    const cellIds = markerMatchesTurn ? verifiedTurnWrites(store, marker) : [];
+    const noWriteReceipt = markerMatchesTurn
+      && typeof marker.turnStart === "string"
+      && lastAssistantMessage.trimEnd().endsWith(NO_WRITE_RECEIPT);
+    const response = stopHookResponse({ wroteThisTurn: cellIds.length > 0, noWriteReceipt });
     if (!response.decision) {
+      const statePath = markerPath(sessionId);
+      if (statePath) {
+        try {
+          writeFileSync(statePath, JSON.stringify({
+            ...marker,
+            closure: {
+              kind: cellIds.length > 0 ? "write" : "no-write",
+              cellIds,
+              closedAt: new Date().toISOString(),
+            },
+          }));
+        } catch {
+          // receipt persistence is best effort; admission itself already succeeded
+        }
+      }
       // released: run the endcap operator cycle so the graph is current for the
       // next turn. Best-effort: a tick error must never block release.
       // derive:true admits standing-program witnesses here too. This is

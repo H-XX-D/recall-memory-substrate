@@ -65,10 +65,11 @@ Every command the tree documents exists on the current CLI; the session hook's r
 
 ### The write gate (opt-in)
 
-`--write-gate` adds a second command to the `UserPromptSubmit` and `Stop` hook entries: `recall-prompt-hook` and `recall-stop-hook`, two small Node binaries bundled with the package. These implement a stricter, fail-closed gate:
+`--write-gate` adds `recall-prompt-hook`, `recall-receipt-hook`, and `recall-stop-hook` to the prompt, PostToolUse, and Stop events. These small Node binaries enforce turn closure around Recall's one admission gate:
 
-- `recall-prompt-hook` stamps the turn's start time to a marker file (per session under `~/.recall/state/stop/`; the `RECALL_STOP_STATE` environment variable overrides the marker path for both hooks).
-- `recall-stop-hook` checks whether any durable cell was created in Recall since that marker. If nothing was written, it holds the turn open and re-injects the full write template JSON: every field must be replaced with a real value, because admission rejects a field whose submitted value still equals its template description (the fill-or-reject rule). If something was written, it releases the turn and runs a background maintenance tick.
+- `recall-prompt-hook` stamps turn, session, working-directory, and start-time data to a marker file (per session under `~/.recall/state/stop/`; `RECALL_STOP_STATE` overrides the path).
+- `recall-receipt-hook` accepts only a successful `recall_write` PostToolUse result and binds its returned cell ID to the matching session and turn. Bash output, rejected writes, stale turns, and ambient/daemon writes cannot forge this receipt.
+- `recall-stop-hook` routes from the turn working directory, verifies the attributed IDs against that project store, and persists a write/no-write closure receipt. With no attributed write it re-injects the complete template. Strict MCP admission rejects omitted primitives, untouched instructions, and an empty or dangling edge list. If no durable outcome honestly exists, the exact footer `[Recall no-write: no durable outcome]` releases the turn without creating noise.
 
 The hold is fail-closed on the marker: a missing turn-start marker holds the turn. A store that fails to open releases the turn instead, since a gate that cannot read the store cannot judge it. Treat the gate as an opt-in enforcement mechanism, not a default: it will interrupt turns that produce no durable memory write. Claude launches matching command hooks concurrently, so neither handler can depend on array order. The portable Python hook and optional Node write gate keep independent state; `--write-gate` adds the stricter Node handlers alongside the Python handlers.
 
@@ -96,6 +97,12 @@ This updates six surfaces under `$CODEX_HOME` (or `~/.codex` when unset):
 - `~/.codex/hooks/recall-session-start.py`: installs the same portable, reviewed hook used by Claude Code.
 - `~/.codex/hooks.json`: registers Codex's supported subset: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, and `Stop`. Codex has no `UserPromptExpansion` event.
 
+Add `--write-gate` to install the Node prompt/receipt/Stop closure set and set
+`RECALL_INTEGRITY_GATE=1` in the MCP environment. This is opt-in. It advertises
+every write primitive as required, accepts explicit `null` only for genuinely
+inapplicable optional primitives, requires a resolvable graph edge, and exposes
+the same no-write receipt described above.
+
 Re-running sync replaces only Recall-owned handlers and managed content. It refreshes the packaged skill and generated prompt, while preserving unrelated hooks and config even when they share a matcher group with an old Recall handler. Existing files that change receive the same `.bak` backup as the MCP and AGENTS files. `recall codex status` reports the MCP table, AGENTS block, skill and prompt presence/currentness, hook asset, and all four hook registrations without changing anything.
 
 Codex requires review for non-managed command hooks. After the first install, or whenever a hook definition changes, open `/hooks`, inspect the Recall handlers, and trust them. Sync never writes Codex's trust store. Codex launches matching hooks concurrently, and its current `PostToolUse` support does not intercept every unified-exec shell call; the Stop gates therefore remain fail-open and single-shot. If `config.toml` already contains inline `[hooks]` tables, sync reports a warning because Codex recommends one hook representation per config layer.
@@ -108,6 +115,7 @@ Flags:
 
 - `--apply`: write the changes.
 - `--db path`: set `RECALL_DB` for the MCP server entry.
+- `--write-gate`: enable verified turn closure and strict interactive admission.
 
 To remove the integration, delete the `[mcp_servers.recall]` table from `config.toml`, the block between the `recall:begin` / `recall:end` markers in `AGENTS.md`, `skills/recall/SKILL.md`, `prompts/recall.md`, the Recall handlers in `hooks.json`, and the installed hook script, or restore changed files from their `.bak` backups.
 

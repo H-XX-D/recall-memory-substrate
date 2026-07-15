@@ -618,13 +618,20 @@ it does change is backed up first (a `.bak` copy of prior content).
 hooks installed, whether built-in auto-memory is disabled, and whether the
 `recall` MCP server is registered (`mcpPath`, `mcpInstalled`).
 
-**`recall codex sync [--apply]`** (bare `recall codex` is the same) wires
+**`recall codex sync [--apply] [--write-gate]`** (bare `recall codex` is the same) wires
 Recall into Codex: installs the packaged Recall skill at
 `$CODEX_HOME/skills/recall/SKILL.md`, generates the `/recall` prompt at
 `$CODEX_HOME/prompts/recall.md`, merges MCP server registration into Codex's
 config, merges a Recall block into `AGENTS.md`, and installs the portable
 `SessionStart`, `UserPromptSubmit`, `PostToolUse`, and `Stop` hooks. Same
 dry-run-by-default and backup behavior as `claude sync`.
+
+`--write-gate` adds the turn marker, accepted-write receipt, and Stop closure handlers and sets
+`RECALL_INTEGRITY_GATE=1` on the registered MCP server. Interactive writes then
+use the same admission gate with the complete-template and mandatory-edge
+contract; omitted primitives, untouched template instructions, empty edges,
+and dangling targets reject. A turn with no durable outcome closes through the
+explicit no-write receipt instead of fabricating memory.
 
 **`recall codex status`** reports whether the MCP server is registered, whether
 the `AGENTS.md` Recall block is present, whether the skill and prompt are

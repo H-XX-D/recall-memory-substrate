@@ -25,6 +25,10 @@ test("stopHookResponse releases with an empty object when something was written"
   assert.deepEqual(stopHookResponse({ wroteThisTurn: true }), {});
 });
 
+test("stop releases on an explicit no-write receipt without claiming a write", () => {
+  assert.deepEqual(stopHookResponse({ wroteThisTurn: false, noWriteReceipt: true }), {});
+});
+
 test("stopHookResponse blocks with the template appended when nothing was written", () => {
   const r = stopHookResponse({ wroteThisTurn: false });
   assert.equal(r.decision, "block");

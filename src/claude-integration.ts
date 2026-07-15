@@ -21,7 +21,7 @@ const CLAUDE_HOOK_EVENTS = [
 ] as const;
 
 export interface RecallHookGroupsOpts {
-  writeGate?: { stopHookCommand: string; promptHookCommand: string };
+  writeGate?: { stopHookCommand: string; promptHookCommand: string; receiptHookCommand: string };
 }
 
 export function recallHookGroups(hookCommandPath: string, opts?: RecallHookGroupsOpts): ClaudeHookGroups {
@@ -33,9 +33,11 @@ export function recallHookGroups(hookCommandPath: string, opts?: RecallHookGroup
   // optional Node write-gate hooks below. Every Python mode is fail-open.
   const promptHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --prompt`, timeout: 10 }];
   const stopHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --stop`, timeout: 10 }];
+  const toolHooks: unknown[] = [{ type: "command", command: `python3 ${quoted} --tool`, timeout: 10 }];
   if (writeGate) {
     promptHooks.push({ type: "command", command: writeGate.promptHookCommand });
     stopHooks.push({ type: "command", command: writeGate.stopHookCommand });
+    toolHooks.push({ type: "command", command: writeGate.receiptHookCommand });
   }
 
   return {
@@ -50,7 +52,7 @@ export function recallHookGroups(hookCommandPath: string, opts?: RecallHookGroup
     },
     PostToolUse: {
       matcher: "Bash|mcp__recall__.*",
-      hooks: [{ type: "command", command: `python3 ${quoted} --tool`, timeout: 10 }],
+      hooks: toolHooks,
     },
     Stop: {
       hooks: stopHooks,
@@ -118,5 +120,5 @@ function isRecallOwnedHandler(handler: unknown): boolean {
   const command = (handler as { command?: unknown })?.command;
   if (typeof command !== "string") return false;
   return command.includes(HOOK_MARKER)
-    || /(^|\s)recall-(?:prompt|stop)-hook(?:\s|$)/.test(command);
+    || /(^|\s)recall-(?:prompt|stop|receipt)-hook(?:\s|$)/.test(command);
 }

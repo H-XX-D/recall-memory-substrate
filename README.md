@@ -56,7 +56,7 @@ Requires Node.js 22.13 or newer (Recall uses the built-in `node:sqlite`; Node fl
 ```sh
 cd ~/code/my-project
 recall project init                 # this project gets its own graph
-recall claude sync --apply          # Codex: recall codex sync --apply
+recall claude sync --apply          # Codex: recall codex sync --apply [--write-gate]
 ```
 
 That is the whole setup, and the last memory management a human does. From here the agent runs its own memory: hooks prime every prompt from the graph, the agent writes back what it learns through the gate, and the substrate maintains itself between turns. Sync previews its changes by default and backs up any file it modifies.
